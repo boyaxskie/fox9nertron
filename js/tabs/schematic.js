@@ -235,6 +235,7 @@ export function schematicTab(root) {
   }
 
   let tAnim = 0;
+  const labelBoxes = [];
   function draw() {
     if (!W) return;
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
@@ -263,6 +264,7 @@ export function schematicTab(root) {
     // current dots
     if (showDots && res?.ok) drawDots(pieces);
     // labels
+    labelBoxes.length = 0;
     for (const p of c.parts) drawLabel(p);
     // pins in wire / place mode
     if (mode === 'wire') {
@@ -328,13 +330,21 @@ export function schematicTab(root) {
     const dist = Math.max(1.6, S.TYPES[p.type].box[3] + 0.9);
     // parts with a pin in the middle of the bottom edge: put the label beside that wire, not on it
     const side = !vert && { REG: 0.6, OPAMP: 0.6, SCOPE: 0.6, RELAY: 2.6 }[p.type];
-    const x = sx(p.x + nx * dist + (side ? (p.rot ? -side : side) : 0)), y = sy(p.y + ny * dist);
+    const off = p.lbl ?? [0, 0];         // label dragged by hand (grid units)
+    const x = sx(p.x + nx * dist + (side ? (p.rot ? -side : side) : 0) + off[0]), y = sy(p.y + ny * dist + off[1]);
     ctx.font = `600 ${Math.max(10, Math.min(13, view.g * 0.55))}px system-ui, sans-serif`;
-    ctx.textAlign = vert ? (nx < 0 ? 'right' : 'left') : side ? (p.rot ? 'right' : 'left') : 'center'; ctx.textBaseline = 'middle';
+    const align = vert ? (nx < 0 ? 'right' : 'left') : side ? (p.rot ? 'right' : 'left') : 'center';
+    ctx.textAlign = align; ctx.textBaseline = 'middle';
     const val = valueText(p);
     ctx.fillStyle = C.text;
     const lines = [p.name + (val ? '  ' + val : '')];
     if (r && (p.type === 'VM' || p.type === 'AM')) lines.push(p.type === 'VM' ? si(r.v, 'V') : si(r.i, 'A'));
+    // hit box (screen px) so the label can be dragged
+    const tw = Math.max(...lines.map(t => ctx.measureText(t).width)) + 6;
+    const bx0 = align === 'left' ? x - 3 : align === 'right' ? x - tw + 3 : x - tw / 2;
+    const by0 = y - (vert && lines.length > 1 ? 17 : 9), by1 = y + (lines.length > 1 ? (vert ? 17 : 23) : 9);
+    labelBoxes.push({ p, x0: bx0, y0: by0, x1: bx0 + tw, y1: by1 });
+    if ((sel?.kind === 'part' && sel.id === p.id) || down?.lab?.p === p) { ctx.save(); ctx.strokeStyle = 'rgba(79,195,247,0.45)'; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.strokeRect(bx0, by0, tw, by1 - by0); ctx.restore(); ctx.fillStyle = C.text; }
     if (vert) { ctx.fillText(lines[0], x, y - (lines.length > 1 ? 8 : 0)); if (lines[1]) { ctx.fillStyle = C.cur; ctx.fillText(lines[1], x, y + 9); } }
     else { ctx.fillText(lines[0], x, y); if (lines[1]) { ctx.fillStyle = C.cur; ctx.font = '700 13px ui-monospace, monospace'; ctx.fillText(lines[1], x, y + 15); } }
   }
@@ -443,11 +453,17 @@ export function schematicTab(root) {
     const x = wx(px), y = wy(py);
     down = { px, py, x, y, moved: false, last: [px, py], drag: null, pan: false };
     if (mode === 'select') {
+      const lb = [...labelBoxes].reverse().find(b => px >= b.x0 && px <= b.x1 && py >= b.y0 && py <= b.y1);
       const p = partAt(x, y);
-      if (p) {
+      const wEnd = !p && !lb ? wireEndAt(x, y) : null;
+      const wi = !p && !lb && !wEnd ? wireAt(x, y) : -1;
+      if (lb) down.lab = { p: lb.p, ox: lb.p.lbl?.[0] ?? 0, oy: lb.p.lbl?.[1] ?? 0, ax: x, ay: y };
+      else if (p) {
         down.drag = { p, ox: p.x, oy: p.y, ax: x, ay: y, ends: attachedEnds(p) };
         if (p.type === 'PB') { p.props.on = true; down.pb = p; commit(false); }
-      } else down.pan = true;
+      } else if (wEnd) down.wend = { k: wEnd, orig: structuredClone(c.wires) };
+      else if (wi >= 0) down.wdrag = { i: wi, orig: structuredClone(c.wires), ax: x, ay: y };
+      else down.pan = true;
     } else down.pan = true;
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -463,7 +479,20 @@ export function schematicTab(root) {
     if (!down.moved && Math.hypot(px - down.px, py - down.py) > 6) down.moved = true;
     if (!down.moved) return;
     hover = [wx(px), wy(py)];
-    if (down.drag) {
+    if (down.lab) {
+      const d = down.lab, q = (v) => Math.round(v * 4) / 4;
+      d.p.lbl = [q(d.ox + wx(px) - d.ax), q(d.oy + wy(py) - d.ay)]; draw();
+    } else if (down.wdrag) {
+      const d = down.wdrag, dx = Math.round(wx(px) - d.ax), dy = Math.round(wy(py) - d.ay);
+      if (dx !== d.dx || dy !== d.dy) { d.dx = dx; d.dy = dy; c.wires = moveWire(d.orig, d.i, dx, dy); sel = { kind: 'wire', i: d.i }; solve(); draw(); }
+    } else if (down.wend) {
+      const d = down.wend, [ox, oy] = d.k, nx = Math.round(wx(px)), ny = Math.round(wy(py));
+      if (nx !== d.nx || ny !== d.ny) {
+        d.nx = nx; d.ny = ny;
+        c.wires = d.orig.map(w => { const o = { ...w }; for (const e of [1, 2]) if (o['x' + e] === ox && o['y' + e] === oy) { o['x' + e] = nx; o['y' + e] = ny; } return o; }).filter(w => w.x1 !== w.x2 || w.y1 !== w.y2);
+        solve(); draw();
+      }
+    } else if (down.drag) {
       const d = down.drag, nx = Math.round(d.ox + wx(px) - d.ax), ny = Math.round(d.oy + wy(py) - d.ay);
       if (nx !== d.p.x || ny !== d.p.y) { d.p.x = nx; d.p.y = ny; followPins(d); solve(); renderPanel(); draw(); }
     } else if (down.pan) { view.ox += px - down.last[0]; view.oy += py - down.last[1]; down.last = [px, py]; draw(); }
@@ -475,7 +504,9 @@ export function schematicTab(root) {
     const d = down; down = null;
     if (d.pb) { d.pb.props.on = false; commit(false); }
     if (d.drag && d.moved) { commit(); return; }
-    if (!d.moved) tap(d.x, d.y, d);
+    if (d.lab && d.moved) { sel = { kind: 'part', id: d.lab.p.id }; commit(); say('Label moved. Reset it from the part panel.'); return; }
+    if ((d.wdrag || d.wend) && d.moved) { if (d.wend) sel = null; commit(); say(d.wend ? 'Wire corner moved.' : 'Wire moved: connected wires stretch along.'); return; }
+    if (!d.moved) { if (d.lab) { sel = { kind: 'part', id: d.lab.p.id }; renderPanel(); draw(); return; } tap(d.x, d.y, d); }
   };
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (down?.pb) { down.pb.props.on = false; commit(false); } down = null; });
@@ -485,6 +516,51 @@ export function schematicTab(root) {
   function mid() { const v = [...ptrs.values()]; return [(v[0][0] + v[1][0]) / 2, (v[0][1] + v[1][1]) / 2]; }
   function zoomAt(k, fx, fy) { const ng = Math.max(6, Math.min(80, view.g * k)), kk = ng / view.g; view.ox = fx - (fx - view.ox) * kk; view.oy = fy - (fy - view.oy) * kk; view.g = ng; }
 
+  // free wire corner / end (not on a part pin) close to the finger
+  function wireEndAt(x, y) {
+    const pinK = new Set(c.parts.flatMap(p => S.pinsOf(p).map(q => S.key(...q))));
+    let best = null, bd = Math.max(0.35, 9 / view.g);
+    for (const w of c.wires) for (const e of [1, 2]) {
+      const ex = w['x' + e], ey = w['y' + e], d = Math.hypot(ex - x, ey - y);
+      if (d < bd && !pinK.has(S.key(ex, ey))) { bd = d; best = [ex, ey]; }
+    }
+    return best;
+  }
+  // slide a wire: straight wires move sideways, neighbours stretch (or a new piece of wire is added so nothing breaks)
+  function moveWire(orig, i, dx, dy) {
+    const ws = orig.map(w => ({ ...w })), w0 = orig[i];
+    if (w0.y1 === w0.y2) dx = 0; else if (w0.x1 === w0.x2) dy = 0;
+    if (!dx && !dy) return ws;
+    const pinK = new Set(c.parts.flatMap(p => S.pinsOf(p).map(q => S.key(...q))));
+    const onInside = (o, x, y) => { const vx = o.x2 - o.x1, vy = o.y2 - o.y1, l2 = vx * vx + vy * vy; if (!l2) return false; const t = ((x - o.x1) * vx + (y - o.y1) * vy) / l2; return t > 1e-6 && t < 1 - 1e-6 && Math.abs((x - o.x1) * vy - (y - o.y1) * vx) < 1e-6; };
+    const add = [];
+    for (const end of [1, 2]) {
+      const ex = w0['x' + end], ey = w0['y' + end], k = S.key(ex, ey);
+      let conn = pinK.has(k);
+      orig.forEach((o, j) => {
+        if (j === i) return;
+        for (const e2 of [1, 2]) if (S.key(o['x' + e2], o['y' + e2]) === k) {
+          const keepsStraight = (o.x1 === o.x2 && dx === 0) || (o.y1 === o.y2 && dy === 0);
+          if (keepsStraight) { ws[j]['x' + e2] += dx; ws[j]['y' + e2] += dy; } else conn = true;
+        }
+        if (onInside(o, ex, ey)) conn = true;
+      });
+      ws[i]['x' + end] += dx; ws[i]['y' + end] += dy;
+      if (conn) {
+        if (!dx || !dy) add.push({ x1: ex, y1: ey, x2: ex + dx, y2: ey + dy });
+        else add.push({ x1: ex, y1: ey, x2: ex + dx, y2: ey }, { x1: ex + dx, y1: ey, x2: ex + dx, y2: ey + dy });
+      }
+    }
+    return ws.concat(add).filter(w => w.x1 !== w.x2 || w.y1 !== w.y2);
+  }
+  // crooked (diagonal) wire → L shape
+  function straighten(i, downFirst = false) {
+    const w = c.wires[i]; if (!w || w.x1 === w.x2 || w.y1 === w.y2) return false;
+    const cx = downFirst ? w.x1 : w.x2, cy = downFirst ? w.y2 : w.y1;
+    c.wires.splice(i, 1, { x1: w.x1, y1: w.y1, x2: cx, y2: cy }, { x1: cx, y1: cy, x2: w.x2, y2: w.y2 });
+    return true;
+  }
+  function straightenAll() { let n = 0; for (let i = c.wires.length - 1; i >= 0; i--) if (straighten(i)) n++; return n; }
   // wire ends touching a part's pins move with it (rubber band)
   function attachedEnds(p) {
     const pins = S.pinsOf(p).map(q => S.key(...q)), out = [];
@@ -669,7 +745,11 @@ export function schematicTab(root) {
       const v = pcs.length ? pcs[0].va : null, i = pcs.length ? Math.max(...pcs.map(x => Math.abs(x.i))) : 0;
       panel.append(el('div', { class: 'sp-head' }, el('b', { text: 'Wire' }), el('span', { class: 'muted', text: '0 Ω' })),
         readings([['Voltage to ground', v == null ? '—' : si(v, 'V'), true], ['Current', si(i, 'A'), true]], [], []),
-        el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', text: '🗑 Delete wire', onclick: () => { c.wires.splice(sel.i, 1); sel = null; commit(); } })));
+        el('div', { class: 'row wrap' },
+          ...(w.x1 !== w.x2 && w.y1 !== w.y2 ? [el('button', { class: 'btn primary', type: 'button', text: '⌐ Straighten (across first)', onclick: () => { straighten(sel.i, false); sel = null; commit(); say('Crooked wire turned into an L.'); } }),
+            el('button', { class: 'btn', type: 'button', text: '⌙ Straighten (down first)', onclick: () => { straighten(sel.i, true); sel = null; commit(); say('Crooked wire turned into an L.'); } })] : []),
+          el('button', { class: 'btn', type: 'button', text: '🗑 Delete wire', onclick: () => { c.wires.splice(sel.i, 1); sel = null; commit(); } })),
+        note('Drag a wire to slide it; connected wires stretch along. Drag a wire corner (not on a pin) to move it.'));
       panelRefresh = () => renderPanel();
       return;
     }
@@ -680,7 +760,8 @@ export function schematicTab(root) {
     nameInp.addEventListener('change', () => { p.name = nameInp.value.trim().slice(0, 12) || p.name; commit(); });
     panel.append(el('div', { class: 'sp-head' }, nameInp, el('span', { class: 'muted', text: t.label }),
       el('button', { class: 'btn', type: 'button', text: '↻', title: 'Rotate (R)', onclick: rotateSel }),
-      el('button', { class: 'btn', type: 'button', text: '🗑', title: 'Delete', onclick: () => { c.parts = c.parts.filter(x => x !== p); sel = null; commit(); } })));
+      el('button', { class: 'btn', type: 'button', text: '🗑', title: 'Delete', onclick: () => { c.parts = c.parts.filter(x => x !== p); sel = null; commit(); } }),
+      p.lbl ? el('button', { class: 'btn', type: 'button', text: '⟲ Label', title: 'Put the label back', onclick: () => { delete p.lbl; commit(); } }) : null));
     const f = el('div', { class: 'fields' });
     switch (p.type) {
       case 'R': f.append(field('Resistance', plain(q.r), 'Ω', v => { q.r = Math.max(v, 1e-6); }), choice('Power rating', String(q.rating), RATINGS.map(x => [String(x), wattName(x)]), v => { q.rating = +v; })); break;
@@ -932,7 +1013,9 @@ export function schematicTab(root) {
     if (!res.ok) { box.append(el('p', { class: 'flag ' + (res.stopped ? 'warn' : 'bad'), text: res.error })); panel.append(box); return; }
     box.append(readings([[timeMode() ? 'Power now' : 'Power from sources', si(res.delivered, 'W'), true], ...(timeMode() ? [['Time', si(sim.t, 's', 4)]] : []), ['Parts', String(c.parts.length)], ['Wires', String(c.wires.length)]], [],
       res.notes.map(t => [/SHORT/.test(t) ? 'bad' : 'warn', t])));
-    box.append(note('Tap a part or wire for its voltage, current and power. Wire colors: <b style="color:#3DDC84">green = +</b>, grey = 0 V, <b style="color:#FF6B6B">red = −</b>. Yellow dots = current flow.'));
+    const crooked = c.wires.filter(w => w.x1 !== w.x2 && w.y1 !== w.y2).length;
+    if (crooked) box.append(el('div', { class: 'row wrap' }, el('button', { class: 'btn primary', type: 'button', text: `⌐ Straighten ${crooked} crooked wire${crooked > 1 ? 's' : ''}`, onclick: () => { const n = straightenAll(); commit(); say(`${n} wire${n > 1 ? 's' : ''} turned into L shapes.`); } })));
+    box.append(note('Tap a part or wire for its voltage, current and power. Drag a label or a wire to tidy up. Wire colors: <b style="color:#3DDC84">green = +</b>, grey = 0 V, <b style="color:#FF6B6B">red = −</b>. Yellow dots = current flow.'));
     panel.append(box);
   }
 

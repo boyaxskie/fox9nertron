@@ -29,6 +29,7 @@ export function pcbView(api) {
   const box = el('div', { class: 'pcb-box', hidden: true }, top, wrap, routeBar, status, panel);
   const ctx = canvas.getContext('2d');
   let W = 0, H = 0;
+  const nameBoxes = [];
   const say = (t) => { status.textContent = t; };
 
   // ---------- data ----------
@@ -121,6 +122,7 @@ export function pcbView(api) {
       padPath(pd); ctx.fill();
       if (pd.drill > 0) { ctx.fillStyle = COL.hole; ctx.beginPath(); ctx.arc(sx(pd.x), sy(pd.y), Math.max(1, pd.drill / 2 * view.s), 0, 7); ctx.fill(); }
     }
+    nameBoxes.length = 0;
     // silkscreen: part outlines + names
     ctx.strokeStyle = 'rgba(232,237,242,0.75)'; ctx.lineWidth = 1.2;
     for (const p of parts()) {
@@ -129,7 +131,9 @@ export function pcbView(api) {
       if (sel?.kind === 'part' && sel.id === p.id) { const e = P.partExtents(p, bp); ctx.save(); ctx.strokeStyle = COL.sel; ctx.setLineDash([5, 4]); ctx.strokeRect(sx(e[0]) - 3, sy(e[1]) - 3, (e[2] - e[0]) * view.s + 6, (e[3] - e[1]) * view.s + 6); ctx.restore(); }
       const e = P.partExtents(p, bp);
       ctx.fillStyle = COL.silk; ctx.font = `600 ${Math.max(9, Math.min(13, view.s * 1.3))}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillText(p.name, sx((e[0] + e[2]) / 2), sy(e[1]) - 2);
+      const lo = bp.lbl ?? [0, 0], lx = sx((e[0] + e[2]) / 2 + lo[0]), ly = sy(e[1] + lo[1]) - 2, lw = ctx.measureText(p.name).width + 6, lh = Math.max(9, Math.min(13, view.s * 1.3)) + 4;
+      ctx.fillText(p.name, lx, ly);
+      nameBoxes.push({ p, x0: lx - lw / 2, y0: ly - lh, x1: lx + lw / 2, y1: ly + 2 });
     }
     // pad labels when zoomed in
     if (view.s >= 9) {
@@ -215,7 +219,11 @@ export function pcbView(api) {
     if (ptrs.size === 2) { const v = [...ptrs.values()]; pinch = Math.hypot(v[0][0] - v[1][0], v[0][1] - v[1][1]); down = { pinch: true, last: mid() }; return; }
     const x = wx(px), y = wy(py);
     down = { px, py, x, y, moved: false };
-    if (mode === 'move') { const p = partAt(x, y); if (p) { const bp = L.parts[p.id]; down.part = p; down.start = [bp.x, bp.y]; } }
+    if (mode === 'move') {
+      const nb = [...nameBoxes].reverse().find(b => px >= b.x0 && px <= b.x1 && py >= b.y0 && py <= b.y1);
+      if (nb) { const bp = L.parts[nb.p.id]; down.lab = nb.p; down.start = [...(bp.lbl ?? [0, 0])]; }
+      else { const p = partAt(x, y); if (p) { const bp = L.parts[p.id]; down.part = p; down.start = [bp.x, bp.y]; } }
+    }
   });
   canvas.addEventListener('pointermove', (e) => {
     const [px, py] = pos(e);
@@ -227,7 +235,10 @@ export function pcbView(api) {
     }
     if (Math.hypot(px - down.px, py - down.py) > 6) down.moved = true;
     if (!down.moved) return;
-    if (down.part) {
+    if (down.lab) {
+      const bp = L.parts[down.lab.id];
+      bp.lbl = [P.snap(down.start[0] + (px - down.px) / view.s, 0.5), P.snap(down.start[1] + (py - down.py) / view.s, 0.5)]; draw();
+    } else if (down.part) {
       const bp = L.parts[down.part.id];
       bp.x = P.snap(down.start[0] + (px - down.px) / view.s, 1.27); bp.y = P.snap(down.start[1] + (py - down.py) / view.s, 1.27);
       analyzeNow(); draw();
@@ -238,6 +249,8 @@ export function pcbView(api) {
     const d = down; if (!d) return;
     if (d.pinch) { if (!ptrs.size) down = null; return; }
     down = null;
+    if (d.lab && d.moved) { sel = { kind: 'part', id: d.lab.id }; change(`${d.lab.name} label moved.`); return; }
+    if (d.lab) { sel = { kind: 'part', id: d.lab.id }; renderPanel(); draw(); return; }
     if (d.part && d.moved) { change(`${d.part.name} moved. ⚡ Autoroute again to redo the traces.`); return; }
     if (d.moved) return;
     tap(d.x, d.y);
