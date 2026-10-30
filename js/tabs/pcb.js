@@ -5,6 +5,7 @@ import { rotPt } from '../sch-core.js';
 import * as P from '../pcb-core.js';
 import { autoroute, cleanPath } from '../pcb-route.js';
 import { camAll, vWidth, copperSvg } from '../pcb-cam.js';
+import { gerberCopper, gerberOutline, excellon } from '../pcb-gerber.js';
 
 const COL = { bg: '#0F1317', board: '#16352A', edge: '#6FAF8A', cu: '#D9894A', cuHi: '#FFC08A', hole: '#0F1317', silk: '#E8EDF2', rat: '#FFE16B', jump: '#4FC3F7', bad: '#FF6B6B', sel: '#4FC3F7', iso: '#7FDBFF', drill: '#FF6B6B', cut: '#C084FC', dim: '#7E8A97' };
 
@@ -363,6 +364,18 @@ export function pcbView(api) {
           `3. Drill bit ${st.drill.bits[0] ?? ''} mm in, Z0 again, run 2-drill.nc (it pauses for each bit change).`,
           `4. ${C.cutDia} mm end mill in, Z0 again, run 3-cutout.nc. Snap the tabs, sand the edges.`,
           'Tip: a probe or auto-level (later) helps a lot when the blank is not perfectly flat.'].join('\n') }));
+    }
+    // Gerber + drill (same kind of files Proteus makes) for the Fox9ner web app
+    {
+      const nm = (c.title ?? 'board').replace(/[^\w.-]+/g, '_');
+      const holes = an.pads.filter(p => p.drill > 0).length;
+      panel.append(el('details', { class: 'pcb-sec', open: true }, el('summary', { text: '📤 Gerber + drill (for the Fox9ner web app)' }),
+        note(`Same files Proteus makes: bottom copper, board outline and drill (${holes} holes). Seen from the top, not mirrored, mm, origin = lower-left corner. Load them in the Fox9ner web app like your Proteus files.`),
+        an.rats.length || an.shorts.length ? el('div', { class: 'flag ' + (an.shorts.length ? 'bad' : 'warn'), text: an.shorts.length ? 'The board has a SHORT: fix it before cutting.' : `${an.rats.length} connection(s) not routed yet: the files would miss them.` }) : null,
+        el('div', { class: 'row wrap' },
+          btn('⬇ Copper (.GBL)', () => api.shareFile(`${nm}-Bottom_Copper.GBL`, gerberCopper(api.getC()), 'text/plain')),
+          btn('⬇ Drill (.DRL)', () => api.shareFile(`${nm}-Drill.DRL`, excellon(api.getC()), 'text/plain')),
+          btn('⬇ Outline (.GKO)', () => api.shareFile(`${nm}-Board_Outline.GKO`, gerberOutline(api.getC()), 'text/plain')))));
     }
     panel.append(camSec);
   }
