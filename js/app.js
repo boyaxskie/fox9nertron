@@ -9,7 +9,7 @@ import { timingTab } from './tabs/timing.js';
 import { partsTab } from './tabs/parts.js';
 import { schematicTab } from './tabs/schematic.js';
 
-export const VERSION = '1.2.1';
+export const VERSION = '1.4.0';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -42,6 +42,8 @@ function help() {
 <p><b>Empty boxes</b> are calculated: the answer shows greyed inside the box and in the green result.</p>
 <p><b>⚡ Schematic</b>: tap a part in the tray, tap the grid to place it. <b>↖ Select</b>: drag parts, tap one for its voltage, current and power. <b>↻</b> rotates (key R). <b>〰 Wire</b>: tap a yellow pin, then the next point; wires bend once (L-shape) and stop on a pin. Tap a switch to flip it, hold a push button. Wire colors show voltage (green +, grey 0 V, red −) and yellow dots show the current flowing. Pinch or mouse wheel to zoom, drag empty space to move. Projects: save, open, export, and save a PNG picture.</p>
 <p><b>📈 Time simulation</b>: add a Capacitor, Inductor, Signal generator or Scope and ▶ Run moves through time. The oscilloscope under the drawing shows CH1 (yellow) and CH2 (blue) against the scope's bottom pin (COM, usually ground), with p-p, average and frequency. Set time/div (or Auto time), speed (slow motion), ⏸ pause and ⟲ t = 0 to start again with empty capacitors. Examples marked 📈 show RC charging, PWM, the coil flyback spike, rectifier ripple and the PC817 optocoupler.</p>
+<p><b>🔌 Active parts</b>: NPN / PNP transistors (2N2222, BC547, TIP120…), N / P MOSFETs (IRLZ44N, AO3400, IRF540N…), zener diodes, op-amps (LM358, MCP6002…), regulators (7805, AMS1117, LM317) and relays. Tap one to see if it is OFF, fully ON or only partly on (hot), its heat, and spikes over its rating. Try the examples: relay driver, MOSFET solenoid, 7805, LM317, zener and the op-amp comparator.</p>
+<p><b>★ Your own parts</b>: part not in the list? Tap the part, open its Type list, pick <b>+ New part from datasheet…</b> and type the main values (typical column). It is saved and shows as ★ in the list from then on; ✎ Edit or delete it the same way. Projects carry their ★ parts, so a shared file opens right on another phone.</p>
 <p><b>Kirchhoff</b>: number every junction (0 = ground). Each part goes From one node To another. Example: a 9 V battery with + on node 1 and − on ground is <i>V src, From 1, To 0, 9</i>.</p>
 <p><b>Colours</b>: green = safe, yellow = check it, red = it will fail or it's dangerous.</p>
 <p><b>Install</b>: iPhone Safari → Share → Add to Home Screen. Android Chrome → menu → Install app. Works offline after that. Your inputs are remembered on this device.</p>

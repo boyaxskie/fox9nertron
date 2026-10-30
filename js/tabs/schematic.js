@@ -13,7 +13,9 @@ const RATINGS = [0.125, 0.25, 0.5, 1, 2, 3, 5, 10];
 export function schematicTab(root) {
   root.classList.add('sch-pane');
   // ---------- state ----------
+  registerLib(myParts(), false);
   let c = load() ?? S.example('led');
+  registerLib(c.lib, true);
   let sel = null;            // {kind:'part', id} | {kind:'wire', i}
   let mode = 'select';       // select | wire | delete | place
   let placeType = null;
@@ -78,6 +80,14 @@ export function schematicTab(root) {
   }
   // mouse wheel scrolls the rows sideways (when they don't wrap)
   for (const row of [top, tray]) row.addEventListener('wheel', (e) => { if (row.scrollWidth > row.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { row.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
+  // mouse drag scrolls the rows too (a click without movement still works)
+  for (const row of [top, tray]) {
+    let dx0 = null, sl0 = 0, moved = false;
+    row.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') return; dx0 = e.clientX; sl0 = row.scrollLeft; moved = false; });
+    addEventListener('pointermove', (e) => { if (dx0 == null) return; const d = e.clientX - dx0; if (Math.abs(d) > 5) moved = true; if (moved) row.scrollLeft = sl0 - d; });
+    addEventListener('pointerup', () => { dx0 = null; });
+    row.addEventListener('click', (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+  }
   const canvas = el('canvas', { class: 'sch-canvas' });
   const wrap = el('div', { class: 'sch-wrap' }, canvas);
   const status = el('div', { class: 'sch-status' });
@@ -114,7 +124,7 @@ export function schematicTab(root) {
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -138,6 +148,7 @@ export function schematicTab(root) {
   function syncTop2() { voltsBtn.textContent = showVolts ? 'Volts ●' : 'Volts ○'; voltsBtn.classList.toggle('on', showVolts); dotsBtn.textContent = showDots ? 'Flow ●' : 'Flow ○'; dotsBtn.classList.toggle('on', showDots); }
 
   function commit(push = true) {
+    const lib = S.usedCustom(c); if (Object.keys(lib).length) c.lib = lib; else delete c.lib;
     solve();
     store.set('sch.cur', JSON.stringify(c));
     if (push) {
@@ -182,7 +193,7 @@ export function schematicTab(root) {
   // ---------- drawing ----------
   function resize() {
     const dpr = devicePixelRatio || 1;
-    wrap.style.height = Math.round(Math.max(280, Math.min(680, innerHeight * 0.56))) + 'px';
+    wrap.style.height = Math.round(Math.max(300, Math.min(760, innerHeight * 0.64))) + 'px';
     const rr = wrap.getBoundingClientRect();
     const first = !W;
     W = Math.round(rr.width); H = Math.round(rr.height);
@@ -276,8 +287,8 @@ export function schematicTab(root) {
     for (const p of c.parts) {
       const r = res.parts.get(p.id); if (!r || p.type === 'GND' || p.type === 'POT' || p.type === 'SPDT' || p.type === 'DPDT' || p.type === 'SCOPE') continue;
       const pins = S.pinsOf(p);
+      if (r.dots) { for (const [a, b, i] of r.dots) dotsOn(pins[a][0], pins[a][1], pins[b][0], pins[b][1], i); continue; }
       dotsOn(pins[0][0], pins[0][1], pins[1][0], pins[1][1], r.i);
-      if (p.type === 'OPTO') dotsOn(pins[2][0], pins[2][1], pins[3][0], pins[3][1], r.ic);
     }
   }
 
@@ -303,9 +314,11 @@ export function schematicTab(root) {
     const vert = p.rot & 1;
     if (vert) { nx = 1; ny = 0; }          // vertical parts: label always on the right (never cut off at the left edge)
     const dist = Math.max(1.6, S.TYPES[p.type].box[3] + 0.9);
-    const x = sx(p.x + nx * dist), y = sy(p.y + ny * dist);
+    // parts with a pin in the middle of the bottom edge: put the label beside that wire, not on it
+    const side = !vert && { REG: 0.6, OPAMP: 0.6, SCOPE: 0.6, RELAY: 2.6 }[p.type];
+    const x = sx(p.x + nx * dist + (side ? (p.rot ? -side : side) : 0)), y = sy(p.y + ny * dist);
     ctx.font = `600 ${Math.max(10, Math.min(13, view.g * 0.55))}px system-ui, sans-serif`;
-    ctx.textAlign = vert ? (nx < 0 ? 'right' : 'left') : 'center'; ctx.textBaseline = 'middle';
+    ctx.textAlign = vert ? (nx < 0 ? 'right' : 'left') : side ? (p.rot ? 'right' : 'left') : 'center'; ctx.textBaseline = 'middle';
     const val = valueText(p);
     ctx.fillStyle = C.text;
     const lines = [p.name + (val ? '  ' + val : '')];
@@ -332,6 +345,9 @@ export function schematicTab(root) {
       case 'L': return si(q.l, 'H', 3);
       case 'SIG': return `${q.wave} ${si(q.f, 'Hz', 3)} ${si(q.amp, 'V', 3)}`;
       case 'OPTO': return 'PC817';
+      case 'ZD': return S.ZENER_PARTS[q.model] ? `${q.model} ${si(S.ZENER_PARTS[q.model].vz, 'V', 3)}` : si(q.vz, 'V', 3);
+      case 'NPN': case 'PNP': case 'NMOS': case 'PMOS': case 'OPAMP': return q.model;
+      case 'RELAY': return S.getCustom('RELAY', q.relay) ? q.relay : `${q.vcoil} V coil`;
     }
     return '';
   }
@@ -537,6 +553,94 @@ export function schematicTab(root) {
     inp.addEventListener('change', apply); inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
     return el('label', { class: 'field' }, el('span', { class: 'lab', text: label }), el('span', { class: 'box' }, inp, el('span', { class: 'unit', text: unit })));
   }
+  // ---------- my parts (custom parts typed in from a datasheet) ----------
+  function builtins(lib, filt = () => true) { return Object.entries(lib).filter(([, m]) => !m.custom && filt(m)).map(([k, m]) => [k, `${k}: ${m.note}`]); }
+  function modelChoice(p, label, kind, value, opts, onPick) {
+    const pol = { NPN: 'npn', PNP: 'pnp', NMOS: 'n', PMOS: 'p' }[p.type];
+    const lib = { BJT: S.BJTS, FET: S.FETS, DIODE: S.DIODES, ZENER: S.ZENER_PARTS, LED: S.LED_COLORS, AMP: S.AMPS, REG: S.REGS, RELAY: S.RELAYS }[kind];
+    const mine = Object.entries(lib).filter(([, m]) => m.custom && (!pol || m.pol === pol)).map(([k]) => [k, `★ ${k}`]);
+    const wrap = el('div', { class: 'mp-row' }, choice(label, value, [...opts, ...mine, ['__new', '+ New part from datasheet…']], v => {
+      if (v === '__new') { partForm(kind, p, null); return; }
+      onPick(v);
+      const m = S.getCustom(kind, v); if (m && kind === 'LED') p.props.imax = m.imax;
+    }));
+    if (S.getCustom(kind, value)) wrap.append(el('button', { class: 'btn', type: 'button', text: `✎ Edit ★ ${value}`, onclick: () => partForm(kind, p, value) }));
+    return wrap;
+  }
+  function myParts() { try { return JSON.parse(store.get('sch.myparts', '{}')) || {}; } catch { return {}; } }
+  function saveMyParts(a) { store.set('sch.myparts', JSON.stringify(a)); }
+  // register a library (my parts, or the one inside a project file); project parts I don't have yet are added to my parts
+  function registerLib(lib, addToMine) {
+    if (!lib || typeof lib !== 'object') return 0;
+    const my = myParts(); let added = 0;
+    for (const [kind, o] of Object.entries(lib)) {
+      if (!S.CUSTOM_KINDS[kind] || !o) continue;
+      for (const [nm, d] of Object.entries(o)) {
+        if (S.isBuiltIn(kind, nm)) continue;
+        if (addToMine && !my[kind]?.[nm]) { (my[kind] ??= {})[nm] = d; added++; }
+        S.registerCustom(kind, nm, d, d.pol);
+      }
+    }
+    if (added) saveMyParts(my);
+    return added;
+  }
+  function setPartModel(p, kind, nm) {
+    const m = S.getCustom(kind, nm);
+    if (kind === 'LED') { p.props.color = nm; p.props.imax = m.imax; } else if (kind === 'RELAY') p.props.relay = nm; else p.props.model = nm;
+  }
+  function partForm(kind, p, name) {
+    const K = S.CUSTOM_KINDS[kind], pol = { NPN: 'npn', PNP: 'pnp', NMOS: 'n', PMOS: 'p' }[p.type];
+    const old = name ? S.getCustom(kind, name)?.raw ?? {} : {};
+    const nameIn = el('input', { class: 'num wide', value: name ?? '', placeholder: 'e.g. MRF510, 2SC5200, LM2940-5', maxlength: 30, autocapitalize: 'characters', spellcheck: 'false' });
+    if (name) nameIn.disabled = true;
+    const ins = {};
+    const rows = K.fields.map(([k, label, unit, def, hint, opt]) => {
+      let inp;
+      if (k === 'glow') inp = el('select', { class: 'sel' }, Object.entries(S.LED_COLORS).filter(([, v]) => !v.custom).map(([c]) => el('option', { value: c, text: c })));
+      else if (k === 'adj') inp = el('select', { class: 'sel' }, el('option', { value: '0', text: 'No (fixed, GND pin)' }), el('option', { value: '1', text: 'Yes (ADJ pin, like LM317)' }));
+      else inp = el('input', { class: 'num', autocomplete: 'off', spellcheck: 'false', inputmode: 'decimal', placeholder: opt ? `optional (${plain(def)})` : '' });
+      inp.value = old[k] != null ? String(old[k]) : opt ? '' : String(def);
+      ins[k] = inp;
+      return el('label', { class: 'field' }, el('span', { class: 'lab', text: label + (hint ? ` · ${hint}` : '') }),
+        inp.tagName === 'SELECT' ? inp : el('span', { class: 'box' }, inp, el('span', { class: 'unit', text: unit })));
+    });
+    const err = el('div', { class: 'flag bad', hidden: true });
+    const save = () => {
+      const nm = (name ?? nameIn.value).trim().replace(/[★]/g, '');
+      const bad = (t) => { err.textContent = t; err.hidden = false; };
+      if (!nm) return bad('Type a name.');
+      if (S.isBuiltIn(kind, nm)) return bad(`"${nm}" is already in the list.`);
+      if (!name && S.getCustom(kind, nm)) return bad(`You already have ★ ${nm}. Pick it from the list and tap Edit.`);
+      const raw = {};
+      for (const [k, , , , , opt] of K.fields) {
+        const t = ins[k].value.trim();
+        if (k === 'glow' || k === 'adj') { raw[k] = t; continue; }
+        if (!t) { if (opt) continue; return bad('Fill in every value (optional ones can stay empty).'); }
+        const v = parse(t); if (v == null || !(v >= 0)) return bad(`"${t}" is not a number.`);
+        raw[k] = v;
+      }
+      if (pol) raw.pol = pol;
+      const my = myParts(); (my[kind] ??= {})[nm] = raw; saveMyParts(my);
+      S.registerCustom(kind, nm, raw, pol);
+      setPartModel(p, kind, nm);
+      d.close(); commit(); say(`Saved ★ ${nm} to your parts. It's in the list for every ${K.title.toLowerCase()} now.`);
+    };
+    const del = () => {
+      const my = myParts(); if (my[kind]) delete my[kind][name]; saveMyParts(my);
+      S.unregisterCustom(kind, name);
+      for (const q of c.parts) if (S.kindOfType(q.type) === kind && S.partModelKey(q) === name) {
+        const def = S.TYPES[q.type].props; if (kind === 'LED') Object.assign(q.props, { color: def.color, imax: def.imax }); else if (kind === 'RELAY') delete q.props.relay; else q.props.model = def.model;
+      }
+      d.close(); commit(); say(`Deleted ★ ${name}. Parts using it went back to the default.`);
+    };
+    const d = el('dialog', { class: 'dlg' }, el('div', { class: 'dlg-title2', text: name ? `Edit ★ ${name}` : `New ${K.title.toLowerCase()}${pol ? ` (${{ npn: 'NPN', pnp: 'PNP', n: 'N-channel', p: 'P-channel' }[pol]})` : ''}` }),
+      el('div', { class: 'dlg-pad mp-form' }, note('Type the values from the datasheet. Use the "typical" column; a rough value is fine.'),
+        el('label', { class: 'field' }, el('span', { class: 'lab', text: 'Part name' }), nameIn), ...rows, err),
+      el('div', { class: 'dlg-buttons mp-btns' }, name ? el('button', { class: 'btn danger', type: 'button', text: 'Delete', onclick: del }) : null,
+        el('button', { class: 'btn', type: 'button', text: 'Cancel', onclick: () => d.close() }), el('button', { class: 'btn primary', type: 'button', text: 'Save', onclick: save })));
+    document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
+    if (!name) nameIn.focus();
+  }
   function choice(label, value, options, onSet) {
     const s = el('select', { class: 'sel' }, options.map(([v, t]) => el('option', { value: v, text: t })));
     s.value = value; s.addEventListener('change', () => { onSet(s.value); commit(); });
@@ -588,8 +692,8 @@ export function schematicTab(root) {
         b.addEventListener('pointerup', rel); b.addEventListener('pointercancel', rel); b.addEventListener('lostpointercapture', rel);
         f.append(b); break;
       }
-      case 'LED': f.append(choice('Color', q.color, Object.entries(S.LED_COLORS).map(([k, v]) => [k, `${k} (${v.vf} V)`]), v => { q.color = v; }), field('Max current', plain(q.imax), 'A', v => { q.imax = v; })); break;
-      case 'D': f.append(choice('Type', q.model, Object.entries(S.DIODES).map(([k, v]) => [k, `${k}: ${v.note}`]), v => { q.model = v; })); break;
+      case 'LED': f.append(modelChoice(p, 'Color / part', 'LED', q.color, Object.entries(S.LED_COLORS).filter(([, v]) => !v.custom).map(([k, v]) => [k, `${k} (${v.vf} V)`]), v => { q.color = v; }), field('Max current', plain(q.imax), 'A', v => { q.imax = v; })); break;
+      case 'D': f.append(modelChoice(p, 'Type', 'DIODE', q.model, builtins(S.DIODES), v => { q.model = v; })); break;
       case 'LAMP': f.append(field('Rated voltage', plain(q.vr), 'V', v => { q.vr = v; }), field('Rated power', plain(q.wr), 'W', v => { q.wr = v; })); break;
       case 'C': f.append(field('Capacitance', plain(q.c), 'F', v => { q.c = Math.max(v, 1e-15); }), field('Voltage rating', plain(q.vmax), 'V', v => { q.vmax = v; }),
         choice('Type', q.polar ? 'e' : 'n', [['e', 'Electrolytic (has + and −)'], ['n', 'Ceramic / film (no polarity)']], v => { q.polar = v === 'e'; })); break;
@@ -599,6 +703,28 @@ export function schematicTab(root) {
         field('DC offset', plain(q.off), 'V', v => { q.off = v; }), field('Duty (PWM)', plain(q.duty), '%', v => { q.duty = Math.min(100, v); })); break;
       case 'SCOPE': f.append(note('CH1 (yellow) and CH2 (blue) measure against the bottom pin (COM). Usually wire COM to ground. Settings are under the scope screen.'),
         el('button', { class: 'btn', type: 'button', text: 'Auto time/div', onclick: () => autoTime() })); break;
+      case 'ZD': {
+        f.append(modelChoice(p, 'Part', 'ZENER', q.model ?? '', [['', 'Generic (choose Vz below)']], v => { q.model = v || undefined; }));
+        if (!S.ZENER_PARTS[q.model]) f.append(choice('Zener voltage', S.ZENERS.includes(q.vz) ? String(q.vz) : 'x', [...S.ZENERS.map(v => [String(v), `${v} V`]), ['x', 'custom']], v => { if (v !== 'x') q.vz = +v; }),
+          field('Zener voltage (custom)', plain(q.vz), 'V', v => { q.vz = Math.max(0.5, v); }),
+          choice('Power rating', String(q.pmax), [['0.5', '0.5 W (BZX55, small glass)'], ['1', '1 W (1N47xx)'], ['5', '5 W (1N53xx)']], v => { q.pmax = +v; }));
+        f.append(note('The bar (cathode) goes to + . Always put a resistor in series.')); break;
+      }
+      case 'NPN': case 'PNP': f.append(modelChoice(p, 'Type', 'BJT', q.model, builtins(S.BJTS, m => m.pol === p.type.toLowerCase()), v => { q.model = v; }),
+        note(p.type === 'NPN' ? 'Pins: B left, C top, E bottom. Low-side switch: E to ground, load between + and C.' : 'Pins: B left, E top, C bottom. High-side switch: E to +, load between C and ground. Base LOW = on.')); break;
+      case 'NMOS': case 'PMOS': f.append(modelChoice(p, 'Type', 'FET', q.model, builtins(S.FETS, m => m.pol === (p.type === 'NMOS' ? 'n' : 'p')), v => { q.model = v; }),
+        note(p.type === 'NMOS' ? 'Pins: G left, D top, S bottom. Low-side switch: S to ground, load between + and D. Add 100 Ω in the gate and 10 kΩ gate → ground.' : 'Pins: G left, S top, D bottom. High-side: S to +, load between D and ground. Gate LOW (below S) = on.')); break;
+      case 'OPAMP': f.append(modelChoice(p, 'Type', 'AMP', q.model, builtins(S.AMPS), v => { q.model = v; }),
+        note('Pins: − input top-left, + input bottom-left, output right, supply V+ top, V− bottom (to ground on a single supply).')); break;
+      case 'REG': f.append(modelChoice(p, 'Type', 'REG', q.model, builtins(S.REGS), v => { q.model = v; }),
+        note(S.REGS[q.model]?.adj ? 'Pins: IN left, OUT right, ADJ bottom. R1 (240 Ω) from OUT to ADJ, R2 from ADJ to ground: Vout = 1.25 × (1 + R2 ÷ R1).' : 'Pins: IN left, OUT right, GND bottom. Real circuit: 0.33 µF on IN and 0.1 µF on OUT, close to the pins.')); break;
+      case 'RELAY': {
+        const cust = S.getCustom('RELAY', q.relay);
+        f.append(modelChoice(p, 'Coil', 'RELAY', cust ? q.relay : String(q.vcoil), Object.entries(S.RELAYS).filter(([, m]) => !m.custom).map(([v, m]) => [v, `${v} V coil (${m.rcoil} Ω)`]),
+          v => { if (S.getCustom('RELAY', v)) q.relay = v; else { delete q.relay; q.vcoil = +v; Object.assign(q, { rcoil: S.RELAYS[v].rcoil, l: S.RELAYS[v].l }); } }));
+        if (!cust) f.append(field('Coil resistance', plain(q.rcoil), 'Ω', v => { q.rcoil = Math.max(v, 1); }), field('Coil inductance', plain(q.l), 'H', v => { q.l = Math.max(v, 1e-6); }));
+        f.append(note('Coil pins on the left. Contacts: COM (bottom) connects to NC when off, to NO when the coil pulls in (≥ 75 % of rated current).')); break;
+      }
       case 'OPTO': f.append(choice('CTR (current transfer ratio)', String(q.ctr), [[50, '50 %'], [80, '80 %'], [100, '100 % (typical)'], [160, '160 %'], [200, '200 %'], [300, '300 %'], [600, '600 %']].map(([v, t]) => [String(v), t]), v => { q.ctr = +v; }),
         note('Pins: 1 anode, 2 cathode (LED, left) · 4 collector, 3 emitter (transistor, right). Ic = CTR × If until it saturates.')); break;
     }
@@ -623,6 +749,7 @@ export function schematicTab(root) {
   }
 
   function partReadings(p, r) {
+    const c0 = (v) => (Math.abs(v) < 1e-9 ? 0 : v);
     const q = p.props, vals = [], L = [], warn = [];
     const I = Math.abs(r.i), Vab = r.v;
     switch (p.type) {
@@ -657,7 +784,7 @@ export function schematicTab(root) {
         if (!q.on && Math.abs(Vab) > 1e-3) L.push(`Open switch: the full ${si(Math.abs(Vab), 'V')} appears across it.`);
         break;
       case 'LED': {
-        const m = S.LED_COLORS[q.color];
+        const m = S.LED_COLORS[q.color] ?? S.LED_COLORS.red;
         vals.push(['Current', si(I, 'A'), true], ['Voltage', si(Math.abs(Vab), 'V'), true], ['Power', si(r.p, 'W')]);
         if (r.on) {
           L.push(`LED needs ≈ ${m.vf} V (${q.color}). The rest drops on the resistor in series.`);
@@ -668,7 +795,7 @@ export function schematicTab(root) {
         break;
       }
       case 'D': {
-        const m = S.DIODES[q.model];
+        const m = S.DIODES[q.model] ?? S.DIODES['1N4007'];
         vals.push(['Current', si(I, 'A'), true], ['Voltage', si(Vab, 'V'), true], ['Power', si(r.p, 'W')]);
         warn.push(r.on ? [I > m.imax ? 'bad' : 'ok', I > m.imax ? `Over ${si(m.imax, 'A')}: use a bigger diode.` : `Conducting (${m.vf} V drop).`] : ['ok', Vab < 0 ? `Blocking ${si(-Vab, 'V')} (rated ${m.piv} V).` : 'Not conducting.']);
         if (-Vab > m.piv) warn.push(['bad', `Reverse voltage over ${m.piv} V: it breaks down.`]);
@@ -702,6 +829,77 @@ export function schematicTab(root) {
         break;
       }
       case 'SCOPE': vals.push(['CH1 now', si(r.ch1, 'V'), true], ['CH2 now', si(r.ch2, 'V'), true]); break;
+      case 'ZD': {
+        const vz = -r.v, iz = -r.i, zq = S.zenerOf(q);
+        if (r.state === 'rev') {
+          vals.push(['Holds', si(vz, 'V'), true], ['Zener current', si(iz, 'A'), true], ['Power', si(c0(r.p), 'W'), true]);
+          L.push(`P = Vz × Iz = ${plain(vz)} × ${plain(iz)} = ${si(c0(r.p), 'W')}`, 'The series resistor drops the rest: R = (Vin − Vz) ÷ (Iload + Iz).');
+          warn.push(r.p > zq.pmax ? ['bad', `Over its ${zq.pmax} W rating: it will burn. Use a bigger series resistor or a ${zq.pmax < 1 ? '1 W' : '5 W'} zener.`] : iz < 0.002 ? ['warn', 'Under 2 mA: the voltage is soft (not well regulated). Aim for 5–20 mA.'] : r.p > 0.6 * zq.pmax ? ['warn', `Hot: ${pct(r.p / zq.pmax, 0)} of its rating.`] : ['ok', `Regulating at ${si(vz, 'V')}.`]);
+        } else if (r.state === 'fwd') { vals.push(['Current', si(r.i, 'A'), true], ['Voltage', si(r.v, 'V'), true]); warn.push(['warn', 'Forward: it just acts like a normal diode (0.7 V). For regulation flip it: the bar (cathode) goes to +.']); }
+        else { vals.push(['Voltage', si(vz, 'V'), true], ['Current', '0 A', true]); warn.push(['warn', vz > 0 ? `Below ${si(zq.vz, 'V')}: blocking, not regulating yet.` : 'Not conducting.']); }
+        break;
+      }
+      case 'NPN': case 'PNP': {
+        const m = S.BJTS[q.model] ?? S.BJTS[p.type === 'NPN' ? '2N2222' : '2N2907'], npn = p.type === 'NPN', st = { off: 'OFF', act: 'ACTIVE (partly on)', sat: 'SATURATED (fully on)', brk: 'BREAKDOWN' }[r.state];
+        vals.push(['State', st, true], ['Base current', si(c0(r.ib), 'A'), true], ['Collector current', si(c0(r.ic), 'A'), true], [npn ? 'Vce' : 'Vec', si(c0(r.vce), 'V'), true], [npn ? 'Vbe' : 'Veb', si(c0(r.vbe), 'V')], ['Power (heat)', si(c0(r.p), 'W')]);
+        L.push(`β (gain) ≈ ${m.beta}: Ic can be up to β × Ib = ${m.beta} × ${si(c0(r.ib), 'A')} = ${si(m.beta * r.ib, 'A')}`, `As a switch use Ib ≈ Ic ÷ 10 → base resistor ≈ (Vpin − ${m.vbe}) ÷ (Ic ÷ 10)`, `Heat = ${npn ? 'Vce' : 'Vec'} × Ic + ${npn ? 'Vbe' : 'Veb'} × Ib = ${si(c0(r.p), 'W')}`);
+        if (r.state === 'off') warn.push(['ok', `OFF: no base current (needs ${npn ? 'B above E' : 'B below E'} by ${m.vbe} V).`]);
+        if (r.state === 'sat') warn.push(['ok', `Fully ON: only ${si(c0(r.vce), 'V')} across it. Good switch.`]);
+        if (r.state === 'act') warn.push(['warn', `Partly on (amplifier mode): it drops ${si(c0(r.vce), 'V')} and heats. For a switch give it more base current (smaller base resistor).`]);
+        if (r.state === 'brk') warn.push(['bad', `BREAKDOWN: ${si(c0(r.vce), 'V')} is over its ${m.vmax} V rating. A coil switch-off spike? Add a flyback diode across the coil.`]);
+        if (r.ic > m.imax) warn.push(['bad', `Collector current over ${si(m.imax, 'A')}: too much for a ${q.model}.`]);
+        if (r.p > m.pmax) warn.push(['bad', `${si(c0(r.p), 'W')} heat: over ${m.pmax} W, it needs a heatsink or a bigger transistor.`]);
+        if (r.ib > 0.012) warn.push(['warn', `Base current ${si(c0(r.ib), 'A')}: more than an MCU pin likes (ESP32 / Arduino ≈ 10–20 mA). Use a bigger base resistor or a Darlington / MOSFET.`]);
+        break;
+      }
+      case 'NMOS': case 'PMOS': {
+        const m = S.FETS[q.model] ?? S.FETS[p.type === 'NMOS' ? 'IRLZ44N' : 'AO3401'], nch = p.type === 'NMOS', st = { off: 'OFF', ohm: 'ON (fully on)', sat: 'PARTLY ON (gate too low)', brk: 'AVALANCHE' }[r.state];
+        vals.push(['State', st, true], [nch ? 'Gate Vgs' : 'Gate Vsg', si(c0(r.vgs), 'V'), true], ['Drain current', si(c0(r.id), 'A'), true], [nch ? 'Vds' : 'Vsd', si(c0(r.vds), 'V'), true], ...(r.rds != null ? [['Rds(on)', si(r.rds, 'Ω')]] : []), ['Power (heat)', si(c0(r.p), 'W')]);
+        L.push(`Threshold Vth ≈ ${m.vth} V (starts to turn on), fully on at ${m.vfull} V: Rds = ${si(m.rdson, 'Ω')}`);
+        if (r.rds != null) L.push(`Heat = Id² × Rds = ${plain(r.id)}² × ${plain(r.rds)} = ${si(c0(r.id) * r.id * r.rds, 'W')}`);
+        if (r.state === 'off') warn.push(['ok', `OFF: gate ${si(c0(r.vgs), 'V')} is below the ${m.vth} V threshold.`]);
+        if (r.state === 'ohm') warn.push(r.vgs >= m.vfull * 0.9 ? ['ok', 'Fully ON. Good switch.'] : ['warn', `ON, but the gate is only ${si(c0(r.vgs), 'V')}: Rds ${si(r.rds, 'Ω')} instead of ${si(m.rdson, 'Ω')} (${m.vfull} V gate). ${m.logic ? 'OK for moderate current.' : 'Use a logic-level MOSFET (IRLZ44N, AO3400).'}`]);
+        if (r.state === 'sat') warn.push(['bad', `NOT fully on: gate ${si(c0(r.vgs), 'V')} is too low for ${si(c0(r.id), 'A')}. It drops ${si(c0(r.vds), 'V')} and burns ${si(c0(r.p), 'W')}. Use a logic-level MOSFET or drive the gate with ${m.vfull} V.`]);
+        if (r.state === 'brk') warn.push(['bad', `AVALANCHE: ${si(c0(r.vds), 'V')} is over its ${m.vmax} V rating (coil switch-off spike). Add a flyback diode across the coil.`]);
+        if (r.body) warn.push(['warn', 'Body diode is conducting (current flowing backwards through the MOSFET).']);
+        if (Math.abs(r.vgs) > 20) warn.push(['bad', 'Gate over ±20 V: it can punch through. Clamp it with a zener.']);
+        if (r.id > m.imax) warn.push(['bad', `Drain current over ${si(m.imax, 'A')}.`]);
+        if (r.p > m.pmax) warn.push(['bad', `${si(c0(r.p), 'W')} heat: needs a heatsink (about ${m.pmax} W without one).`]);
+        break;
+      }
+      case 'OPAMP': {
+        const m = S.AMPS[q.model] ?? S.AMPS.LM358, st = { lin: 'LINEAR', high: 'OUTPUT HIGH (at the top)', low: 'OUTPUT LOW (at the bottom)' }[r.state];
+        vals.push(['Output', si(r.vout, 'V'), true], ['Input + minus −', si(c0(r.vdiff), 'V'), true], ['State', st, true], ['Supply', si(r.vsup, 'V')], ['Output current', si(c0(r.iout), 'A')]);
+        L.push(`Vout = gain × (V+ − V−), gain ≈ ${si(m.a, '')}: a tiny difference swings the output to a rail.`, 'With negative feedback (output → − input) it keeps both inputs equal: amplifier.', 'Without feedback it is a comparator: + higher → output HIGH, − higher → output LOW.', `${q.model}: output reaches ${m.dl < 0.1 ? 'the bottom rail' : `${m.dl} V above the bottom`} and ${m.dh < 0.1 ? 'the top rail' : `${m.dh} V below the top`}.`);
+        if (r.vsup < 3) warn.push(['bad', 'Not powered: wire V+ (top pin) to + and V− (bottom pin) to ground or the − supply.']);
+        if (r.vsup > m.vmax) warn.push(['bad', `Supply ${si(r.vsup, 'V')} is over its ${m.vmax} V maximum.`]);
+        if (Math.abs(r.iout) > m.iout) warn.push(['warn', `Output current ${si(Math.abs(r.iout), 'A')}: op-amps only drive a few mA. Add a transistor for loads.`]);
+        break;
+      }
+      case 'REG': {
+        const m = S.REGS[q.model] ?? S.REGS['7805'], st = { reg: 'REGULATING', drop: 'DROPOUT (input too low)', lim: 'CURRENT LIMIT', off: 'OFF' }[r.state];
+        vals.push(['Output', si(r.vout, 'V'), true], ['Load current', si(c0(r.iout), 'A'), true], ['Heat', si(c0(r.p), 'W'), true], ['Input', si(r.vin, 'V')], ['State', st]);
+        L.push(`Heat = (Vin − Vout) × I = ${plain(r.vio)} × ${plain(r.iout)} = ${si(c0(r.p), 'W')}  (a linear regulator burns the difference)`, `Needs Vin ≥ ${m.adj ? 'Vout' : si(m.vout, 'V')} + ${m.drop} V`);
+        if (m.adj) L.push('Vout = 1.25 V × (1 + R2 ÷ R1) + 50 µA × R2');
+        if (r.state === 'reg') warn.push(['ok', `Steady ${si(r.vout, 'V')}.`]);
+        if (r.state === 'drop') warn.push(['bad', `Input too low: needs at least ${m.drop} V more than the output. Output sags to ${si(r.vout, 'V')}.`]);
+        if (r.state === 'lim') warn.push(['bad', `Overload: current limit ${si(m.ilim, 'A')} (short or too heavy a load).`]);
+        if (r.state === 'off') warn.push(['warn', 'Off: no input, or something else pushes the output higher.']);
+        if (r.vin > m.vinmax) warn.push(['bad', `Input over ${m.vinmax} V maximum.`]);
+        if (r.p > 15) warn.push(['bad', 'Way too much heat for a linear regulator: use a buck converter (LM2596, MP1584).']);
+        else if (r.p > 1) warn.push(['warn', `${si(c0(r.p), 'W')} of heat: needs a heatsink (bare TO-220 handles ≈ 1 W). A buck converter wastes much less.`]);
+        if (m.adj && r.iout < 0.0095) warn.push(['warn', 'LM317 needs ≥ 10 mA load or the output creeps up. Use R1 = 120–240 Ω.']);
+        break;
+      }
+      case 'RELAY': {
+        const rq = S.relayOf(q), inom = rq.vcoil / rq.rcoil;
+        vals.push(['Contacts', r.on ? 'ON (COM → NO)' : 'OFF (COM → NC)', true], ['Coil current', si(Math.abs(r.icoil), 'A'), true], ['Coil voltage', si(Math.abs(r.v), 'V'), true], ['Contact current', si(Math.abs(r.icon), 'A')], ['Coil power', si(c0(r.p), 'W')]);
+        L.push(`Rated coil current = ${rq.vcoil} V ÷ ${plain(rq.rcoil)} Ω = ${si(inom, 'A')}`, `Pulls in at ≥ ${si(0.75 * inom, 'A')} (75 %), lets go under ${si(0.3 * inom, 'A')} (30 %)`, 'Never drive a coil straight from an ESP32 / Arduino pin: use a transistor or MOSFET + flyback diode.');
+        if (Math.abs(r.v) > 1.3 * rq.vcoil) warn.push(['bad', Math.abs(r.v) > 3 * rq.vcoil ? `${si(Math.abs(r.v), 'V')} across the coil: switch-off spike! Add a flyback diode across the coil.` : 'Coil over-voltage: it overheats.']);
+        if (Math.abs(r.icon) > 10) warn.push(['bad', 'Contact current over 10 A (typical relay rating).']);
+        if (!r.on && Math.abs(r.icoil) > 0.3 * inom) warn.push(['warn', 'Coil current too low to pull in: check the driver / supply voltage.']);
+        break;
+      }
       case 'OPTO': {
         const st = { off: 'OFF', act: 'ACTIVE (current-limited)', sat: 'SATURATED (fully on)' }[r.state];
         vals.push(['LED current If', si(r.ifw, 'A'), true], ['Collector Ic', si(r.ic, 'A'), true], ['Vce', si(r.vce, 'V'), true], ['State', st]);
@@ -738,9 +936,9 @@ export function schematicTab(root) {
     document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
     return d;
   }
-  function loadCircuit(j, msg) { resetSim(); c = j; sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
+  function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; resetSim(); c = j; sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -884,12 +1082,81 @@ function symbol(ctx, p, r, g) {
       T('1', -1.7, -1.4, 0.5, C.dim); T('2', -1.7, 1.4, 0.5, C.dim); T('4', 1.7, -1.4, 0.5, C.dim); T('3', 1.7, 1.4, 0.5, C.dim);
       break;
     }
+    case 'ZD': {
+      const on = r?.state === 'rev';
+      L(-2, 0, -0.55, 0); L(0.55, 0, 2, 0);
+      ctx.beginPath(); ctx.moveTo(-0.55, -0.6); ctx.lineTo(0.55, 0); ctx.lineTo(-0.55, 0.6); ctx.closePath();
+      ctx.fillStyle = on ? 'rgba(61,220,132,0.35)' : 'transparent'; ctx.fill(); ctx.stroke();
+      L(0.3, -0.85, 0.55, -0.6, 0.55, 0.6, 0.8, 0.85);
+      break;
+    }
+    case 'NPN': case 'PNP': {
+      const npn = p.type === 'NPN', s = r?.state, ce = s === 'sat' ? '#3DDC84' : s === 'act' ? '#FFC857' : s === 'brk' ? '#FF6B6B' : C.part;
+      ctx.beginPath(); ctx.arc(0.25, 0, 1.3, 0, 7); ctx.stroke();
+      L(-2, 0, -0.45, 0); ctx.lineWidth *= 1.6; L(-0.45, -0.8, -0.45, 0.8); ctx.lineWidth /= 1.6;
+      ctx.strokeStyle = ce; ctx.fillStyle = ce;
+      L(-0.45, -0.35, 1, -1.05, 1, -2); L(-0.45, 0.35, 1, 1.05, 1, 2);
+      if (npn) arrowHead(ctx, -0.45, 0.35, 1, 1.05, 0.8); else arrowHead(ctx, 1, -1.05, -0.45, -0.35, 0.75);
+      T(npn ? 'C' : 'E', 1.5, -1.6, 0.5, C.dim); T(npn ? 'E' : 'C', 1.5, 1.6, 0.5, C.dim); T('B', -1.5, -0.45, 0.5, C.dim);
+      break;
+    }
+    case 'NMOS': case 'PMOS': {
+      const nch = p.type === 'NMOS', s = r?.state, ch = s === 'ohm' ? '#3DDC84' : s === 'sat' ? '#FFC857' : s === 'brk' ? '#FF6B6B' : C.part;
+      L(-2, 0, -0.75, 0); ctx.lineWidth *= 1.3; L(-0.75, -0.9, -0.75, 0.9); ctx.lineWidth /= 1.3;
+      ctx.strokeStyle = ch; ctx.fillStyle = ch; ctx.lineWidth *= 1.5;
+      L(-0.35, -1, -0.35, -0.5); L(-0.35, -0.25, -0.35, 0.25); L(-0.35, 0.5, -0.35, 1); ctx.lineWidth /= 1.5;
+      L(-0.35, -0.75, 1, -0.75, 1, -2); L(-0.35, 0.75, 1, 0.75, 1, 2);
+      // body connects to the source (bottom for N, top for P)
+      if (nch) { L(-0.35, 0, 1, 0, 1, 0.75); arrowHead(ctx, 0.6, 0, -0.3, 0, 1); } else { L(-0.35, 0, 1, 0, 1, -0.75); arrowHead(ctx, -0.25, 0, 0.6, 0, 1); }
+      // body diode (cathode up)
+      ctx.strokeStyle = r?.body ? '#FFC857' : C.dim; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth *= 0.7;
+      L(1, -1.35, 1.6, -1.35, 1.6, 1.35, 1, 1.35);
+      ctx.beginPath(); ctx.moveTo(1.38, 0.2); ctx.lineTo(1.82, 0.2); ctx.lineTo(1.6, -0.2); ctx.closePath(); ctx.fill(); L(1.38, -0.2, 1.82, -0.2); ctx.lineWidth /= 0.7;
+      T('G', -1.5, -0.45, 0.5, C.dim); T(nch ? 'D' : 'S', 0.55, -1.55, 0.5, C.dim); T(nch ? 'S' : 'D', 0.55, 1.55, 0.5, C.dim);
+      break;
+    }
+    case 'OPAMP': {
+      const s = r?.state;
+      ctx.beginPath(); ctx.moveTo(-2, -1.8); ctx.lineTo(2, 0); ctx.lineTo(-2, 1.8); ctx.closePath();
+      ctx.fillStyle = s === 'high' ? 'rgba(61,220,132,0.18)' : s === 'low' ? 'rgba(255,107,107,0.12)' : 'rgba(79,195,247,0.08)'; ctx.fill(); ctx.stroke();
+      L(-3, 1, -2, 1); L(-3, -1, -2, -1); L(2, 0, 3, 0); L(0, -2, 0, -0.9); L(0, 2, 0, 0.9);
+      T('−', -1.45, -1, 0.9, '#FF6B6B'); T('+', -1.45, 1, 0.9, '#3DDC84');
+      T('V+', 0.55, -1.6, 0.45, C.dim); T('V−', 0.55, 1.6, 0.45, C.dim);
+      break;
+    }
+    case 'REG': {
+      const m = S.REGS[q.model] ?? S.REGS['7805'];
+      L(-3, 0, -2, 0); L(2, 0, 3, 0); L(0, 2, 0, 1.1);
+      ctx.fillStyle = '#161C22'; ctx.fillRect(-2, -1.1, 4, 2.2); ctx.strokeStyle = r?.state && r.state !== 'reg' ? '#FF6B6B' : C.part; ctx.strokeRect(-2, -1.1, 4, 2.2);
+      T(q.model.replace('AMS', ''), 0, -0.2, q.model.length > 6 ? 0.5 : 0.62, C.part);
+      T('IN', -1.45, 0.55, 0.42, C.dim); T('OUT', 1.35, 0.55, 0.42, C.dim); T(m.adj ? 'ADJ' : 'GND', 0, 0.7, 0.42, C.dim);
+      break;
+    }
+    case 'RELAY': {
+      const on = !!r?.on;
+      L(-3, -2, -3, -1); L(-3, 1, -3, 2);
+      if (on) { ctx.fillStyle = 'rgba(255,200,87,0.25)'; ctx.fillRect(-3.55, -1, 1.1, 2); }
+      ctx.strokeRect(-3.55, -1, 1.1, 2); L(-3.55, 1, -2.45, -1);
+      L(0, 2, 0, 1); L(0, -2, 0, -1.45, -0.6, -1.45, -0.6, -1.05); L(2, -2, 2, -1.45, 1.1, -1.45, 1.1, -1.05);
+      for (const [x, y] of [[0, 1], [-0.6, -1.05], [1.1, -1.05]]) { ctx.beginPath(); ctx.arc(x, y, 0.13, 0, 7); ctx.fill(); }
+      ctx.strokeStyle = on ? '#3DDC84' : C.part; L(0, 1, on ? 1.05 : -0.55, -0.95);
+      ctx.strokeStyle = C.dim; ctx.setLineDash([0.18, 0.15]); L(-2.45, 0, on ? 0.5 : -0.27, 0); ctx.setLineDash([]);
+      T('NC', -0.75, -1.85, 0.4, C.dim); T('NO', 1.45, -1.85, 0.4, C.dim); T('COM', 0.75, 1.6, 0.4, C.dim);
+      break;
+    }
     case 'VM': case 'AM': L(-2, 0, -1, 0); L(1, 0, 2, 0); ctx.beginPath(); ctx.arc(0, 0, 1, 0, 7); ctx.stroke(); T(p.type === 'VM' ? 'V' : 'A', 0, 0.05, 1.0, C.sel); T('+', -1.45, -0.55, 0.7, '#3DDC84'); break;
   }
 }
 
+// filled arrow head on the segment (x1,y1)→(x2,y2), tip at fraction f
+function arrowHead(ctx, x1, y1, x2, y2, f) {
+  const dx = x2 - x1, dy = y2 - y1, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l;
+  const tx = x1 + dx * f, ty = y1 + dy * f, s = 0.36;
+  ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx - ux * s - uy * s * 0.6, ty - uy * s + ux * s * 0.6); ctx.lineTo(tx - ux * s + uy * s * 0.6, ty - uy * s - ux * s * 0.6); ctx.closePath(); ctx.fill();
+}
+
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = type === 'DPDT' ? 7 : type === 'SPDT' ? 14 : type === 'SCOPE' ? 11 : type === 'OPTO' ? 12 : g; x.translate(w / 2, type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

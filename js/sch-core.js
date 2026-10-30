@@ -12,6 +12,105 @@ export const DIODES = {
   '1N5819': { vf: 0.35, rs: 0.05, imax: 1, piv: 40, note: 'Schottky, low drop (flyback diode)' },
 };
 
+export const BJTS = {
+  '2N2222': { pol: 'npn', beta: 150, vbe: 0.65, rb: 2, vsat: 0.2, rsat: 0.3, imax: 0.6, vmax: 40, pmax: 0.5, note: 'NPN 600 mA, small switch' },
+  'BC547': { pol: 'npn', beta: 200, vbe: 0.65, rb: 5, vsat: 0.2, rsat: 1, imax: 0.1, vmax: 45, pmax: 0.5, note: 'NPN 100 mA, small signal' },
+  'S8050': { pol: 'npn', beta: 200, vbe: 0.65, rb: 2, vsat: 0.25, rsat: 0.4, imax: 0.5, vmax: 25, pmax: 0.6, note: 'NPN 500 mA' },
+  'TIP120': { pol: 'npn', beta: 1000, vbe: 1.3, rb: 2, vsat: 0.9, rsat: 0.1, imax: 5, vmax: 60, pmax: 2, note: 'NPN Darlington 5 A' },
+  'TIP31C': { pol: 'npn', beta: 50, vbe: 0.8, rb: 1, vsat: 0.3, rsat: 0.1, imax: 3, vmax: 100, pmax: 2, note: 'NPN power 3 A' },
+  '2N2907': { pol: 'pnp', beta: 150, vbe: 0.65, rb: 2, vsat: 0.2, rsat: 0.3, imax: 0.6, vmax: 60, pmax: 0.5, note: 'PNP 600 mA' },
+  'BC557': { pol: 'pnp', beta: 200, vbe: 0.65, rb: 5, vsat: 0.2, rsat: 1, imax: 0.1, vmax: 45, pmax: 0.5, note: 'PNP 100 mA' },
+  'S8550': { pol: 'pnp', beta: 200, vbe: 0.65, rb: 2, vsat: 0.25, rsat: 0.4, imax: 0.5, vmax: 25, pmax: 0.6, note: 'PNP 500 mA' },
+  'TIP125': { pol: 'pnp', beta: 1000, vbe: 1.3, rb: 2, vsat: 0.9, rsat: 0.1, imax: 5, vmax: 60, pmax: 2, note: 'PNP Darlington 5 A' },
+  'TIP32C': { pol: 'pnp', beta: 50, vbe: 0.8, rb: 1, vsat: 0.3, rsat: 0.1, imax: 3, vmax: 100, pmax: 2, note: 'PNP power 3 A' },
+};
+// rdson is at gate voltage vfull; logic = fully on from a 3.3–5 V pin
+export const FETS = {
+  'IRLZ44N': { pol: 'n', vth: 1.5, rdson: 0.025, vfull: 5, imax: 47, vmax: 55, pmax: 2, logic: true, note: 'N, logic level, 47 A' },
+  'AO3400': { pol: 'n', vth: 1.05, rdson: 0.033, vfull: 4.5, imax: 5.7, vmax: 30, pmax: 1.4, logic: true, note: 'N, SOT-23, 3.3 V gate OK, 5.7 A' },
+  'IRF540N': { pol: 'n', vth: 3, rdson: 0.044, vfull: 10, imax: 33, vmax: 100, pmax: 2, logic: false, note: 'N, needs 10 V gate, 33 A' },
+  'IRFZ44N': { pol: 'n', vth: 3, rdson: 0.0175, vfull: 10, imax: 49, vmax: 55, pmax: 2, logic: false, note: 'N, needs 10 V gate, 49 A' },
+  '2N7000': { pol: 'n', vth: 2.1, rdson: 1.8, vfull: 10, imax: 0.2, vmax: 60, pmax: 0.4, logic: false, note: 'N, small 200 mA' },
+  'AO3401': { pol: 'p', vth: 0.9, rdson: 0.05, vfull: 4.5, imax: 4, vmax: 30, pmax: 1.4, logic: true, note: 'P, SOT-23, 4 A' },
+  'IRF9540N': { pol: 'p', vth: 3, rdson: 0.117, vfull: 10, imax: 23, vmax: 100, pmax: 2, logic: false, note: 'P, needs 10 V gate, 23 A' },
+};
+// dh / dl = how close the output gets to the top / bottom supply
+export const AMPS = {
+  'LM358': { dh: 1.5, dl: 0.02, a: 1e5, iq: 0.0007, vmax: 32, iout: 0.03, note: 'single supply 3–32 V, output reaches 0 V but not the top' },
+  'LM741': { dh: 2, dl: 2, a: 2e5, iq: 0.0017, vmax: 36, iout: 0.025, note: 'old, needs ± supply, 2 V from both rails' },
+  'TL072': { dh: 1.5, dl: 1.5, a: 2e5, iq: 0.0014, vmax: 36, iout: 0.03, note: 'audio, JFET input' },
+  'MCP6002': { dh: 0.025, dl: 0.025, a: 1e5, iq: 0.0001, vmax: 6, iout: 0.02, note: 'rail-to-rail, 1.8–6 V (3.3 V MCU)' },
+};
+export const REGS = {
+  '7805': { vout: 5, drop: 2, ilim: 1.5, iq: 0.005, vinmax: 35, note: '5 V, 1.5 A, input 7–35 V' },
+  '7809': { vout: 9, drop: 2, ilim: 1.5, iq: 0.005, vinmax: 35, note: '9 V, 1.5 A' },
+  '7812': { vout: 12, drop: 2, ilim: 1.5, iq: 0.005, vinmax: 35, note: '12 V, 1.5 A, input 14–35 V' },
+  'AMS1117-3.3': { vout: 3.3, drop: 1.1, ilim: 1, iq: 0.005, vinmax: 15, note: '3.3 V, 1 A low-drop (ESP32)' },
+  'AMS1117-5.0': { vout: 5, drop: 1.1, ilim: 1, iq: 0.005, vinmax: 15, note: '5 V, 1 A low-drop' },
+  'LM317': { vout: 1.25, drop: 2, ilim: 1.5, iq: 0, iadj: 50e-6, vinmax: 40, adj: true, note: 'adjustable: Vout = 1.25 × (1 + R2 ÷ R1)' },
+};
+export const RELAYS = { 5: { rcoil: 70, l: 0.02 }, 12: { rcoil: 400, l: 0.12 }, 24: { rcoil: 1600, l: 0.5 } };
+export const ZENERS = [2.7, 3.3, 3.9, 4.7, 5.1, 5.6, 6.2, 6.8, 8.2, 9.1, 10, 12, 15, 18, 24];
+
+// ---------- custom parts (typed in from a datasheet) ----------
+// kind → which part types use it, and the fields the form asks for: [key, label, unit, default, hint, optional]
+export const CUSTOM_KINDS = {
+  BJT: { types: ['NPN', 'PNP'], title: 'Transistor', fields: [
+    ['beta', 'Gain hFE (β)', '', 100, 'hFE / DC current gain, typical'], ['vbe', 'Vbe (on)', 'V', 0.7, 'base-emitter on voltage'], ['vsat', 'Vce(sat)', 'V', 0.3, 'collector-emitter saturation voltage'],
+    ['imax', 'Max collector current Ic', 'A', 1, ''], ['vmax', 'Max Vce (Vceo)', 'V', 40, ''], ['pmax', 'Max power (no heatsink)', 'W', 0.6, 'Ptot / Pd at 25 °C ambient']] },
+  FET: { types: ['NMOS', 'PMOS'], title: 'MOSFET', fields: [
+    ['vth', 'Gate threshold Vgs(th)', 'V', 2, 'starts to turn on (use the typical value)'], ['rdson', 'Rds(on)', 'Ω', 0.05, 'on-resistance'], ['vfull', '…measured at gate voltage', 'V', 10, 'the Vgs written next to Rds(on)'],
+    ['imax', 'Max drain current Id', 'A', 10, ''], ['vmax', 'Max Vds', 'V', 60, 'V(BR)DSS'], ['pmax', 'Max power (no heatsink)', 'W', 1, '≈ 2 W for TO-220, 1 W for SOT-23']] },
+  DIODE: { types: ['D'], title: 'Diode', fields: [['vf', 'Forward voltage Vf', 'V', 0.7, ''], ['imax', 'Max forward current', 'A', 1, 'IF(AV)'], ['piv', 'Max reverse voltage', 'V', 100, 'VRRM']] },
+  ZENER: { types: ['ZD'], title: 'Zener', fields: [['vz', 'Zener voltage Vz', 'V', 5.1, ''], ['pmax', 'Power rating', 'W', 0.5, 'Ptot']] },
+  LED: { types: ['LED'], title: 'LED', fields: [['vf', 'Forward voltage Vf', 'V', 2, 'typical'], ['imax', 'Max current', 'A', 0.02, 'IF'], ['glow', 'Glow color', '', 'red', '']] },
+  AMP: { types: ['OPAMP'], title: 'Op-amp', fields: [
+    ['dh', 'Output stops below top supply by', 'V', 1.5, 'from "output swing" (0.02 for rail-to-rail)'], ['dl', 'Output stops above bottom supply by', 'V', 1.5, ''],
+    ['vmax', 'Max supply (top to bottom)', 'V', 36, ''], ['iout', 'Max output current', 'A', 0.03, 'short-circuit current'],
+    ['a', 'Open-loop gain', '', 100000, '100 dB = 100 000', true], ['iq', 'Supply current', 'A', 0.002, '', true]] },
+  REG: { types: ['REG'], title: 'Regulator', fields: [
+    ['adj', 'Adjustable (has ADJ pin)?', '', 0, ''], ['vout', 'Output voltage (adjustable: reference)', 'V', 5, 'adjustable: 1.25 V between OUT and ADJ'], ['drop', 'Dropout voltage', 'V', 2, ''],
+    ['ilim', 'Current limit', 'A', 1.5, ''], ['vinmax', 'Max input (adjustable: max in − out)', 'V', 35, ''],
+    ['iq', 'Quiescent current (fixed) / ADJ pin current', 'A', 0.005, 'ADJ pin: ≈ 0.00005', true]] },
+  RELAY: { types: ['RELAY'], title: 'Relay', fields: [['vcoil', 'Coil voltage', 'V', 12, ''], ['rcoil', 'Coil resistance', 'Ω', 400, ''], ['l', 'Coil inductance', 'H', 0.1, 'rarely given: 0.02–0.5', true]] },
+};
+export const ZENER_PARTS = {};
+export const kindOfType = (t) => Object.keys(CUSTOM_KINDS).find(k => CUSTOM_KINDS[k].types.includes(t));
+const libOf = (kind) => ({ BJT: BJTS, FET: FETS, DIODE: DIODES, ZENER: ZENER_PARTS, LED: LED_COLORS, AMP: AMPS, REG: REGS, RELAY: RELAYS })[kind];
+// turn the typed-in values into the model the solver uses
+export function registerCustom(kind, name, d, pol) {
+  const n = (k, def) => (Number.isFinite(+d[k]) && d[k] !== '' ? +d[k] : def);
+  let m;
+  switch (kind) {
+    case 'BJT': m = { pol: d.pol ?? pol, beta: n('beta', 100), vbe: n('vbe', 0.7), rb: 2, vsat: n('vsat', 0.3), rsat: 0.2, imax: n('imax', 1), vmax: n('vmax', 40), pmax: n('pmax', 0.6) }; break;
+    case 'FET': m = { pol: d.pol ?? pol, vth: n('vth', 2), rdson: n('rdson', 0.05), vfull: Math.max(n('vfull', 10), n('vth', 2) + 0.5), imax: n('imax', 10), vmax: n('vmax', 60), pmax: n('pmax', 1) }; m.logic = m.vfull <= 5; break;
+    case 'DIODE': m = { vf: n('vf', 0.7), rs: 0.05, imax: n('imax', 1), piv: n('piv', 100) }; break;
+    case 'ZENER': m = { vz: n('vz', 5.1), pmax: n('pmax', 0.5) }; break;
+    case 'LED': m = { vf: n('vf', 2), rs: 12, imax: n('imax', 0.02), hex: (LED_COLORS[d.glow] ?? LED_COLORS.red).hex, glow: d.glow ?? 'red' }; break;
+    case 'AMP': m = { dh: n('dh', 1.5), dl: n('dl', 1.5), a: n('a', 1e5), iq: n('iq', 0.002), vmax: n('vmax', 36), iout: n('iout', 0.03) }; break;
+    case 'REG': { const adj = !!+d.adj; m = { vout: n('vout', adj ? 1.25 : 5), drop: n('drop', 2), ilim: n('ilim', 1.5), vinmax: n('vinmax', 35), adj }; if (adj) { m.iq = 0; m.iadj = n('iq', 50e-6); } else m.iq = n('iq', 0.005); break; }
+    case 'RELAY': m = { vcoil: n('vcoil', 12), rcoil: Math.max(1, n('rcoil', 400)), l: n('l', 0.1) }; break;
+  }
+  m.custom = true; m.raw = { ...d }; m.note = '★ your part';
+  libOf(kind)[name] = m;
+  return m;
+}
+export function unregisterCustom(kind, name) { const L = libOf(kind); if (L[name]?.custom) delete L[name]; }
+export const zenerOf = (pr) => ZENER_PARTS[pr.model] ?? pr;          // {vz, pmax}
+export const relayOf = (pr) => (RELAYS[pr.relay]?.custom ? RELAYS[pr.relay] : pr);   // {vcoil, rcoil, l}
+export const isBuiltIn = (kind, name) => !!libOf(kind)[name] && !libOf(kind)[name].custom;
+export const getCustom = (kind, name) => (libOf(kind)[name]?.custom ? libOf(kind)[name] : null);
+// which part on the circuit uses which custom model (saved with the project so it opens on another phone)
+export function partModelKey(p) { return p.type === 'LED' ? p.props.color : p.type === 'RELAY' ? p.props.relay : p.props.model; }
+export function usedCustom(c) {
+  const lib = {};
+  for (const p of c.parts) {
+    const kind = kindOfType(p.type), nm = kind && partModelKey(p), m = nm && getCustom(kind, nm);
+    if (m) (lib[kind] ??= {})[nm] = { ...m.raw, pol: m.pol };
+  }
+  return lib;
+}
+
 // pins: local coords; first pin is "a" (+ / anode / start), second "b"
 export const TYPES = {
   R: { label: 'Resistor', prefix: 'R', pins: [[-2, 0], [2, 0]], box: [-2, -0.7, 2, 0.7], props: { r: 1000, rating: 0.25 } },
@@ -30,12 +129,20 @@ export const TYPES = {
   SIG: { label: 'Signal generator', prefix: 'G', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: { wave: 'sine', f: 50, amp: 5, off: 0, duty: 50 } },
   SCOPE: { label: 'Oscilloscope probes', prefix: 'SC', pins: [[-3, -1], [-3, 1], [0, 2]], box: [-3, -1.8, 2.2, 2], props: {} },
   OPTO: { label: 'Optocoupler PC817', prefix: 'U', pins: [[-2, -1], [-2, 1], [2, -1], [2, 1]], box: [-2, -1.9, 2, 1.9], props: { ctr: 100 } },
+  ZD: { label: 'Zener diode', prefix: 'ZD', pins: [[-2, 0], [2, 0]], box: [-2, -0.8, 2, 0.8], props: { vz: 5.1, pmax: 0.5 } },
+  NPN: { label: 'NPN transistor', prefix: 'Q', pins: [[-2, 0], [1, -2], [1, 2]], box: [-2, -2, 1.6, 2], props: { model: '2N2222' } },
+  PNP: { label: 'PNP transistor', prefix: 'Q', pins: [[-2, 0], [1, 2], [1, -2]], box: [-2, -2, 1.6, 2], props: { model: '2N2907' } },
+  NMOS: { label: 'N-channel MOSFET', prefix: 'Q', pins: [[-2, 0], [1, -2], [1, 2]], box: [-2, -2, 1.8, 2], props: { model: 'IRLZ44N' } },
+  PMOS: { label: 'P-channel MOSFET', prefix: 'Q', pins: [[-2, 0], [1, 2], [1, -2]], box: [-2, -2, 1.8, 2], props: { model: 'AO3401' } },
+  OPAMP: { label: 'Op-amp', prefix: 'U', pins: [[-3, 1], [-3, -1], [3, 0], [0, -2], [0, 2]], box: [-3, -2, 3, 2], props: { model: 'LM358' } },
+  REG: { label: 'Voltage regulator', prefix: 'U', pins: [[-3, 0], [3, 0], [0, 2]], box: [-3, -1.2, 3, 2], props: { model: '7805' } },
+  RELAY: { label: 'Relay (coil + changeover)', prefix: 'K', pins: [[-3, -2], [-3, 2], [0, 2], [0, -2], [2, -2]], box: [-3.7, -2.4, 2.4, 2.4], props: { vcoil: 5, rcoil: 70, l: 0.02 } },
   GND: { label: 'Ground', prefix: 'GND', pins: [[0, 0]], box: [-0.8, 0, 0.8, 1.6], props: {} },
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
-export const DYNAMIC = new Set(['C', 'L', 'SIG', 'SCOPE']);
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const DYNAMIC = new Set(['C', 'L', 'SIG', 'SCOPE', 'RELAY']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type));
 
 // signal generator value at time t
@@ -104,6 +211,10 @@ export function junctions(c) {
   return [...count.entries()].filter(([, n]) => n >= 3).map(([k]) => k.split(',').map(Number));
 }
 
+// MOSFET: on-resistance falls as the gate voltage rises; saturation current k·(Vgs − Vth)²
+export const fetRds = (m, vc) => m.rdson * Math.max(0.7, (m.vfull - m.vth) / Math.max(1e-3, vc - m.vth));
+export const fetK = (m) => 3 * m.imax / (m.vfull - m.vth) ** 2;
+
 // ---------- solver ----------
 // sim = null → DC (capacitors open, inductors shorted). sim = { t, dt, state } → one time step (backward Euler).
 export function solveCircuit(c, sim = null) {
@@ -133,7 +244,7 @@ export function solveCircuit(c, sim = null) {
     if (b) { const [x, y] = pinsOf(b)[1]; gkeys.add(key(x, y)); autoGround = b.name; }
   }
   pieces.forEach((w, k) => R(node(w.x1, w.y1), node(w.x2, w.y2), R_WIRE, null, 'wire' + k));
-  const diodes = [], optos = [];
+  const diodes = [], trans = [], fets = [], zeners = [], amps = [], regs = [], relays = [];
   for (const p of c.parts) {
     if (p.type === 'GND') continue;
     const pins = pinsOf(p).map(([x, y]) => node(x, y));
@@ -172,13 +283,54 @@ export function solveCircuit(c, sim = null) {
       case 'SCOPE': R(pins[0], pins[2], 10e6, p, 'ch1'); R(pins[1], pins[2], 10e6, p, 'ch2'); break;
       case 'OPTO': {
         const prev = st.get(p.id);
-        diodes.push({ p, a: pins[0], b: pins[1], vf: 1.2, rs: 5, on: prev?.on ?? false, n: inner(), opto: true });
-        optos.push({ p, c: pins[2], e: pins[3], state: prev?.ts ?? 'off', ifw: prev?.ifw ?? 0, n: inner() });
+        const d = { p, a: pins[0], b: pins[1], vf: 1.2, rs: 5, on: prev?.on ?? false, n: inner(), role: 'led' };
+        diodes.push(d);
+        trans.push({ p, d, c: pins[2], e: pins[3], gain: pr.ctr / 100, vsat: 0.1, rsat: 4, vbr: Infinity, state: prev?.ts ?? 'off', n: inner() });
+        break;
+      }
+      case 'NPN': case 'PNP': {
+        const npn = p.type === 'NPN', m = BJTS[pr.model] ?? BJTS[npn ? '2N2222' : '2N2907'], prev = st.get(p.id), [B, Cc, E] = pins;
+        const d = { p, a: npn ? B : E, b: npn ? E : B, vf: m.vbe, rs: m.rb, on: prev?.on ?? false, n: inner(), role: 'be' };
+        diodes.push(d);
+        trans.push({ p, d, c: npn ? Cc : E, e: npn ? E : Cc, gain: m.beta, vsat: m.vsat, rsat: m.rsat, vbr: m.vmax * 1.3, state: prev?.ts ?? 'off', n: inner() });
+        break;
+      }
+      case 'NMOS': case 'PMOS': {
+        const nch = p.type === 'NMOS', m = FETS[pr.model] ?? FETS[nch ? 'IRLZ44N' : 'AO3401'], prev = st.get(p.id), [G, Dn, Sn] = pins;
+        diodes.push({ p, a: nch ? Sn : Dn, b: nch ? Dn : Sn, vf: 0.8, rs: 0.02, on: prev?.bon ?? false, n: inner(), role: 'body' });
+        fets.push({ p, m, g: G, s: Sn, hi: nch ? Dn : Sn, lo: nch ? Sn : Dn, sign: nch ? 1 : -1, vc: prev?.vc ?? 0, state: prev?.ts ?? 'off', vbr: m.vmax * 1.3, n: inner() });
+        break;
+      }
+      case 'ZD': {
+        const prev = st.get(p.id);
+        const zm = zenerOf(pr);
+        zeners.push({ p, a, b, vz: Math.max(0.5, zm.vz), rz: 2 + zm.vz, state: prev?.zs ?? 'off', n: inner() });
+        break;
+      }
+      case 'OPAMP': {
+        const m = AMPS[pr.model] ?? AMPS.LM358, prev = st.get(p.id), n = inner();
+        I(pins[3], pins[4], m.iq, p, 'iq');
+        R(n, pins[2], 20, p, 'rout');
+        amps.push({ p, m, ip: pins[0], in: pins[1], out: pins[2], vp: pins[3], vn: pins[4], n, state: prev?.os ?? 'lin' });
+        break;
+      }
+      case 'REG': {
+        const m = REGS[pr.model] ?? REGS['7805'], prev = st.get(p.id), [IN, OUT, REF] = pins;
+        if (m.iq) I(IN, REF, m.iq, p, 'iq');
+        if (m.adj) I(IN, REF, m.iadj, p, 'iadj'); else R(OUT, REF, 100e3, p, 'int');
+        regs.push({ p, m, i: IN, o: OUT, r: REF, state: prev?.rs ?? 'reg' });
+        break;
+      }
+      case 'RELAY': {
+        const prev = st.get(p.id), n = inner(), rm = relayOf(pr);
+        if (sim) { R(pins[0], n, Math.max(rm.l, 1e-9) / sim.dt, p, 'coil'); I(pins[0], n, prev?.i ?? 0, p, 'hist'); } else R(pins[0], n, R_WIRE, p, 'coil');
+        R(n, pins[1], Math.max(rm.rcoil, 1e-3), p, 'rc');
+        relays.push({ p, com: pins[2], nc: pins[3], no: pins[4], on: prev?.on ?? false });
         break;
       }
       case 'LED': case 'D': {
         const m = p.type === 'LED' ? LED_COLORS[pr.color] ?? LED_COLORS.red : DIODES[pr.model] ?? DIODES['1N4007'];
-        diodes.push({ p, a, b, vf: m.vf, rs: m.rs, on: st.get(p.id)?.on ?? false, n: inner() });
+        diodes.push({ p, a, b, vf: m.vf, rs: m.rs, on: st.get(p.id)?.on ?? false, n: inner(), role: 'main' });
         break;
       }
     }
@@ -188,43 +340,116 @@ export function solveCircuit(c, sim = null) {
   if (autoGround) notes.push(`No ground symbol: the − side of ${autoGround} is used as 0 V.`);
 
   let res = null;
-  for (let it = 0; it < 60; it++) {
+  const findEl = (list, owner, role, kind) => list.find(x => x.owner === owner && x.role === role && (!kind || x.kind === kind));
+  for (let it = 0; it < 150; it++) {
     const all = [...els];
     for (const d of diodes) {
-      const role = d.opto ? 'led' : 'main';
-      if (d.on) { all.push({ kind: 'V', a: d.a, b: d.n, val: d.vf, owner: d.p, role }); all.push({ kind: 'R', a: d.n, b: d.b, val: d.rs, owner: d.p, role: 'rs' }); }
-      else all.push({ kind: 'R', a: d.a, b: d.b, val: 1e10, owner: d.p, role });
+      d.was = d.on;
+      if (d.on) { all.push({ kind: 'V', a: d.a, b: d.n, val: d.vf, owner: d.p, role: d.role }); all.push({ kind: 'R', a: d.n, b: d.b, val: d.rs, owner: d.p, role: d.role + 'rs' }); }
+      else all.push({ kind: 'R', a: d.a, b: d.b, val: 1e10, owner: d.p, role: d.role });
     }
-    for (const o of optos) {
-      const ictr = o.ifw * o.p.props.ctr / 100;
-      if (o.state === 'act') all.push({ kind: 'I', a: o.c, b: o.e, val: ictr, owner: o.p, role: 'ce' });
-      else if (o.state === 'sat') { all.push({ kind: 'V', a: o.c, b: o.n, val: 0.1, owner: o.p, role: 'ce' }); all.push({ kind: 'R', a: o.n, b: o.e, val: 4, owner: o.p, role: 'sat' }); }
+    for (const o of trans) {
+      const st2 = o.d.was ? o.state : (o.state === 'brk' ? 'brk' : 'off');
+      if (st2 === 'act') all.push({ kind: 'F', a: o.c, b: o.e, ctrl: findEl(all, o.p, o.d.role, 'V'), val: o.gain, owner: o.p, role: 'ce' });
+      else if (st2 === 'sat') { all.push({ kind: 'V', a: o.c, b: o.n, val: o.vsat, owner: o.p, role: 'ce' }); all.push({ kind: 'R', a: o.n, b: o.e, val: o.rsat, owner: o.p, role: 'sat' }); }
+      else if (st2 === 'brk') { all.push({ kind: 'V', a: o.c, b: o.n, val: o.vbr, owner: o.p, role: 'ce' }); all.push({ kind: 'R', a: o.n, b: o.e, val: 2, owner: o.p, role: 'sat' }); }
       else all.push({ kind: 'R', a: o.c, b: o.e, val: R_OPEN, owner: o.p, role: 'ce' });
+    }
+    for (const f of fets) {
+      const m = f.m;
+      if (f.state === 'ohm') all.push({ kind: 'R', a: f.hi, b: f.lo, val: fetRds(m, f.vc), owner: f.p, role: 'ch' });
+      else if (f.state === 'sat') {
+        const k = fetK(m), ov = Math.max(0, f.vc - m.vth), gm = 2 * k * ov, id0 = k * ov * ov;
+        all.push({ kind: 'G', a: f.hi, b: f.lo, gp: f.g, gn: f.s, gain: gm * f.sign, val: id0 - gm * f.vc, owner: f.p, role: 'ch' });
+      } else if (f.state === 'brk') { all.push({ kind: 'V', a: f.hi, b: f.n, val: f.vbr, owner: f.p, role: 'ch' }); all.push({ kind: 'R', a: f.n, b: f.lo, val: 2, owner: f.p, role: 'brkr' }); }
+      else all.push({ kind: 'R', a: f.hi, b: f.lo, val: R_OPEN, owner: f.p, role: 'ch' });
+    }
+    for (const z of zeners) {
+      if (z.state === 'fwd') { all.push({ kind: 'V', a: z.a, b: z.n, val: 0.7, owner: z.p, role: 'main' }); all.push({ kind: 'R', a: z.n, b: z.b, val: 0.1, owner: z.p, role: 'rs' }); }
+      else if (z.state === 'rev') { all.push({ kind: 'V', a: z.b, b: z.n, val: z.vz, owner: z.p, role: 'main' }); all.push({ kind: 'R', a: z.n, b: z.a, val: z.rz, owner: z.p, role: 'rs' }); }
+      else all.push({ kind: 'R', a: z.a, b: z.b, val: 1e10, owner: z.p, role: 'main' });
+    }
+    for (const o of amps) {
+      if (o.state === 'high') all.push({ kind: 'V', a: o.vp, b: o.n, val: o.m.dh, owner: o.p, role: 'o' });
+      else if (o.state === 'low') all.push({ kind: 'V', a: o.n, b: o.vn, val: o.m.dl, owner: o.p, role: 'o' });
+      else all.push({ kind: 'V', a: o.n, b: 0, val: 0, gp: o.ip, gn: o.in, gain: o.m.a, owner: o.p, role: 'o' });
+    }
+    for (const g of regs) {
+      const m = g.m;
+      if (g.state === 'reg') all.push({ kind: 'V', a: g.o, b: g.r, ca: g.i, cb: g.o, val: m.vout, owner: g.p, role: 'pass' });
+      else if (g.state === 'drop') all.push({ kind: 'V', a: g.i, b: g.o, val: m.drop, owner: g.p, role: 'pass' });
+      else if (g.state === 'lim') all.push({ kind: 'I', a: g.i, b: g.o, val: m.ilim, owner: g.p, role: 'pass' });
+      else all.push({ kind: 'R', a: g.i, b: g.o, val: R_OPEN, owner: g.p, role: 'pass' });
+    }
+    for (const k of relays) {
+      all.push({ kind: 'R', a: k.com, b: k.nc, val: k.on ? R_OPEN : R_WIRE, owner: k.p, role: 'nc' });
+      all.push({ kind: 'R', a: k.com, b: k.no, val: k.on ? R_WIRE : R_OPEN, owner: k.p, role: 'no' });
     }
     res = mna(all, nextNode);
     if (!res) return { ok: false, error: 'Two voltage sources (batteries) are connected directly in parallel or shorted by a wire. Add a resistor.' };
+    const V_ = res.v;
     let changed = false;
     for (const d of diodes) {
-      const vd = res.v[d.a] - res.v[d.b];
-      if (d.on) { const e = res.els.find(x => x.owner === d.p && x.role === (d.opto ? 'led' : 'main')); if (e.i < -1e-12) { d.on = false; changed = true; } }
+      const vd = V_[d.a] - V_[d.b];
+      if (d.on) { const e = findEl(res.els, d.p, d.role); if (e.i < -1e-12) { d.on = false; changed = true; } }
       else if (vd > d.vf + 1e-9) { d.on = true; changed = true; }
     }
-    for (const o of optos) {
-      const d = diodes.find(x => x.p === o.p);
-      const led = res.els.find(x => x.owner === o.p && x.role === 'led');
-      const ifw = d.on ? Math.max(0, led.i) : 0;
-      if (Math.abs(ifw - o.ifw) > 1e-9 + 1e-6 * Math.abs(ifw)) { o.ifw = ifw; changed = true; }
-      const ictr = o.ifw * o.p.props.ctr / 100, vce = res.v[o.c] - res.v[o.e];
-      const ce = res.els.find(x => x.owner === o.p && x.role === 'ce');
+    for (const o of trans) {
+      const ce = findEl(res.els, o.p, 'ce'), vce = V_[o.c] - V_[o.e];
+      const ib = o.d.was ? Math.max(0, findEl(res.els, o.p, o.d.role, 'V').i) : 0;
       let ns = o.state;
-      if (ictr < 1e-9) ns = 'off';
+      if (o.state === 'brk') { if (ce.i < 0) ns = 'off'; }
+      else if (!o.d.was || ib < 1e-12) ns = vce > o.vbr ? 'brk' : 'off';
       else if (o.state === 'off') ns = 'act';
-      else if (o.state === 'act' && vce < 0.1) ns = 'sat';
-      else if (o.state === 'sat' && (ce.i > ictr || ce.i < 0)) ns = ce.i < 0 ? 'off' : 'act';
+      else if (o.state === 'act' && vce < o.vsat) ns = 'sat';
+      else if (o.state === 'sat' && (ce.i > o.gain * ib * (1 + 1e-9) || ce.i < 0)) ns = 'act';
       if (ns !== o.state) { o.state = ns; changed = true; }
     }
+    for (const f of fets) {
+      const vc = f.sign * (V_[f.g] - V_[f.s]), vds = V_[f.hi] - V_[f.lo], m = f.m, ch = findEl(res.els, f.p, 'ch');
+      if (Math.abs(vc - f.vc) > 1e-7 * Math.max(1, Math.abs(vc))) { f.vc = vc; changed = true; }
+      const isat = fetK(m) * Math.max(0, f.vc - m.vth) ** 2;
+      let ns = f.state;
+      if (f.state === 'brk') { if (ch.i < 0) ns = 'off'; }
+      else if (f.vc <= m.vth) ns = vds > f.vbr ? 'brk' : 'off';
+      else if (f.state === 'off') ns = 'ohm';
+      else if (f.state === 'ohm' && ch.i > isat) ns = 'sat';
+      else if (f.state === 'sat' && vds < isat * fetRds(m, f.vc)) ns = 'ohm';
+      if (ns !== f.state) { f.state = ns; changed = true; }
+    }
+    for (const z of zeners) {
+      const vd = V_[z.a] - V_[z.b], e = findEl(res.els, z.p, 'main');
+      let ns = z.state;
+      if (z.state === 'off') { if (vd > 0.7 + 1e-9) ns = 'fwd'; else if (vd < -z.vz - 1e-9) ns = 'rev'; }
+      else if (e.i < -1e-12) ns = 'off';
+      if (ns !== z.state) { z.state = ns; changed = true; }
+    }
+    for (const o of amps) {
+      const hi = V_[o.vp] - o.m.dh, lo = V_[o.vn] + o.m.dl, vo = V_[o.n], want = o.m.a * (V_[o.ip] - V_[o.in]);
+      let ns = o.state;
+      if (hi <= lo) ns = 'low';
+      else if (o.state === 'lin') { if (vo > hi + 1e-9) ns = 'high'; else if (vo < lo - 1e-9) ns = 'low'; }
+      else if (o.state === 'high') { if (want < hi) ns = want < lo ? 'low' : 'lin'; }
+      else if (want > lo) ns = want > hi ? 'high' : 'lin';
+      if (ns !== o.state) { o.state = ns; changed = true; }
+    }
+    for (const g of regs) {
+      const m = g.m, j = findEl(res.els, g.p, 'pass').i, vin = V_[g.i], vo = V_[g.o], vr = V_[g.r];
+      let ns = g.state;
+      if (g.state === 'reg') { if (vin - vo < m.drop - 1e-9) ns = 'drop'; else if (j > m.ilim) ns = 'lim'; else if (j < -1e-6) ns = 'off'; }
+      else if (g.state === 'drop') { if (vo - vr > m.vout + 1e-9) ns = 'reg'; else if (j < -1e-9) ns = 'off'; }
+      else if (g.state === 'lim') { if (vo - vr > m.vout + 1e-9) ns = 'reg'; else if (vin - vo < m.drop - 1e-9) ns = 'drop'; }
+      else if (vo - vr < m.vout - 1e-3 && vin - vo > 1e-3) ns = vin - vo >= m.drop ? 'reg' : 'drop';
+      if (ns !== g.state) { g.state = ns; changed = true; }
+    }
+    // relays only switch once everything else has settled (avoids pull-in from a half-solved step)
+    if (!changed) for (const k of relays) {
+      const rm = relayOf(k.p.props), ic = Math.abs(findEl(res.els, k.p, 'rc').i), inom = rm.vcoil / Math.max(rm.rcoil, 1e-3);
+      const on = k.on ? ic >= 0.3 * inom : ic >= 0.75 * inom;
+      if (on !== k.on) { k.on = on; changed = true; }
+    }
     if (!changed) break;
-    if (it === 59) notes.push('Diodes did not settle; results are approximate.');
+    if (it === 149) notes.push('Some parts did not settle (diodes / transistors / op-amps flip-flopping); results are approximate.');
   }
   // per-part results
   const parts = new Map();
@@ -259,10 +484,53 @@ export function solveCircuit(c, sim = null) {
       continue;
     }
     if (p.type === 'SCOPE') { parts.set(p.id, { ch1: res.v[pins[0]] - res.v[pins[2]], ch2: res.v[pins[1]] - res.v[pins[2]], v: 0, i: 0, p: 0 }); continue; }
-    if (p.type === 'OPTO') {
-      const o = optos.find(x => x.p === p), d = diodes.find(x => x.p === p), led = mine.find(e => e.role === 'led'), ce = mine.find(e => e.role === 'ce');
-      const ifw = d.on ? led.i : 0, ic = ce.i, vce = res.v[pins[2]] - res.v[pins[3]];
-      parts.set(p.id, { va, vb, v: va - vb, i: ifw, ifw, ic, vce, state: o.state, on: d.on, p: (va - vb) * ifw + vce * ic });
+    if (p.type === 'OPTO' || p.type === 'NPN' || p.type === 'PNP') {
+      const o = trans.find(x => x.p === p), d = o.d, inV = d.on ? mine.find(e => e.role === d.role && e.kind === 'V') : null, ce = mine.find(e => e.role === 'ce');
+      const iin = inV ? inV.i : 0, ic = ce.kind === 'F' ? ce.i : ce.i, state = d.on || o.state === 'brk' ? o.state : 'off';
+      if (p.type === 'OPTO') {
+        const vce = res.v[pins[2]] - res.v[pins[3]];
+        parts.set(p.id, { va, vb, v: va - vb, i: iin, ifw: iin, ic, vce, state, on: d.on, p: (va - vb) * iin + vce * ic, dots: [[0, 1, iin], [2, 3, ic]] });
+      } else {
+        const npn = p.type === 'NPN', sg = npn ? 1 : -1, vbe = sg * (res.v[pins[0]] - res.v[pins[2]]), vce = sg * (res.v[pins[1]] - res.v[pins[2]]);   // PNP: Veb, Vec
+        // ib: into the base (NPN) / out of the base (PNP); ic: into collector (NPN) / out of collector (PNP), both shown positive when working normally
+        parts.set(p.id, { va, vb, vbe, vce, ib: iin, ic, ie: iin + ic, state, on: d.on, v: vce, i: ic, p: Math.abs(vbe * iin) + Math.abs(vce * ic),
+          dots: npn ? [[0, 2, iin], [1, 2, ic]] : [[2, 0, iin], [2, 1, ic]] });
+      }
+      continue;
+    }
+    if (p.type === 'NMOS' || p.type === 'PMOS') {
+      const f = fets.find(x => x.p === p), ch = mine.find(e => e.role === 'ch'), body = diodes.find(x => x.p === p), bel = mine.find(e => e.role === 'body');
+      const ich = ch.kind === 'G' ? ch.val + ch.gain * (res.v[ch.gp] - res.v[ch.gn]) : ch.i;
+      const ib = body.on ? bel.i : 0, id = ich - ib;             // channel current (D→S for N, S→D for P), minus body diode
+      const vgs = f.sign * (res.v[pins[0]] - res.v[pins[2]]), vds = f.sign * (res.v[pins[1]] - res.v[pins[2]]);   // PMOS: Vsg, Vsd
+      const rds = f.state === 'ohm' ? fetRds(f.m, f.vc) : null;
+      parts.set(p.id, { va, vb, vgs, vds, id, state: f.state, body: body.on, rds, v: vds, i: id, p: Math.abs((res.v[f.hi] - res.v[f.lo]) * id),
+        dots: p.type === 'NMOS' ? [[1, 2, id]] : [[2, 1, id]] });
+      continue;
+    }
+    if (p.type === 'ZD') {
+      const z = zeners.find(x => x.p === p), e = mine.find(x => x.role === 'main');
+      const iz = z.state === 'fwd' ? e.i : z.state === 'rev' ? -e.i : e.i;
+      parts.set(p.id, { va, vb, v: va - vb, i: iz, p: Math.abs((va - vb) * iz), state: z.state, on: z.state !== 'off' });
+      continue;
+    }
+    if (p.type === 'OPAMP') {
+      const o = amps.find(x => x.p === p), ro = mine.find(e => e.role === 'rout');
+      const vout = res.v[pins[2]], iout = ro.i, vsup = res.v[pins[3]] - res.v[pins[4]];
+      parts.set(p.id, { va, vb, vout, vdiff: va - vb, iout, vsup, state: o.state, v: vout, i: iout, p: o.m.iq * vsup + Math.abs(iout) * (iout > 0 ? res.v[pins[3]] - vout : vout - res.v[pins[4]]), dots: [] });
+      continue;
+    }
+    if (p.type === 'REG') {
+      const g = regs.find(x => x.p === p), e = mine.find(x => x.role === 'pass');
+      const j = e.kind === 'I' ? e.val : e.i, vin = res.v[pins[0]], vout = res.v[pins[1]], vref = res.v[pins[2]], iq = (g.m.iq ?? 0) + (g.m.iadj ?? 0);
+      const gr = g.m.adj ? 0 : vref;
+      parts.set(p.id, { va, vb, vin: vin - gr, vout: vout - gr, vadj: vout - vref, vio: vin - vout, iin: j + iq, iout: j, state: g.state, v: vout - gr, i: j, p: (vin - vout) * j + (vin - vref) * iq, dots: [] });
+      continue;
+    }
+    if (p.type === 'RELAY') {
+      const k = relays.find(x => x.p === p), rc = mine.find(e => e.role === 'rc'), nc = mine.find(e => e.role === 'nc'), no = mine.find(e => e.role === 'no');
+      const ic = rc.i, icon = k.on ? no.i : nc.i;
+      parts.set(p.id, { va, vb, v: va - vb, i: ic, icoil: ic, on: k.on, icon, p: ic * ic * rc.val, dots: [[0, 1, ic], k.on ? [2, 4, no.i] : [2, 3, nc.i]] });
       continue;
     }
     i = main ? main.i : 0;
@@ -282,14 +550,22 @@ export function solveCircuit(c, sim = null) {
     if (p.type === 'C') next.set(p.id, { v: r.v });
     else if (p.type === 'L') next.set(p.id, { i: r.i });
     else if (p.type === 'LED' || p.type === 'D') next.set(p.id, { on: r.on });
-    else if (p.type === 'OPTO') { const o = optos.find(x => x.p === p); next.set(p.id, { on: r.on, ts: o.state, ifw: o.ifw }); }
+    else if (p.type === 'OPTO' || p.type === 'NPN' || p.type === 'PNP') { const o = trans.find(x => x.p === p); next.set(p.id, { on: o.d.on, ts: o.state }); }
+    else if (p.type === 'NMOS' || p.type === 'PMOS') { const f = fets.find(x => x.p === p); next.set(p.id, { ts: f.state, vc: f.vc, bon: diodes.find(x => x.p === p).on }); }
+    else if (p.type === 'ZD') next.set(p.id, { zs: r.state });
+    else if (p.type === 'OPAMP') next.set(p.id, { os: r.state });
+    else if (p.type === 'REG') next.set(p.id, { rs: r.state });
+    else if (p.type === 'RELAY') next.set(p.id, { i: r.icoil, on: r.on });
   }
   return { ok: true, parts, wires, vAt, notes, delivered, nodes: nextNode, next, t: sim?.t ?? 0 };
 }
 
 // Modified Nodal Analysis with a tiny conductance to ground on every node (so open parts never make it unsolvable)
 function mna(els, nNodes) {
+  // R: resistor · I: current a→b · V: v(a) − v(b) − gain·(v(gp) − v(gn)) = val, its current flows ca→cb (default a→b)
+  // F: current val × (current of V element ctrl), a→b · G: current val + gain·(v(gp) − v(gn)), a→b
   const vs = els.filter(e => e.kind === 'V');
+  const vIdx = new Map(vs.map((e, k) => [e, k]));
   const N = nNodes - 1, M = N + vs.length;
   const A = Array.from({ length: M }, () => new Float64Array(M)), z = new Float64Array(M);
   const r = n => n - 1;
@@ -301,11 +577,20 @@ function mna(els, nNodes) {
       if (ia >= 0) A[ia][ia] += g; if (ib >= 0) A[ib][ib] += g;
       if (ia >= 0 && ib >= 0) { A[ia][ib] -= g; A[ib][ia] -= g; }
     } else if (e.kind === 'I') { if (ia >= 0) z[ia] -= e.val; if (ib >= 0) z[ib] += e.val; }
+    else if (e.kind === 'G') {
+      const ip = r(e.gp), im = r(e.gn);
+      for (const [row, sg] of [[ia, 1], [ib, -1]]) { if (row < 0) continue; if (ip >= 0) A[row][ip] += sg * e.gain; if (im >= 0) A[row][im] -= sg * e.gain; }
+      if (ia >= 0) z[ia] -= e.val; if (ib >= 0) z[ib] += e.val;
+    } else if (e.kind === 'F') {
+      const col = N + vIdx.get(e.ctrl);
+      if (ia >= 0) A[ia][col] += e.val; if (ib >= 0) A[ib][col] -= e.val;
+    }
   }
   vs.forEach((e, k) => {
-    const c = N + k, ia = r(e.a), ib = r(e.b);
-    if (ia >= 0) { A[ia][c] += 1; A[c][ia] += 1; }
-    if (ib >= 0) { A[ib][c] -= 1; A[c][ib] -= 1; }
+    const c = N + k, ia = r(e.a), ib = r(e.b), ca = r(e.ca ?? e.a), cb = r(e.cb ?? e.b);
+    if (ca >= 0) A[ca][c] += 1; if (cb >= 0) A[cb][c] -= 1;
+    if (ia >= 0) A[c][ia] += 1; if (ib >= 0) A[c][ib] -= 1;
+    if (e.gain) { const ip = r(e.gp), im = r(e.gn); if (ip >= 0) A[c][ip] -= e.gain; if (im >= 0) A[c][im] += e.gain; }
     z[c] = e.val;
   });
   const x = gauss(A, z);
@@ -315,7 +600,9 @@ function mna(els, nNodes) {
     let i;
     if (e.kind === 'R') i = (v[e.a] - v[e.b]) / e.val;
     else if (e.kind === 'I') i = e.val;
-    else i = x[N + vs.indexOf(e)];
+    else if (e.kind === 'V') i = x[N + vIdx.get(e)];
+    else if (e.kind === 'F') i = e.val * x[N + vIdx.get(e.ctrl)];
+    else i = e.val + e.gain * (v[e.gp] - v[e.gn]);
     return { ...e, i };
   });
   return { v, els: out };
@@ -430,6 +717,74 @@ export function example(name) {
     W(27, 5, 26, 5); W(26, 5, 26, -1); W(26, -1, 0, -1); W(0, -1, 0, 2);
     W(27, 7, 24, 7); W(24, 7, 24, 2); W(24, 2, 12, 2);
     W(30, 8, 30, 10); W(30, 10, 22, 10);
+  } else if (name === 'relay') {
+    // ESP32 pin (3.3 V) → 1 kΩ → 2N2222 switches a 12 V relay coil. The relay contact turns on a 12 V lamp. 1N4148 catches the coil spike.
+    const e = addPart(c, 'BAT', -6, 8, 1); e.name = 'ESP32'; e.props.v = 3.3;
+    const sw = addPart(c, 'SW', 4, 6); sw.name = 'GPIO'; sw.props.on = true;
+    addPart(c, 'R', 10, 6).props.r = 1000;
+    addPart(c, 'NPN', 14, 6).props.model = '2N2222';
+    const k = addPart(c, 'RELAY', 18, 0); Object.assign(k.props, { vcoil: 12, rcoil: 400, l: 0.12 });
+    addPart(c, 'D', 10, 0, 3).props.model = '1N4148';
+    const lp = addPart(c, 'LAMP', 18, 6, 1); Object.assign(lp.props, { vr: 12, wr: 5 });
+    const b = addPart(c, 'BAT', 26, 4, 1); b.props.v = 12;
+    addPart(c, 'GND', -6, 12);
+    W(-6, 6, 2, 6); W(6, 6, 8, 6); W(15, 8, 15, 12); W(15, 2, 15, 4);
+    W(10, -2, 15, -2); W(10, 2, 15, 2); W(15, -2, 15, -4); W(15, -4, 26, -4); W(26, -4, 26, 2); W(20, -2, 20, -4);
+    W(18, 2, 18, 4); W(18, 8, 18, 12); W(-6, 10, -6, 12); W(-6, 12, 26, 12); W(26, 6, 26, 12);
+  } else if (name === 'mosfet') {
+    // ESP32 PWM (3.3 V) drives an IRLZ44N that switches a 12 V solenoid. 10 kΩ keeps the gate off at boot, diode eats the spike.
+    const b = addPart(c, 'BAT', -4, 4, 1); b.props.v = 12;
+    const g = addPart(c, 'SIG', 0, 10, 1); g.name = 'ESP32'; Object.assign(g.props, { wave: 'pwm', f: 50, amp: 3.3, off: 0, duty: 50 });
+    addPart(c, 'R', 4, 6).props.r = 100;
+    addPart(c, 'R', 9, 8, 1).props.r = 10000;
+    addPart(c, 'NMOS', 16, 6).props.model = 'IRLZ44N';
+    const l = addPart(c, 'L', 17, 0, 1); l.name = 'SOLENOID'; Object.assign(l.props, { l: 0.05, r: 24 });
+    addPart(c, 'D', 26, 0, 3).props.model = '1N5819';
+    addPart(c, 'SCOPE', 35, 4);
+    addPart(c, 'GND', -4, 12); addPart(c, 'GND', 35, 6);
+    W(-4, 2, -4, -4); W(-4, -4, 26, -4); W(-4, 6, -4, 12); W(-4, 12, 17, 12);
+    W(0, 8, 0, 6); W(0, 6, 2, 6); W(6, 6, 14, 6); W(9, 10, 9, 12); W(17, 8, 17, 12);
+    W(17, -2, 17, -4); W(17, 2, 17, 4); W(17, 2, 26, 2); W(26, -2, 26, -4);
+    W(11, 6, 11, -6); W(11, -6, 32, -6); W(32, -6, 32, 3);
+    W(17, 3, 29, 3); W(29, 3, 29, 5); W(29, 5, 32, 5);
+  } else if (name === 'reg7805') {
+    // 12 V → 7805 → 5 V. The 7 V difference turns into heat in the regulator.
+    const b = addPart(c, 'BAT', 0, 4, 1); b.props.v = 12;
+    addPart(c, 'REG', 6, 2).props.model = '7805';
+    const r = addPart(c, 'R', 12, 4, 1); r.name = 'LOAD'; r.props.r = 20; r.props.rating = 2;
+    addPart(c, 'VM', 19, 4, 1);
+    addPart(c, 'GND', 0, 8);
+    W(0, 2, 3, 2); W(6, 4, 6, 8); W(9, 2, 12, 2); W(12, 6, 12, 8); W(12, 2, 19, 2); W(19, 6, 19, 8); W(0, 6, 0, 8); W(0, 8, 19, 8);
+  } else if (name === 'lm317') {
+    // LM317: Vout = 1.25 × (1 + R2 ÷ R1) = 1.25 × (1 + 720 ÷ 240) = 5 V. Change R2 to set the voltage.
+    const b = addPart(c, 'BAT', 0, 4, 1); b.props.v = 12;
+    addPart(c, 'REG', 6, 2).props.model = 'LM317';
+    addPart(c, 'R', 11, 4, 1).props.r = 240;
+    addPart(c, 'R', 6, 8, 1).props.r = 720;
+    const r = addPart(c, 'R', 17, 4, 1); r.name = 'LOAD'; r.props.r = 100; r.props.rating = 1;
+    addPart(c, 'VM', 23, 4, 1);
+    addPart(c, 'GND', 0, 12);
+    W(0, 2, 3, 2); W(9, 2, 11, 2); W(6, 4, 6, 6); W(6, 6, 11, 6); W(6, 10, 6, 12); W(11, 2, 17, 2); W(17, 6, 17, 12); W(17, 2, 23, 2); W(23, 6, 23, 12);
+    W(0, 6, 0, 12); W(0, 12, 23, 12);
+  } else if (name === 'zener') {
+    // 12 V → 1 kΩ → 5.1 V zener: the zener holds 5.1 V and the resistor takes the rest.
+    const b = addPart(c, 'BAT', 0, 4, 1); b.props.v = 12;
+    addPart(c, 'R', 4, 0).props.r = 1000;
+    addPart(c, 'ZD', 8, 3, 3).props.vz = 5.1;
+    addPart(c, 'VM', 14, 3, 1);
+    addPart(c, 'GND', 0, 6);
+    W(0, 2, 0, 0); W(0, 0, 2, 0); W(6, 0, 8, 0); W(8, 0, 8, 1); W(8, 0, 14, 0); W(14, 0, 14, 1); W(8, 5, 8, 6); W(14, 5, 14, 6); W(0, 6, 14, 6);
+  } else if (name === 'comparator') {
+    // op-amp as a comparator: triangle wave vs the pot voltage → PWM out. Turn the pot to change the duty.
+    const g = addPart(c, 'SIG', -4, 9, 1); Object.assign(g.props, { wave: 'triangle', f: 100, amp: 2.5, off: 2.5 });
+    addPart(c, 'OPAMP', 10, 6).props.model = 'MCP6002';
+    const pot = addPart(c, 'POT', 4, 1, 1); pot.props.pos = 70;
+    const b = addPart(c, 'BAT', 18, -1, 1); b.props.v = 5;
+    addPart(c, 'SCOPE', 19, 8);
+    for (const [x, y] of [[-4, 11], [4, 3], [10, 8], [18, 1], [19, 10]]) addPart(c, 'GND', x, y);
+    W(-4, 7, 7, 7); W(6, 1, 6, 5); W(6, 5, 7, 5); W(4, -1, 4, -3); W(4, -3, 18, -3); W(10, 4, 10, -3);
+    W(13, 6, 15, 6); W(15, 6, 15, 7); W(15, 7, 16, 7);
+    W(6, 7, 6, 11); W(6, 11, 16, 11); W(16, 11, 16, 9);
   } else if (name === 'bridge') {
     const b = addPart(c, 'BAT', 0, 8, 1); b.props.v = 10;
     addPart(c, 'R', 6, 4, 1).props.r = 1000;   // R1 top-left

@@ -194,7 +194,18 @@ svg text { fill: var(--dim); font: 11px var(--mono); }
 .scope-cv { width: 100%; height: 210px; border-radius: 8px; display: block; }
 .scope-ctl { display: flex; gap: 6px; flex-wrap: wrap; }
 .scope-ctl .sel.sm { padding: 7px 6px; font-size: 13px; }
-/* PC / mouse: no swiping, so tray and tools wrap onto more rows instead of scrolling */
-@media (pointer: fine), (min-width: 900px) {
-  .sch-tools, .sch-tray { flex-wrap: wrap; overflow: visible; }
+/* always ONE row that scrolls sideways (swipe on phone; wheel / drag / thin scrollbar on PC) */
+.sch-tools, .sch-tray { flex-wrap: nowrap; overscroll-behavior-x: contain; }
+@media (pointer: fine) {
+  .sch-tools, .sch-tray { scrollbar-width: thin; scrollbar-color: var(--line2) transparent; padding-bottom: 6px; }
+  .sch-tools::-webkit-scrollbar, .sch-tray::-webkit-scrollbar { display: block; height: 6px; }
+  .sch-tools::-webkit-scrollbar-thumb, .sch-tray::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 3px; }
+  .sch-tray { cursor: grab; }
 }
+/* my parts (custom parts form) */
+.mp-row { display: flex; flex-direction: column; gap: 6px; }
+.mp-row > .btn { align-self: flex-start; }
+.mp-form { display: flex; flex-direction: column; gap: 10px; max-height: 62vh; overflow-y: auto; }
+.mp-form .lab { white-space: normal; }
+.mp-btns { gap: 8px; }
+.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); margin-right: auto; }
