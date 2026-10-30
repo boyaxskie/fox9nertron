@@ -22,6 +22,9 @@ export const FOOTPRINTS = {
   AX300: { label: 'Axial 7.62 mm (300 mil)', n: 2, make: (o) => ({ pads: square1([th(-3.81, 0, 0, 1.8, o.drill ?? 0.8), th(3.81, 0, 1, 1.8, o.drill ?? 0.8)]), body: [box(-2.2, -1, 2.2, 1)] }) },
   AX400: { label: 'Axial 10.16 mm (400 mil)', n: 2, make: (o) => ({ pads: square1([th(-5.08, 0, 0, 1.8, o.drill ?? 0.8), th(5.08, 0, 1, 1.8, o.drill ?? 0.8)]), body: [box(-3.2, -1.2, 3.2, 1.2)] }) },
   AX500: { label: 'Axial 12.7 mm (500 mil)', n: 2, make: (o) => ({ pads: square1([th(-6.35, 0, 0, 2, o.drill ?? 1)]).concat([th(6.35, 0, 1, 2, o.drill ?? 1)]), body: [box(-4.2, -1.6, 4.2, 1.6)] }) },
+  // standing (upright) resistor / diode: body sits on hole 1, the other leg bends down next to it
+  UP254: { label: 'Upright (standing) 2.54 mm', n: 2, make: (o) => ({ pads: square1([th(-1.27, 0, 0, 1.6, o.drill ?? 0.8), th(1.27, 0, 1, 1.6, o.drill ?? 0.8)]), body: [circ(1.35, -1.27, 0), [[-1.27, -1.35], [1.27, -1.35], [1.27, -0.8]]] }) },
+  UP508: { label: 'Upright (standing) 5.08 mm', n: 2, make: (o) => ({ pads: square1([th(-2.54, 0, 0, 1.8, o.drill ?? 0.8), th(2.54, 0, 1, 1.8, o.drill ?? 0.8)]), body: [circ(1.5, -2.54, 0), [[-2.54, -1.5], [2.54, -1.5], [2.54, -0.9]]] }) },
   RAD25: { label: 'Radial 2.54 mm (small cap)', n: 2, make: () => ({ pads: square1([th(-1.27, 0, 0, 1.6, 0.8), th(1.27, 0, 1, 1.6, 0.8)]), body: [circ(2.6)] }) },
   RAD50: { label: 'Radial 5.08 mm (big cap)', n: 2, make: () => ({ pads: square1([th(-2.54, 0, 0, 1.8, 0.9), th(2.54, 0, 1, 1.8, 0.9)]), body: [circ(5)] }) },
   LED5: { label: 'LED 5 mm', n: 2, make: () => ({ pads: square1([th(-1.27, 0, 0, 1.6, 0.8), th(1.27, 0, 1, 1.6, 0.8)]), body: [circ(2.7).slice(3, 26)] }) },
@@ -46,6 +49,9 @@ export const FOOTPRINTS = {
   // SRD-05VDC-SL-C style relay (check against your relay's datasheet)
   SRD: { label: 'Relay SRD (Songle) 5-pin', n: 5, make: () => ({ pads: [th(-6, -2, 0, 2.2, 1.2), th(-6, 10, 1, 2.2, 1.2), th(-8, 4, 2, 2.4, 1.3), th(6.2, -2, 3, 2.4, 1.3), th(6.2, 10, 4, 2.4, 1.3)], body: [box(-9.8, -4.3, 9.2, 11.2)] }) },
 };
+// lead spacings (mm) you can choose for 2-leg parts (bent legs)
+const AXS = [7.62, 10.16, 12.7, 15.24, 17.78, 20.32, 22.86, 25.4], RADS = [2.54, 5.08, 7.62, 10.16];
+export const SPACINGS = { AX300: AXS, AX400: AXS, AX500: AXS, RAD25: RADS, RAD50: RADS, LED5: RADS };
 const PCB_SKIP = new Set(['GND', 'VM', 'SCOPE', 'AM']);
 export const onBoard = (p) => !PCB_SKIP.has(p.type);
 export function fpChoices(p) {
@@ -58,7 +64,7 @@ export function fpChoices(p) {
   if (p.type === 'POT') return ['POT3', 'HDR3'];
   if (p.type === 'SPDT') return ['HDR3'];
   if (n === 3) return ['TO92', 'TO220', 'SOT23', 'SOT223'].filter(k => p.type !== 'REG' || k !== 'TO92');
-  return ['AX300', 'AX400', 'AX500', 'RAD25', 'RAD50', 'LED5', 'TERM2', 'HDR2'];
+  return ['AX300', 'AX400', 'AX500', 'UP254', 'UP508', 'RAD25', 'RAD50', 'LED5', 'TERM2', 'HDR2'];
 }
 export function defaultFp(p) {
   const q = p.props, m = q.model ?? '';
@@ -87,7 +93,11 @@ export function footprintOf(p, bp = {}) {
   let order = [0, 1, 2];
   if (F.ordered && letters) { const s = (bp.order && ORDERS[p.type].includes(bp.order)) ? bp.order : (d.order ?? ORDERS[p.type][0]); order = [...s].map(ch => letters[ch]); }
   const made = F.make({ order, drill: bp.drill ?? d.drill, map: d.map });
-  return { key: fpKey, ...made, orderStr: F.ordered && letters ? [...order].map(i => Object.keys(letters).find(k => letters[k] === i)).join('') : null };
+  // lead spacing (hole to hole) set by hand: bend the legs wider so traces fit underneath
+  const sp = SPACINGS[fpKey], nat = made.pads.length === 2 ? Math.abs(made.pads[1].x - made.pads[0].x) : 0;
+  let pitch = nat;
+  if (sp && bp.pitch && sp.includes(bp.pitch)) { pitch = bp.pitch; made.pads[0].x = -pitch / 2; made.pads[1].x = pitch / 2; }
+  return { key: fpKey, ...made, pitch: sp ? Math.round(pitch * 100) / 100 : null, orderStr: F.ordered && letters ? [...order].map(i => Object.keys(letters).find(k => letters[k] === i)).join('') : null };
 }
 // pad name shown on the board
 export function pinLabel(p, i) {
