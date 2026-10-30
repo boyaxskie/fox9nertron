@@ -209,3 +209,17 @@ svg text { fill: var(--dim); font: 11px var(--mono); }
 .mp-form .lab { white-space: normal; }
 .mp-btns { gap: 8px; }
 .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); margin-right: auto; }
+/* PCB view */
+.pcb-box { display: flex; flex-direction: column; gap: 8px; }
+.pcb-box[hidden] { display: none !important; }
+.pcb-wrap { background: #0F1317; touch-action: none; }
+.pcb-routebar { display: flex; gap: 6px; flex-wrap: wrap; }
+.pcb-pins { display: flex; flex-wrap: wrap; gap: 6px; }
+.pcb-pins .pin { background: var(--bg); border: 1px solid var(--line2); border-radius: 6px; padding: 4px 8px; font: 12.5px ui-monospace, monospace; color: var(--dim); }
+.pcb-sec { border-top: 1px solid var(--line); padding-top: 8px; }
+.pcb-sec > summary { cursor: pointer; font-weight: 700; padding: 4px 0; }
+.pcb-sec .sub { font-weight: 700; color: var(--accent); margin: 10px 0 4px; font-size: 13.5px; }
+.pcb-sec .fields { margin: 6px 0; }
+.pcb-wrap canvas { touch-action: none; }
+.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
+.sb.pcbbtn { color: #D9894A; border-color: color-mix(in srgb, #D9894A 50%, var(--line)); }

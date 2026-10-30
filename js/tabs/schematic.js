@@ -3,6 +3,7 @@ import { el, store, card, note } from '../ui.js';
 import { si, plain, parse, pct, nearest, E12 } from '../num.js';
 import * as S from '../sch-core.js';
 import { wattName } from './basic.js';
+import { pcbView } from './pcb.js';
 
 const C = {
   bg: '#0F1317', dot: '#252D36', wire: '#8A97A6', part: '#E4E9EF', sel: '#4FC3F7', pin: '#FFC857', text: '#C9D3DD', dim: '#7E8A97',
@@ -69,7 +70,7 @@ export function schematicTab(root) {
     runBtn, modeBtns.select, modeBtns.wire, modeBtns.delete,
     btn('↻', () => rotateSel(), 'icon'), btn('↶', () => undo(), 'icon'), btn('↷', () => redo(), 'icon'),
     btn('Fit', () => { fit(); draw(); }), voltsBtn, dotsBtn,
-    btn('Projects', () => projects()), btn('Examples', () => examples()));
+    btn('Projects', () => projects()), btn('Examples', () => examples()), btn('🟫 PCB', () => setView('pcb'), 'pcbbtn'));
   const tray = el('div', { class: 'sch-tray' });
   for (const t of S.PALETTE) {
     const cv = el('canvas', { width: 96, height: 56, class: 'ico' });
@@ -113,6 +114,16 @@ export function schematicTab(root) {
     scv, el('div', { class: 'scope-ctl' }, pauseBtn, resetBtn, autoBtn, tSel, spSel, v1Sel, v2Sel));
   scopeBox.hidden = true;
   root.append(top, tray, wrap, status, scopeBox, panel);
+  // ---------- PCB view (same circuit, board layout + G-code) ----------
+  let view2 = 'sch';
+  const pcb = pcbView({ getC: () => c, commit: (push = true) => commit(push), undo: () => undo(), redo: () => redo(), say: (t) => say(t), shareFile: (n, t, m) => shareFile(n, t, m), toSchematic: () => setView('sch') });
+  root.append(pcb.el);
+  function setView(v) {
+    view2 = v; store.set('sch.view', v);
+    for (const e of [top, tray, wrap, status, panel]) e.hidden = v === 'pcb';
+    if (v === 'pcb') { scopeBox.hidden = true; pcb.show(); } else { pcb.hide(); resize(); commit(false); }
+    scrollTo({ top: 0 });
+  }
   function autoTimeQuiet() { const g = c.parts.find(p => p.type === 'SIG'); if (g) { const want = 2.5 / g.props.f / 10; sim.tdiv = TDIVS.find(t => t >= want) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; } else if (c.parts.some(p => p.type === 'L')) { sim.tdiv = 0.005; tSel.value = '0.005'; sim.buf = []; } }
   function autoTime() {
     const g = c.parts.find(p => p.type === 'SIG');
@@ -156,6 +167,7 @@ export function schematicTab(root) {
       if (hist[hi] !== js) { hist.length = hi + 1; hist.push(js); if (hist.length > 80) hist.shift(); hi = hist.length - 1; }
     }
     renderPanel(); draw(); animate();
+    if (view2 === 'pcb') pcb.refresh();
   }
   function undo() { if (hi <= 0) return say('Nothing to undo.'); hi--; c = JSON.parse(hist[hi]); sel = null; commit(false); say('Undone.'); }
   function redo() { if (hi >= hist.length - 1) return say('Nothing to redo.'); hi++; c = JSON.parse(hist[hi]); sel = null; commit(false); say('Redone.'); }
@@ -361,7 +373,7 @@ export function schematicTab(root) {
       tAnim = t;
       if (!root.isConnected || root.hidden || !W) return;
       const tm = timeMode();
-      if (scopeBox.hidden === tm) scopeBox.hidden = !tm;
+      const tm2 = tm && view2 !== 'pcb'; if (scopeBox.hidden === tm2) scopeBox.hidden = !tm2;
       if (tm) {
         if (!sim.paused && !down?.drag) stepSim(Math.max(1, Math.round(SAMPLES / 120 * sim.speed)));
         draw(); drawScope();
@@ -984,7 +996,7 @@ export function schematicTab(root) {
   syncTop(); setMode('select');
   new ResizeObserver(() => resize()).observe(wrap);
   addEventListener('resize', () => resize());
-  requestAnimationFrame(() => { resize(); commit(false); });
+  requestAnimationFrame(() => { resize(); commit(false); if (store.get('sch.view', 'sch') === 'pcb') setView('pcb'); });
 }
 
 // ---------- symbols (local grid units, pin a at left) ----------
