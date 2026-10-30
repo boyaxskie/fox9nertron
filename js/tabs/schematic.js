@@ -1,0 +1,683 @@
+// Schematic editor: place parts, draw wires, see every voltage / current / power live.
+import { el, store, card, note } from '../ui.js';
+import { si, plain, parse, pct, nearest, E12 } from '../num.js';
+import * as S from '../sch-core.js';
+import { wattName } from './basic.js';
+
+const C = {
+  bg: '#0F1317', dot: '#252D36', wire: '#8A97A6', part: '#E4E9EF', sel: '#4FC3F7', pin: '#FFC857', text: '#C9D3DD', dim: '#7E8A97',
+  pos: [61, 220, 132], neg: [255, 107, 107], gnd: [138, 151, 166], cur: '#FFE16B',
+};
+const RATINGS = [0.125, 0.25, 0.5, 1, 2, 3, 5, 10];
+
+export function schematicTab(root) {
+  root.classList.add('sch-pane');
+  // ---------- state ----------
+  let c = load() ?? S.example('led');
+  let sel = null;            // {kind:'part', id} | {kind:'wire', i}
+  let mode = 'select';       // select | wire | delete | place
+  let placeType = null;
+  let wireStart = null, hover = null;
+  let res = null;
+  const view = { ox: 0, oy: 0, g: 22 };
+  const hist = [JSON.stringify(c)]; let hi = 0;
+  let showVolts = store.get('sch.volts', '1') === '1';
+  let showDots = store.get('sch.dots', '1') === '1';
+  let running = store.get('sch.run', '1') === '1';
+  const STOPPED = 'Simulation stopped: no voltages or currents. Tap ▶ Run to start it again.';
+  function solve() { res = running ? S.solveCircuit(c) : { ok: false, stopped: true, error: STOPPED }; }
+
+  // ---------- DOM ----------
+  const btn = (text, on, cls = '') => el('button', { class: 'sb ' + cls, type: 'button', text, onclick: on });
+  const modeBtns = {
+    select: btn('↖ Select', () => setMode('select')),
+    wire: btn('〰 Wire', () => setMode('wire')),
+    delete: btn('🗑 Delete', () => setMode('delete')),
+  };
+  const voltsBtn = btn('', () => { showVolts = !showVolts; store.set('sch.volts', showVolts ? '1' : '0'); syncTop(); draw(); });
+  const dotsBtn = btn('', () => { showDots = !showDots; store.set('sch.dots', showDots ? '1' : '0'); syncTop(); draw(); });
+  const runBtn = btn('', () => { running = !running; store.set('sch.run', running ? '1' : '0'); syncTop(); commit(false); say(running ? 'Simulation running.' : 'Simulation stopped. Edit freely; tap ▶ Run to see the results.'); }, 'run');
+  const top = el('div', { class: 'sch-tools' },
+    runBtn, modeBtns.select, modeBtns.wire, modeBtns.delete,
+    btn('↻', () => rotateSel(), 'icon'), btn('↶', () => undo(), 'icon'), btn('↷', () => redo(), 'icon'),
+    btn('Fit', () => { fit(); draw(); }), voltsBtn, dotsBtn,
+    btn('Projects', () => projects()), btn('Examples', () => examples()));
+  const tray = el('div', { class: 'sch-tray' });
+  for (const t of S.PALETTE) {
+    const cv = el('canvas', { width: 96, height: 56, class: 'ico' });
+    const b = el('button', { class: 'tb', type: 'button', title: S.TYPES[t].label, onclick: () => { placeType = t; setMode('place'); } }, cv, el('span', { text: shortName(t) }));
+    b.dataset.type = t;
+    tray.append(b);
+    requestAnimationFrame(() => drawIcon(cv, t));
+  }
+  const canvas = el('canvas', { class: 'sch-canvas' });
+  const wrap = el('div', { class: 'sch-wrap' }, canvas);
+  const status = el('div', { class: 'sch-status' });
+  const panel = el('div', { class: 'sch-panel' });
+  root.append(top, tray, wrap, status, panel);
+  let ctx = canvas.getContext('2d');
+  let W = 0, H = 0;
+
+  // ---------- helpers ----------
+  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
+  const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
+  const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
+  const part = (id) => c.parts.find(p => p.id === id);
+  const selPart = () => (sel?.kind === 'part' ? part(sel.id) : null);
+
+  function setMode(m) {
+    mode = m; wireStart = null;
+    for (const [k, b] of Object.entries(modeBtns)) b.classList.toggle('on', k === m);
+    for (const b of tray.children) b.classList.toggle('on', m === 'place' && b.dataset.type === placeType);
+    say({
+      select: 'Tap a part to see its readings. Drag to move. Tap a switch to flip it, hold a button to press it.',
+      wire: 'Tap a pin (yellow dot) or grid point to start, tap again to bend / finish. Ends automatically on a pin or wire.',
+      delete: 'Tap a part or a wire to delete it.',
+      place: `Tap the grid to place the ${S.TYPES[placeType]?.label}.`,
+    }[m]);
+    draw();
+  }
+  function say(t) { status.textContent = t; }
+  function syncTop() { runBtn.textContent = running ? '■ Stop' : '▶ Run'; runBtn.classList.toggle('on', running); syncTop2(); }
+  function syncTop2() { voltsBtn.textContent = showVolts ? 'Volts ●' : 'Volts ○'; voltsBtn.classList.toggle('on', showVolts); dotsBtn.textContent = showDots ? 'Flow ●' : 'Flow ○'; dotsBtn.classList.toggle('on', showDots); }
+
+  function commit(push = true) {
+    solve();
+    store.set('sch.cur', JSON.stringify(c));
+    if (push) {
+      const js = JSON.stringify(c);
+      if (hist[hi] !== js) { hist.length = hi + 1; hist.push(js); if (hist.length > 80) hist.shift(); hi = hist.length - 1; }
+    }
+    renderPanel(); draw(); animate();
+  }
+  function undo() { if (hi <= 0) return say('Nothing to undo.'); hi--; c = JSON.parse(hist[hi]); sel = null; commit(false); say('Undone.'); }
+  function redo() { if (hi >= hist.length - 1) return say('Nothing to redo.'); hi++; c = JSON.parse(hist[hi]); sel = null; commit(false); say('Redone.'); }
+
+  // ---------- geometry ----------
+  function partAt(x, y) {
+    for (let k = c.parts.length - 1; k >= 0; k--) {
+      const p = c.parts[k], [bx0, by0, bx1, by1] = S.TYPES[p.type].box;
+      const [lx, ly] = S.rotPt([x - p.x, y - p.y], (4 - p.rot) & 3);
+      if (lx >= bx0 - 0.3 && lx <= bx1 + 0.3 && ly >= by0 - 0.3 && ly <= by1 + 0.3) return p;
+    }
+    return null;
+  }
+  function wireAt(x, y, tol = 0.45) {
+    let best = -1, bd = tol;
+    c.wires.forEach((w, i) => {
+      const dx = w.x2 - w.x1, dy = w.y2 - w.y1, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((x - w.x1) * dx + (y - w.y1) * dy) / l2));
+      const d = Math.hypot(x - (w.x1 + t * dx), y - (w.y1 + t * dy));
+      if (d < bd) { bd = d; best = i; }
+    });
+    return best;
+  }
+  function snapPoint(x, y) {
+    let best = null, bd = 0.7;
+    for (const p of c.parts) for (const [px, py] of S.pinsOf(p)) { const d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = [px, py]; } }
+    return best ?? [Math.round(x), Math.round(y)];
+  }
+  function isConnectPoint(x, y) {
+    const k = S.key(x, y);
+    for (const p of c.parts) for (const q of S.pinsOf(p)) if (S.key(...q) === k) return true;
+    return c.wires.some(w => S.key(w.x1, w.y1) === k || S.key(w.x2, w.y2) === k || wireAt(x, y, 0.01) >= 0);
+  }
+
+  // ---------- drawing ----------
+  function resize() {
+    const dpr = devicePixelRatio || 1;
+    wrap.style.height = Math.round(Math.max(280, Math.min(680, innerHeight * 0.56))) + 'px';
+    const rr = wrap.getBoundingClientRect();
+    const first = !W;
+    W = Math.round(rr.width); H = Math.round(rr.height);
+    canvas.width = W * dpr; canvas.height = H * dpr; canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (first) fit();
+    draw();
+  }
+
+  function fit() {
+    const xs = [], ys = [];
+    for (const p of c.parts) { const [a, b, cc, d] = S.TYPES[p.type].box; for (const q of [[a, b], [cc, d], [a, d], [cc, b]]) { const [x, y] = S.rotPt(q, p.rot); xs.push(p.x + x); ys.push(p.y + y); } }
+    for (const w of c.wires) { xs.push(w.x1, w.x2); ys.push(w.y1, w.y2); }
+    if (!xs.length || !W) { view.g = 22; view.ox = W / 2; view.oy = H / 2; return; }
+    const x0 = Math.min(...xs) - 4, x1 = Math.max(...xs) + 4, y0 = Math.min(...ys) - 2, y1 = Math.max(...ys) + 3;
+    view.g = Math.max(8, Math.min(48, Math.min(W / (x1 - x0), H / (y1 - y0))));
+    view.ox = W / 2 - (x0 + x1) / 2 * view.g; view.oy = H / 2 - (y0 + y1) / 2 * view.g;
+  }
+
+  function vColor(v, alpha = 1) {
+    if (!showVolts || !res?.ok || v == null) return C.wire;
+    let mx = 0; for (const w of res.wires) mx = Math.max(mx, Math.abs(w.va), Math.abs(w.vb));
+    const t = mx > 1e-9 ? Math.max(-1, Math.min(1, v / mx)) : 0;
+    const [r, g, b] = t >= 0 ? C.pos : C.neg, a = Math.abs(t);
+    const mix = (x, y) => Math.round(x * a + y * (1 - a));
+    return `rgba(${mix(r, C.gnd[0])},${mix(g, C.gnd[1])},${mix(b, C.gnd[2])},${alpha})`;
+  }
+
+  let tAnim = 0;
+  function draw() {
+    if (!W) return;
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    // grid dots
+    if (view.g >= 9) {
+      ctx.fillStyle = C.dot;
+      const gx0 = Math.floor(wx(0)), gx1 = Math.ceil(wx(W)), gy0 = Math.floor(wy(0)), gy1 = Math.ceil(wy(H));
+      const step = view.g < 14 ? 2 : 1;
+      for (let x = gx0; x <= gx1; x++) { if (x % step) continue; for (let y = gy0; y <= gy1; y++) { if (y % step) continue; ctx.fillRect(sx(x) - 1, sy(y) - 1, 2, 2); } }
+    }
+    // wires
+    const pieces = res?.ok ? res.wires : S.wirePieces(c).map(w => ({ ...w, va: null, vb: null, i: 0 }));
+    ctx.lineCap = 'round';
+    for (const w of pieces) {
+      ctx.strokeStyle = vColor(w.va != null ? (w.va + w.vb) / 2 : null);
+      const isSel = sel?.kind === 'wire' && sel.i === w.wi;
+      ctx.lineWidth = isSel ? 4.5 : 2.6;
+      if (isSel) ctx.strokeStyle = C.sel;
+      ctx.beginPath(); ctx.moveTo(sx(w.x1), sy(w.y1)); ctx.lineTo(sx(w.x2), sy(w.y2)); ctx.stroke();
+    }
+    // parts
+    for (const p of c.parts) drawPart(p);
+    // junction dots
+    ctx.fillStyle = C.part;
+    for (const [x, y] of S.junctions(c)) { ctx.beginPath(); ctx.arc(sx(x), sy(y), 3.6, 0, 7); ctx.fill(); }
+    // current dots
+    if (showDots && res?.ok) drawDots(pieces);
+    // labels
+    for (const p of c.parts) drawLabel(p);
+    // pins in wire / place mode
+    if (mode === 'wire') {
+      ctx.fillStyle = C.pin;
+      for (const p of c.parts) for (const [x, y] of S.pinsOf(p)) { ctx.beginPath(); ctx.arc(sx(x), sy(y), 4, 0, 7); ctx.fill(); }
+      if (wireStart && hover) {
+        const [x0, y0] = wireStart, [x1, y1] = snapPoint(...hover);
+        ctx.strokeStyle = C.sel; ctx.setLineDash([6, 5]); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(sx(x0), sy(y0)); ctx.lineTo(sx(x1), sy(y0)); ctx.lineTo(sx(x1), sy(y1)); ctx.stroke(); ctx.setLineDash([]);
+      }
+      if (wireStart) { ctx.strokeStyle = C.sel; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(wireStart[0]), sy(wireStart[1]), 7, 0, 7); ctx.stroke(); }
+    }
+    if (mode === 'place' && hover) {
+      const ghost = { id: -1, type: placeType, x: Math.round(hover[0]), y: Math.round(hover[1]), rot: 0, props: S.TYPES[placeType].props, name: '' };
+      ctx.globalAlpha = 0.45; drawPart(ghost); ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawDots(pieces) {
+    const t = tAnim / 1000;
+    const dotsOn = (x1, y1, x2, y2, i) => {
+      if (Math.abs(i) < 1e-7) return;
+      const len = Math.hypot(x2 - x1, y2 - y1) * view.g; if (len < 1) return;
+      const speed = Math.min(140, 18 * Math.max(0.6, Math.log10(Math.abs(i) / 1e-7)));
+      const sp = 16, off = ((t * speed) % sp + sp) % sp;
+      const dir = i > 0 ? 1 : -1;
+      ctx.fillStyle = C.cur;
+      for (let d = off; d < len; d += sp) {
+        const f = dir > 0 ? d / len : 1 - d / len;
+        ctx.beginPath(); ctx.arc(sx(x1 + (x2 - x1) * f), sy(y1 + (y2 - y1) * f), 2.2, 0, 7); ctx.fill();
+      }
+    };
+    for (const w of pieces) dotsOn(w.x1, w.y1, w.x2, w.y2, w.i);
+    for (const p of c.parts) {
+      const r = res.parts.get(p.id); if (!r || p.type === 'GND' || p.type === 'POT' || p.type === 'SPDT' || p.type === 'DPDT') continue;
+      const [[x1, y1], [x2, y2]] = S.pinsOf(p);
+      dotsOn(x1, y1, x2, y2, r.i);
+    }
+  }
+
+  function drawPart(p) {
+    const r = res?.ok ? res.parts.get(p.id) : null;
+    const isSel = sel?.kind === 'part' && sel.id === p.id;
+    ctx.save();
+    ctx.translate(sx(p.x), sy(p.y)); ctx.rotate(p.rot * Math.PI / 2); ctx.scale(view.g, view.g);
+    ctx.lineWidth = 2.2 / view.g; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    if (isSel) {
+      const [a, b, cc, d] = S.TYPES[p.type].box;
+      ctx.fillStyle = 'rgba(79,195,247,0.12)'; ctx.strokeStyle = C.sel; ctx.setLineDash([4 / view.g, 3 / view.g]);
+      ctx.fillRect(a - 0.25, b - 0.25, cc - a + 0.5, d - b + 0.5); ctx.strokeRect(a - 0.25, b - 0.25, cc - a + 0.5, d - b + 0.5); ctx.setLineDash([]);
+    }
+    symbol(ctx, p, r, view.g);
+    ctx.restore();
+  }
+
+  function drawLabel(p) {
+    if (p.type === 'GND') return;
+    const r = res?.ok ? res.parts.get(p.id) : null;
+    const [nx, ny] = S.rotPt([0, 1], p.rot);
+    const vert = p.rot & 1;
+    const dist = Math.max(1.6, S.TYPES[p.type].box[3] + 0.9);
+    const x = sx(p.x + nx * dist), y = sy(p.y + ny * dist);
+    ctx.font = `600 ${Math.max(10, Math.min(13, view.g * 0.55))}px system-ui, sans-serif`;
+    ctx.textAlign = vert ? (nx < 0 ? 'right' : 'left') : 'center'; ctx.textBaseline = 'middle';
+    const val = valueText(p);
+    ctx.fillStyle = C.text;
+    const lines = [p.name + (val ? '  ' + val : '')];
+    if (r && (p.type === 'VM' || p.type === 'AM')) lines.push(p.type === 'VM' ? si(r.v, 'V') : si(r.i, 'A'));
+    if (vert) { ctx.fillText(lines[0], x, y - (lines.length > 1 ? 8 : 0)); if (lines[1]) { ctx.fillStyle = C.cur; ctx.fillText(lines[1], x, y + 9); } }
+    else { ctx.fillText(lines[0], x, y); if (lines[1]) { ctx.fillStyle = C.cur; ctx.font = '700 13px ui-monospace, monospace'; ctx.fillText(lines[1], x, y + 15); } }
+  }
+
+  function valueText(p) {
+    const q = p.props;
+    switch (p.type) {
+      case 'R': return si(q.r, 'Ω', 3);
+      case 'POT': return `${si(q.r, 'Ω', 3)} @${Math.round(q.pos)}%`;
+      case 'BAT': return si(q.v, 'V', 3);
+      case 'ISRC': return si(q.i, 'A', 3);
+      case 'LED': return q.color;
+      case 'D': return q.model;
+      case 'LAMP': return `${si(q.vr, 'V', 3)} ${si(q.wr, 'W', 3)}`;
+      case 'SW': return q.on ? 'ON' : 'OFF';
+      case 'SPDT': case 'DPDT': return q.on ? '▼ down' : '▲ up';
+      case 'PB': return q.on ? 'pressed' : '';
+    }
+    return '';
+  }
+
+  // ---------- animation ----------
+  let raf = 0;
+  function animate() {
+    cancelAnimationFrame(raf);
+    if (!showDots || !res?.ok) return;
+    const loop = (t) => { tAnim = t; if (!root.isConnected || root.hidden) { raf = requestAnimationFrame(loop); return; } draw(); raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
+  }
+
+  // ---------- input ----------
+  const ptrs = new Map();
+  let down = null, pinch = 0;
+  canvas.style.touchAction = 'none';
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture?.(e.pointerId);
+    const [px, py] = pos(e); ptrs.set(e.pointerId, [px, py]);
+    if (ptrs.size === 2) { const v = [...ptrs.values()]; pinch = Math.hypot(v[0][0] - v[1][0], v[0][1] - v[1][1]); down = { pinch: true, last: mid() }; return; }
+    const x = wx(px), y = wy(py);
+    down = { px, py, x, y, moved: false, last: [px, py], drag: null, pan: false };
+    if (mode === 'select') {
+      const p = partAt(x, y);
+      if (p) {
+        down.drag = { p, ox: p.x, oy: p.y, ax: x, ay: y, ends: attachedEnds(p) };
+        if (p.type === 'PB') { p.props.on = true; down.pb = p; commit(false); }
+      } else down.pan = true;
+    } else down.pan = true;
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    const [px, py] = pos(e);
+    if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, [px, py]);
+    if (!down) { if (mode === 'wire' || mode === 'place') { hover = [wx(px), wy(py)]; draw(); } return; }
+    if (down.pinch && ptrs.size >= 2) {
+      const v = [...ptrs.values()], d = Math.hypot(v[0][0] - v[1][0], v[0][1] - v[1][1]), [mx, my] = mid();
+      view.ox += mx - down.last[0]; view.oy += my - down.last[1];
+      if (pinch > 0) zoomAt(d / pinch, mx, my);
+      pinch = d; down.last = [mx, my]; draw(); return;
+    }
+    if (!down.moved && Math.hypot(px - down.px, py - down.py) > 6) down.moved = true;
+    if (!down.moved) return;
+    hover = [wx(px), wy(py)];
+    if (down.drag) {
+      const d = down.drag, nx = Math.round(d.ox + wx(px) - d.ax), ny = Math.round(d.oy + wy(py) - d.ay);
+      if (nx !== d.p.x || ny !== d.p.y) { d.p.x = nx; d.p.y = ny; followPins(d); solve(); renderPanel(); draw(); }
+    } else if (down.pan) { view.ox += px - down.last[0]; view.oy += py - down.last[1]; down.last = [px, py]; draw(); }
+  });
+  const up = (e) => {
+    ptrs.delete(e.pointerId);
+    if (!down) return;
+    if (down.pinch) { if (ptrs.size === 0) down = null; return; }
+    const d = down; down = null;
+    if (d.pb) { d.pb.props.on = false; commit(false); }
+    if (d.drag && d.moved) { commit(); return; }
+    if (!d.moved) tap(d.x, d.y, d);
+  };
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (down?.pb) { down.pb.props.on = false; commit(false); } down = null; });
+  canvas.addEventListener('pointerleave', () => { if (!down && hover) { hover = null; draw(); } });
+  canvas.addEventListener('wheel', (e) => { e.preventDefault(); const [px, py] = pos(e); zoomAt(Math.exp(-e.deltaY * 0.0015), px, py); draw(); }, { passive: false });
+  function pos(e) { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+  function mid() { const v = [...ptrs.values()]; return [(v[0][0] + v[1][0]) / 2, (v[0][1] + v[1][1]) / 2]; }
+  function zoomAt(k, fx, fy) { const ng = Math.max(6, Math.min(80, view.g * k)), kk = ng / view.g; view.ox = fx - (fx - view.ox) * kk; view.oy = fy - (fy - view.oy) * kk; view.g = ng; }
+
+  // wire ends touching a part's pins move with it (rubber band)
+  function attachedEnds(p) {
+    const pins = S.pinsOf(p).map(q => S.key(...q)), out = [];
+    c.wires.forEach((w, i) => {
+      const a = pins.indexOf(S.key(w.x1, w.y1)), b = pins.indexOf(S.key(w.x2, w.y2));
+      if (a >= 0) out.push([i, 1, a]); if (b >= 0) out.push([i, 2, b]);
+    });
+    return out;
+  }
+  function followPins(d) {
+    const pins = S.pinsOf(d.p);
+    for (const [i, end, k] of d.ends) { const w = c.wires[i]; if (!w) continue; w['x' + end] = pins[k][0]; w['y' + end] = pins[k][1]; }
+  }
+
+  function tap(x, y) {
+    if (mode === 'place') {
+      const p = S.addPart(c, placeType, Math.round(x), Math.round(y));
+      sel = { kind: 'part', id: p.id }; hover = null;
+      setMode('select'); commit();
+      say(`${p.name} placed. Drag to move, ↻ to rotate, then wire it with 〰 Wire.`);
+      return;
+    }
+    if (mode === 'delete') {
+      const p = partAt(x, y);
+      if (p) { c.parts = c.parts.filter(q => q !== p); sel = null; commit(); say(`${p.name} deleted.`); return; }
+      const wi = wireAt(x, y);
+      if (wi >= 0) { c.wires.splice(wi, 1); sel = null; commit(); say('Wire deleted.'); return; }
+      say('Nothing here. Tap a part or a wire.'); return;
+    }
+    if (mode === 'wire') {
+      const pt = snapPoint(x, y);
+      if (!wireStart) { wireStart = pt; draw(); say('Now tap where the wire goes. It bends once (L-shape).'); return; }
+      const [x0, y0] = wireStart, [x1, y1] = pt;
+      if (x0 === x1 && y0 === y1) { wireStart = null; draw(); say('Wire finished. Tap a new start point.'); return; }
+      const endsOnSomething = isConnectPoint(x1, y1);
+      if (x0 !== x1) c.wires.push({ x1: x0, y1: y0, x2: x1, y2: y0 });
+      if (y0 !== y1) c.wires.push({ x1: x1, y1: y0, x2: x1, y2: y1 });
+      wireStart = endsOnSomething ? null : pt;
+      commit();
+      say(endsOnSomething ? 'Connected. Tap a new start point, or ↖ Select when done.' : 'Keep going: tap the next point (tap the same point twice to stop).');
+      return;
+    }
+    // select mode
+    const p = partAt(x, y);
+    if (p) {
+      if (p.type === 'SW' || p.type === 'SPDT' || p.type === 'DPDT') { p.props.on = !p.props.on; sel = { kind: 'part', id: p.id }; commit(); say(`${p.name} ${p.props.on ? 'ON (closed)' : 'OFF (open)'}. Tap again to flip.`); return; }
+      sel = { kind: 'part', id: p.id }; renderPanel(); draw(); return;
+    }
+    const wi = wireAt(x, y);
+    if (wi >= 0) { sel = { kind: 'wire', i: wi }; renderPanel(); draw(); return; }
+    sel = null; renderPanel(); draw();
+  }
+
+  function rotateSel() {
+    const p = selPart(); if (!p) return say('Select a part first, then ↻.');
+    const d = { p, ends: attachedEnds(p) };
+    p.rot = (p.rot + 1) & 3; followPins(d); commit();
+  }
+
+  // keyboard (PC)
+  addEventListener('keydown', (e) => {
+    if (root.hidden || !root.isConnected || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName ?? '')) return;
+    const k = e.key.toLowerCase();
+    if (k === 'r') rotateSel();
+    else if (k === 'w') setMode('wire');
+    else if (k === 'escape') { setMode('select'); sel = null; renderPanel(); }
+    else if (k === 'delete' || k === 'backspace') {
+      if (sel?.kind === 'part') { const p = selPart(); c.parts = c.parts.filter(q => q !== p); sel = null; commit(); }
+      else if (sel?.kind === 'wire') { c.wires.splice(sel.i, 1); sel = null; commit(); }
+    } else if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
+  });
+
+  // ---------- properties + readings panel ----------
+  function field(label, value, unit, onSet) {
+    const inp = el('input', { class: 'num', value, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'done' });
+    const apply = () => { const v = parse(inp.value); if (v == null || !(v >= 0)) { inp.classList.add('badv'); return; } inp.classList.remove('badv'); onSet(v); commit(); };
+    inp.addEventListener('change', apply); inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+    return el('label', { class: 'field' }, el('span', { class: 'lab', text: label }), el('span', { class: 'box' }, inp, el('span', { class: 'unit', text: unit })));
+  }
+  function choice(label, value, options, onSet) {
+    const s = el('select', { class: 'sel' }, options.map(([v, t]) => el('option', { value: v, text: t })));
+    s.value = value; s.addEventListener('change', () => { onSet(s.value); commit(); });
+    return el('label', { class: 'field' }, el('span', { class: 'lab', text: label }), s);
+  }
+
+  function renderPanel() {
+    panel.innerHTML = '';
+    if (!res) solve();
+    if (sel?.kind === 'wire') {
+      const w = c.wires[sel.i]; if (!w) { sel = null; return renderPanel(); }
+      const pcs = res.ok ? res.wires.filter(x => x.wi === sel.i) : [];
+      const v = pcs.length ? pcs[0].va : null, i = pcs.length ? Math.max(...pcs.map(x => Math.abs(x.i))) : 0;
+      panel.append(el('div', { class: 'sp-head' }, el('b', { text: 'Wire' }), el('span', { class: 'muted', text: '0 Ω' })),
+        readings([['Voltage to ground', v == null ? '—' : si(v, 'V'), true], ['Current', si(i, 'A'), true]], [], []),
+        el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', text: '🗑 Delete wire', onclick: () => { c.wires.splice(sel.i, 1); sel = null; commit(); } })));
+      return;
+    }
+    const p = selPart();
+    if (!p) return summary();
+    const t = S.TYPES[p.type], q = p.props, r = res.ok ? res.parts.get(p.id) : null;
+    const nameInp = el('input', { class: 'num nm', value: p.name, maxlength: 12 });
+    nameInp.addEventListener('change', () => { p.name = nameInp.value.trim().slice(0, 12) || p.name; commit(); });
+    panel.append(el('div', { class: 'sp-head' }, nameInp, el('span', { class: 'muted', text: t.label }),
+      el('button', { class: 'btn', type: 'button', text: '↻', title: 'Rotate (R)', onclick: rotateSel }),
+      el('button', { class: 'btn', type: 'button', text: '🗑', title: 'Delete', onclick: () => { c.parts = c.parts.filter(x => x !== p); sel = null; commit(); } })));
+    const f = el('div', { class: 'fields' });
+    switch (p.type) {
+      case 'R': f.append(field('Resistance', plain(q.r), 'Ω', v => { q.r = Math.max(v, 1e-6); }), choice('Power rating', String(q.rating), RATINGS.map(x => [String(x), wattName(x)]), v => { q.rating = +v; })); break;
+      case 'POT': {
+        f.append(field('Total resistance', plain(q.r), 'Ω', v => { q.r = Math.max(v, 1); }));
+        const rng = el('input', { type: 'range', min: 0, max: 100, step: 1, value: q.pos, class: 'rng' });
+        const lab = el('span', { class: 'lab', text: `Wiper ${Math.round(q.pos)} %` });
+        rng.addEventListener('input', () => { q.pos = +rng.value; lab.textContent = `Wiper ${q.pos} %`; solve(); draw(); updateReadings(); });
+        rng.addEventListener('change', () => commit());
+        f.append(el('label', { class: 'field' }, lab, rng));
+        break;
+      }
+      case 'BAT': f.append(field('Voltage', plain(q.v), 'V', v => { q.v = v; }), field('Internal resistance', plain(q.rint), 'Ω', v => { q.rint = v; })); break;
+      case 'ISRC': f.append(field('Current', plain(q.i), 'A', v => { q.i = v; })); break;
+      case 'SW': f.append(el('button', { class: 'btn primary', type: 'button', text: q.on ? 'Switch OFF (open)' : 'Switch ON (close)', onclick: () => { q.on = !q.on; commit(); } })); break;
+      case 'SPDT': case 'DPDT': f.append(el('button', { class: 'btn primary', type: 'button', text: q.on ? 'Flip to ▲ up' : 'Flip to ▼ down', onclick: () => { q.on = !q.on; commit(); } })); break;
+      case 'PB': {
+        const b = el('button', { class: 'btn primary hold', type: 'button', text: 'Hold to press' });
+        b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); q.on = true; solve(); draw(); updateReadings(); });
+        const rel = () => { if (!q.on) return; q.on = false; solve(); draw(); updateReadings(); };
+        b.addEventListener('pointerup', rel); b.addEventListener('pointercancel', rel); b.addEventListener('lostpointercapture', rel);
+        f.append(b); break;
+      }
+      case 'LED': f.append(choice('Color', q.color, Object.entries(S.LED_COLORS).map(([k, v]) => [k, `${k} (${v.vf} V)`]), v => { q.color = v; }), field('Max current', plain(q.imax), 'A', v => { q.imax = v; })); break;
+      case 'D': f.append(choice('Type', q.model, Object.entries(S.DIODES).map(([k, v]) => [k, `${k}: ${v.note}`]), v => { q.model = v; })); break;
+      case 'LAMP': f.append(field('Rated voltage', plain(q.vr), 'V', v => { q.vr = v; }), field('Rated power', plain(q.wr), 'W', v => { q.wr = v; })); break;
+    }
+    if (f.children.length) panel.append(f);
+    const rd = el('div', { class: 'sp-read' }); panel.append(rd);
+    updateReadings();
+    function updateReadings() {
+      const r = res.ok ? res.parts.get(p.id) : null;
+      rd.innerHTML = '';
+      if (!res.ok) { rd.append(el('p', { class: 'flag ' + (res.stopped ? 'warn' : 'bad'), text: res.error })); return; }
+      if (!r) { rd.append(note('Ground: this point is 0 V. Every voltage is measured from here.')); return; }
+      rd.append(partReadings(p, r));
+    }
+  }
+
+  function readings(vals, lines, warn) {
+    return el('div', {},
+      el('div', { class: 'readouts' }, vals.map(([l, v, hi]) => el('div', { class: 'ro' + (hi ? ' hi' : '') }, el('span', { class: 'rl', text: l }), el('span', { class: 'rv', text: v })))),
+      warn.length ? el('div', { class: 'flags' }, warn.map(([lvl, t]) => el('div', { class: 'flag ' + lvl, text: t }))) : null,
+      lines.length ? el('pre', { class: 'steps', text: lines.join('\n') }) : null);
+  }
+
+  function partReadings(p, r) {
+    const q = p.props, vals = [], L = [], warn = [];
+    const I = Math.abs(r.i), Vab = r.v;
+    switch (p.type) {
+      case 'R': {
+        vals.push(['Voltage drop', si(Math.abs(Vab), 'V'), true], ['Current', si(I, 'A'), true], ['Power', si(r.p, 'W'), true]);
+        L.push(`I = V ÷ R = ${plain(Math.abs(Vab))} ÷ ${plain(q.r)} = ${si(I, 'A')}`, `P = I² × R = ${plain(I)}² × ${plain(q.r)} = ${si(r.p, 'W')}`);
+        const load = r.p / q.rating;
+        warn.push([load > 1 ? 'bad' : load > 0.5 ? 'warn' : 'ok', load > 1 ? `Over its ${wattName(q.rating)} rating (${pct(load, 0)}): it will burn. Use ${wattName(RATINGS.find(x => x >= r.p * 2) ?? 10)}.` : load > 0.5 ? `Runs hot: ${pct(load, 0)} of ${wattName(q.rating)}. Use a bigger rating for 2× margin.` : `Cool: ${pct(load, 0)} of its ${wattName(q.rating)} rating.`]);
+        break;
+      }
+      case 'POT':
+        vals.push(['Wiper voltage', si(r.vw, 'V'), true], ['Current', si(Math.abs(r.iaw), 'A')], ['Power', si(r.p, 'W')]);
+        L.push(`Top part = ${si(q.r * q.pos / 100, 'Ω')}, bottom part = ${si(q.r * (1 - q.pos / 100), 'Ω')}`, `Wiper = ${si(r.vw, 'V')} (to ground)`);
+        if (r.p > 0.25) warn.push(['warn', 'Most small pots are 0.1–0.25 W: use it as a divider, not to carry load current.']);
+        break;
+      case 'BAT': {
+        const out = -r.i;
+        vals.push(['Current out of +', si(out, 'A'), true], ['Power delivered', si(-r.p, 'W'), true], ['Terminal voltage', si(Vab, 'V')]);
+        if (q.rint > 0) L.push(`Terminal V = EMF − I × r = ${plain(q.v)} − ${plain(out)} × ${plain(q.rint)} = ${si(Vab, 'V')}`);
+        if (out < -1e-6) warn.push(['warn', `Current flows INTO ${p.name}: it is being charged (or another source is stronger).`]);
+        if (Math.abs(out) > 50) warn.push(['bad', 'SHORT CIRCUIT! Add a resistor or a fuse.']);
+        if (q.v > 0 && 9 === q.v && Math.abs(out) > 0.5) warn.push(['warn', 'A 9 V battery can only supply about 0.1–0.5 A for long.']);
+        break;
+      }
+      case 'ISRC': vals.push(['Current', si(q.i, 'A'), true], ['Voltage across', si(Vab, 'V'), true]); break;
+      case 'SPDT': case 'DPDT':
+        vals.push(['Position', q.on ? '▼ down' : '▲ up', true], [p.type === 'DPDT' ? 'Pole 1 current' : 'Current', si(Math.abs(r.i1), 'A'), true]);
+        if (p.type === 'DPDT') vals.push(['Pole 2 current', si(Math.abs(r.i2), 'A'), true]);
+        L.push(p.type === 'DPDT' ? 'Two switches moved by one lever. Common pins on the left; each connects to the upper (▲) or lower (▼) pin on the right.\nClassic use: reverse a DC motor or solenoid (cross-wire the outer pins).' : 'Common pin on the left connects to the upper (▲) or lower (▼) pin.');
+        break;
+      case 'SW': case 'PB': vals.push(['State', q.on ? 'closed' : 'open', true], [q.on ? 'Current' : 'Voltage across', q.on ? si(I, 'A') : si(Math.abs(Vab), 'V'), true]);
+        if (!q.on && Math.abs(Vab) > 1e-3) L.push(`Open switch: the full ${si(Math.abs(Vab), 'V')} appears across it.`);
+        break;
+      case 'LED': {
+        const m = S.LED_COLORS[q.color];
+        vals.push(['Current', si(I, 'A'), true], ['Voltage', si(Math.abs(Vab), 'V'), true], ['Power', si(r.p, 'W')]);
+        if (r.on) {
+          L.push(`LED needs ≈ ${m.vf} V (${q.color}). The rest drops on the resistor in series.`);
+          const pct20 = I / q.imax;
+          warn.push([pct20 > 1.2 ? 'bad' : pct20 > 1 ? 'warn' : I < 0.001 ? 'warn' : 'ok', pct20 > 1.2 ? `Too much current (${si(I, 'A')} > ${si(q.imax, 'A')}): it will burn. Use a bigger series resistor.` : pct20 > 1 ? 'At its limit: a slightly bigger resistor makes it last longer.' : I < 0.001 ? 'Very dim (under 1 mA).' : `OK: ${pct(pct20, 0)} of max current.`]);
+        } else warn.push(['warn', Vab < 0 ? 'Reversed: the LED blocks. Flip it (↻ twice): the long leg (+, anode) goes to +.' : `Off: not enough voltage (needs ${m.vf} V).`]);
+        if (Vab < -5) warn.push(['bad', 'More than 5 V backwards can damage an LED.']);
+        break;
+      }
+      case 'D': {
+        const m = S.DIODES[q.model];
+        vals.push(['Current', si(I, 'A'), true], ['Voltage', si(Vab, 'V'), true], ['Power', si(r.p, 'W')]);
+        warn.push(r.on ? [I > m.imax ? 'bad' : 'ok', I > m.imax ? `Over ${si(m.imax, 'A')}: use a bigger diode.` : `Conducting (${m.vf} V drop).`] : ['ok', Vab < 0 ? `Blocking ${si(-Vab, 'V')} (rated ${m.piv} V).` : 'Not conducting.']);
+        if (-Vab > m.piv) warn.push(['bad', `Reverse voltage over ${m.piv} V: it breaks down.`]);
+        break;
+      }
+      case 'LAMP': {
+        const b = r.p / q.wr;
+        vals.push(['Brightness', pct(b, 0), true], ['Current', si(I, 'A'), true], ['Power', si(r.p, 'W')], ['Voltage', si(Math.abs(Vab), 'V')]);
+        L.push(`Hot resistance = V² ÷ P = ${plain(q.vr)}² ÷ ${plain(q.wr)} = ${si(q.vr * q.vr / q.wr, 'Ω')}`);
+        if (b > 1.2) warn.push(['bad', 'Over its rated voltage: it burns out quickly.']);
+        break;
+      }
+      case 'VM': vals.push(['Reads', si(Vab, 'V'), true]); L.push('Voltmeter: + side (left pin) minus − side. 10 MΩ inside, like a real multimeter.'); break;
+      case 'AM': vals.push(['Reads', si(r.i, 'A'), true]); L.push('Ammeter: current flowing in at the left pin. Put it IN the wire (in series), never across a battery.'); break;
+    }
+    return readings(vals, L, warn);
+  }
+
+  function summary() {
+    const box = el('div');
+    if (!res.ok) { box.append(el('p', { class: 'flag ' + (res.stopped ? 'warn' : 'bad'), text: res.error })); panel.append(box); return; }
+    box.append(readings([['Power from sources', si(res.delivered, 'W'), true], ['Parts', String(c.parts.length)], ['Wires', String(c.wires.length)]], [],
+      res.notes.map(t => [/SHORT/.test(t) ? 'bad' : 'warn', t])));
+    box.append(note('Tap a part or wire for its voltage, current and power. Wire colors: <b style="color:#3DDC84">green = +</b>, grey = 0 V, <b style="color:#FF6B6B">red = −</b>. Yellow dots = current flow.'));
+    panel.append(box);
+  }
+
+  // ---------- projects ----------
+  const projStore = {
+    all() { try { return JSON.parse(store.get('sch.projects', '{}')) || {}; } catch { return {}; } },
+    save(all) { store.set('sch.projects', JSON.stringify(all)); },
+  };
+  function dialog(title, items, onPick, extra) {
+    const d = el('dialog', { class: 'dlg' }, el('div', { class: 'dlg-title2', text: title }), extra ?? null,
+      el('div', { class: 'dlg-items' }, items.map((t, i) => el('button', { class: 'dlg-it', type: 'button', text: t, onclick: () => { d.close(); onPick(i); } }))),
+      el('form', { method: 'dialog', class: 'dlg-buttons' }, el('button', { class: 'btn', text: 'Close' })));
+    document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
+    return d;
+  }
+  function loadCircuit(j, msg) { c = j; sel = null; hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
+  function examples() {
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor']];
+    dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
+  }
+  function projects() {
+    const all = projStore.all(), names = Object.keys(all).sort((a, b) => all[b].t - all[a].t);
+    dialog('Schematic projects', ['Save as…', ...names.map(n => `Open: ${n}`), 'Delete a project…', 'New (empty)', 'Export file (backup)', 'Import file…', 'Save picture (PNG)'], i => {
+      if (i === 0) {
+        const name = prompt2('Name for this circuit', c.title ?? '', (n) => { n = n.trim().slice(0, 40); if (!n) return; c.title = n; const a = projStore.all(); a[n] = { json: JSON.stringify(c), t: Date.now() }; projStore.save(a); say(`Saved "${n}".`); });
+        return name;
+      }
+      if (i <= names.length) { const n = names[i - 1]; loadCircuit(JSON.parse(all[n].json), `Opened "${n}".`); return; }
+      const k = i - names.length;
+      if (k === 1) { if (!names.length) return say('No saved projects.'); dialog('Delete which?', names, j => { const a = projStore.all(); delete a[names[j]]; projStore.save(a); say(`Deleted "${names[j]}".`); }); }
+      else if (k === 2) loadCircuit(S.newCircuit(), 'Empty circuit. Add parts from the tray.');
+      else if (k === 3) shareFile(`${c.title ?? 'circuit'}.f9t.json`, JSON.stringify(c), 'application/json');
+      else if (k === 4) { const f = el('input', { type: 'file', accept: '.json,application/json' }); f.onchange = async () => { const file = f.files[0]; if (!file) return; try { const j = JSON.parse(await file.text()); if (!Array.isArray(j.parts)) throw 0; loadCircuit(j, `Imported ${file.name}.`); } catch { say("That file isn't a Fox9nertron circuit."); } }; f.click(); }
+      else if (k === 5) savePng();
+    });
+  }
+  function prompt2(title, value, onOk) {
+    const inp = el('input', { class: 'num wide', value });
+    const d = el('dialog', { class: 'dlg' }, el('div', { class: 'dlg-title2', text: title }), el('div', { class: 'dlg-pad' }, inp),
+      el('div', { class: 'dlg-buttons' }, el('button', { class: 'btn', type: 'button', text: 'Cancel', onclick: () => d.close() }), el('button', { class: 'btn primary', type: 'button', text: 'Save', onclick: () => { d.close(); onOk(inp.value); } })));
+    document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal(); inp.focus();
+  }
+  async function shareFile(name, text, mime) {
+    const blob = text instanceof Blob ? text : new Blob([text], { type: mime });
+    try { const file = new File([blob], name, { type: mime }); if (navigator.canShare?.({ files: [file] }) && /iPhone|iPad|Android/i.test(navigator.userAgent)) { await navigator.share({ files: [file] }); return; } } catch (e) { if (e?.name === 'AbortError') return; }
+    const a = el('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); a.remove();
+    say(`Saved ${name}.`);
+  }
+  function savePng() {
+    const keep = { ...view }, keepSel = sel, keepMode = mode, real = ctx, realW = W, realH = H;
+    sel = null; mode = 'select';
+    const dpr = 2, w = 1400, h = 1000;
+    const oc = document.createElement('canvas'); oc.width = w * dpr; oc.height = h * dpr;
+    ctx = oc.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    W = w; H = h; fit(); draw();
+    ctx = real; W = realW; H = realH; Object.assign(view, keep); sel = keepSel; mode = keepMode; draw();
+    oc.toBlob(b => shareFile(`${c.title ?? 'circuit'}.png`, b, 'image/png'), 'image/png');
+  }
+
+  // ---------- start ----------
+  syncTop(); setMode('select');
+  new ResizeObserver(() => resize()).observe(wrap);
+  addEventListener('resize', () => resize());
+  requestAnimationFrame(() => { resize(); commit(false); });
+}
+
+// ---------- symbols (local grid units, pin a at left) ----------
+function symbol(ctx, p, r, g) {
+  const q = p.props;
+  const L = (...pts) => { ctx.beginPath(); ctx.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]); ctx.stroke(); };
+  const T = (txt, x, y, size = 0.75, col = C.part) => { ctx.save(); ctx.translate(x, y); ctx.rotate(-(p.rot || 0) * Math.PI / 2); ctx.scale(1 / g, 1 / g); ctx.fillStyle = col; ctx.font = `700 ${size * g}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, 0, 0); ctx.restore(); };
+  ctx.strokeStyle = C.part; ctx.fillStyle = C.part;
+  switch (p.type) {
+    case 'R': L(-2, 0, -1.2, 0, -1, -0.45, -0.6, 0.45, -0.2, -0.45, 0.2, 0.45, 0.6, -0.45, 1, 0.45, 1.2, 0, 2, 0);
+      if (r && q.rating && r.p > q.rating) { ctx.strokeStyle = '#FF6B6B'; L(-1.2, 0, -1, -0.45, -0.6, 0.45, -0.2, -0.45, 0.2, 0.45, 0.6, -0.45, 1, 0.45, 1.2, 0); }
+      break;
+    case 'POT': L(-2, 0, -1.2, 0, -1, -0.45, -0.6, 0.45, -0.2, -0.45, 0.2, 0.45, 0.6, -0.45, 1, 0.45, 1.2, 0, 2, 0);
+      { const x = -1.2 + 2.4 * q.pos / 100; L(0, -2, 0, -1.3, x, -1.3, x, -0.65); ctx.beginPath(); ctx.moveTo(x, -0.5); ctx.lineTo(x - 0.25, -0.85); ctx.lineTo(x + 0.25, -0.85); ctx.closePath(); ctx.fill(); }
+      break;
+    case 'BAT': L(-2, 0, -0.25, 0); L(0.25, 0, 2, 0); ctx.lineWidth *= 1.4; L(-0.25, -0.9, -0.25, 0.9); ctx.lineWidth *= 1.6; L(0.25, -0.45, 0.25, 0.45);
+      T('+', -0.9, -0.65, 0.8, '#3DDC84'); T('−', 0.9, -0.65, 0.8, '#FF6B6B'); break;
+    case 'ISRC': L(-2, 0, -0.85, 0); L(0.85, 0, 2, 0); ctx.beginPath(); ctx.arc(0, 0, 0.85, 0, 7); ctx.stroke(); L(-0.5, 0, 0.45, 0); L(0.15, -0.3, 0.5, 0, 0.15, 0.3); break;
+    case 'SW': L(-2, 0, -1, 0); L(1, 0, 2, 0); ctx.beginPath(); ctx.arc(-1, 0, 0.14, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(1, 0, 0.14, 0, 7); ctx.fill();
+      if (q.on) L(-1, 0, 1, -0.05); else L(-1, 0, 0.85, -0.85); break;
+    case 'SPDT': case 'DPDT': {
+      const pole = (cy) => {
+        L(-2, cy, -1, cy); L(1, cy - 1, 2, cy - 1); L(1, cy + 1, 2, cy + 1);
+        for (const [x, y] of [[-1, cy], [1, cy - 1], [1, cy + 1]]) { ctx.beginPath(); ctx.arc(x, y, 0.14, 0, 7); ctx.fill(); }
+        L(-1, cy, 0.95, q.on ? cy + 0.92 : cy - 0.92);
+      };
+      if (p.type === 'SPDT') pole(0);
+      else { pole(-2); pole(2); ctx.save(); ctx.setLineDash([0.18, 0.18]); L(0, q.on ? -1.5 : -2.5, 0, q.on ? 2.5 : 1.5); ctx.restore(); }
+      break;
+    }
+    case 'PB': L(-2, 0, -1, 0); L(1, 0, 2, 0); ctx.beginPath(); ctx.arc(-1, 0, 0.14, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(1, 0, 0.14, 0, 7); ctx.fill();
+      { const y = q.on ? -0.12 : -0.55; L(-1.05, y, 1.05, y); L(0, y, 0, -1.2); L(-0.35, -1.2, 0.35, -1.2); } break;
+    case 'LED': case 'D': {
+      const lit = p.type === 'LED' && r?.on && Math.abs(r.i) > 1e-4;
+      const col = p.type === 'LED' ? (S.LED_COLORS[q.color]?.hex ?? '#FF3B30') : C.part;
+      if (lit) { const a = Math.min(1, 0.35 + Math.abs(r.i) / q.imax * 0.65); const gr = ctx.createRadialGradient(0, 0, 0.1, 0, 0, 1.6); gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.globalAlpha *= a; ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, 1.6, 0, 7); ctx.fill(); ctx.globalAlpha /= a; }
+      L(-2, 0, -0.55, 0); L(0.55, 0, 2, 0);
+      ctx.beginPath(); ctx.moveTo(-0.55, -0.6); ctx.lineTo(0.55, 0); ctx.lineTo(-0.55, 0.6); ctx.closePath();
+      ctx.fillStyle = p.type === 'LED' ? col : 'transparent'; if (p.type === 'LED') { ctx.globalAlpha *= lit ? 1 : 0.35; ctx.fill(); ctx.globalAlpha /= lit ? 1 : 0.35; }
+      ctx.strokeStyle = C.part; ctx.stroke(); L(0.55, -0.6, 0.55, 0.6);
+      if (p.type === 'LED') { ctx.strokeStyle = lit ? col : C.dim; L(0.1, -0.75, 0.55, -1.2); L(0.4, -1.2, 0.55, -1.2, 0.55, -1.05); L(-0.35, -0.85, 0.1, -1.3); L(-0.05, -1.3, 0.1, -1.3, 0.1, -1.15); }
+      break;
+    }
+    case 'LAMP': {
+      const b = r ? Math.min(1, r.p / Math.max(q.wr, 1e-9)) : 0;
+      if (b > 0.02) { const gr = ctx.createRadialGradient(0, 0, 0.1, 0, 0, 1.7); gr.addColorStop(0, `rgba(255,225,107,${0.25 + 0.75 * b})`); gr.addColorStop(1, 'rgba(255,225,107,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, 1.7, 0, 7); ctx.fill(); }
+      L(-2, 0, -0.85, 0); L(0.85, 0, 2, 0); ctx.strokeStyle = C.part; ctx.beginPath(); ctx.arc(0, 0, 0.85, 0, 7); ctx.stroke(); L(-0.6, -0.6, 0.6, 0.6); L(-0.6, 0.6, 0.6, -0.6); break;
+    }
+    case 'GND': L(0, 0, 0, 0.8); L(-0.75, 0.8, 0.75, 0.8); L(-0.5, 1.1, 0.5, 1.1); L(-0.25, 1.4, 0.25, 1.4); break;
+    case 'VM': case 'AM': L(-2, 0, -1, 0); L(1, 0, 2, 0); ctx.beginPath(); ctx.arc(0, 0, 1, 0, 7); ctx.stroke(); T(p.type === 'VM' ? 'V' : 'A', 0, 0.05, 1.0, C.sel); T('+', -1.45, -0.55, 0.7, '#3DDC84'); break;
+  }
+}
+
+function drawIcon(cv, type) {
+  const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
+  x.clearRect(0, 0, w, h); x.save(); const gg = type === 'DPDT' ? 7 : type === 'SPDT' ? 14 : g; x.translate(w / 2, type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
+}

@@ -161,3 +161,30 @@ svg text { fill: var(--dim); font: 11px var(--mono); }
 @media (prefers-reduced-motion: no-preference) { .tab, .btn, .segb { transition: color .12s, background-color .12s, border-color .12s; } }
 .unit.sm { padding-right: 6px; font-size: 12px; }
 .nl-row .sel.sm { padding: 7px 2px; }
+
+/* ---------- schematic editor ---------- */
+.pane.sch-pane { gap: 8px; }
+.sch-tools, .sch-tray { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.sch-tools::-webkit-scrollbar, .sch-tray::-webkit-scrollbar { display: none; }
+.sb { flex: 0 0 auto; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font: 600 14px var(--sans); cursor: pointer; touch-action: manipulation; }
+.sb.icon { padding: 8px 13px; font-size: 16px; }
+.sb.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.tb { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 2px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 6px 5px; color: var(--dim); font: 600 11px var(--sans); cursor: pointer; min-width: 64px; touch-action: manipulation; }
+.tb .ico { width: 48px; height: 28px; }
+.tb.on { border-color: var(--accent); color: var(--accent); }
+.sch-wrap { position: relative; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #0F1317; }
+.sch-canvas { display: block; cursor: crosshair; }
+.sch-status { color: var(--dim); font-size: 13.5px; min-height: 1.4em; }
+.sch-panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.sp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sp-head .nm { flex: 0 1 110px; width: 110px; background: var(--bg); border: 1px solid var(--line2); border-radius: 7px; font-weight: 700; }
+.sp-read { display: flex; flex-direction: column; gap: 8px; }
+.rng { width: 100%; accent-color: var(--accent); }
+.btn.hold { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; padding: 12px 18px; }
+.dlg-title2 { font-weight: 700; font-size: 17px; padding: 16px 20px 6px; }
+.dlg-items { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
+.dlg-it { text-align: left; background: none; border: 0; color: var(--text); font: 15px var(--sans); padding: 12px 20px; cursor: pointer; }
+.dlg-it:hover { background: var(--line); }
+.dlg-pad { padding: 8px 20px; }
+.sb.run { color: var(--good); border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
+.sb.run.on { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); background: var(--card); }
