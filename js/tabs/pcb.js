@@ -26,7 +26,13 @@ export function pcbView(api) {
   const status = el('div', { class: 'sch-status' });
   const routeBar = el('div', { class: 'pcb-routebar', hidden: true }, btn('✓ Finish here', () => finishRoute(null)), btn('↶ Back one', () => { if (route?.pts.length > 1) { route.pts.pop(); draw(); } }), btn('✖ Cancel', () => { route = null; routeBar.hidden = true; draw(); }));
   const panel = el('div', { class: 'sch-panel' });
-  const box = el('div', { class: 'pcb-box', hidden: true }, top, wrap, routeBar, status, panel);
+  // fine tuning: arrows move the selected part / trace corner / trace segment by one step
+  let step = +store.get('pcb.step', '0.25');
+  const stepSel = el('select', { class: 'sel sm', 'aria-label': 'Nudge step' }, [0.1, 0.25, 0.5, 0.635, 1.27].map(v => el('option', { value: v, text: `step ${v} mm` })));
+  stepSel.value = String(step); stepSel.onchange = () => { step = +stepSel.value; store.set('pcb.step', stepSel.value); };
+  const nudgeBar = el('div', { class: 'pcb-nudge', hidden: true }, el('span', { class: 'muted', text: 'Nudge' }),
+    btn('◀', () => nudge(-1, 0), 'icon'), btn('▲', () => nudge(0, -1), 'icon'), btn('▼', () => nudge(0, 1), 'icon'), btn('▶', () => nudge(1, 0), 'icon'), stepSel);
+  const box = el('div', { class: 'pcb-box', hidden: true }, top, wrap, routeBar, nudgeBar, status, panel);
   const ctx = canvas.getContext('2d');
   let W = 0, H = 0;
   const nameBoxes = [];
@@ -41,11 +47,12 @@ export function pcbView(api) {
     return had;
   }
   function analyzeNow() { const c = api.getC(); an = P.analyze(c); errs = P.drc(c, an); }
-  function change(msg, push = true) { cam = null; api.commit(push); analyzeNow(); renderPanel(); draw(); if (msg) say(msg); }
+  function change(msg, push = true) { cam = null; const w0 = L.w, h0 = L.h; P.fitBoard(api.getC(), 1.5, true); if (L.w !== w0 || L.h !== h0) { msg = (msg ? msg + ' ' : '') + `Board grew to ${L.w} × ${L.h} mm.`; setTimeout(() => { W = 0; resize(); }, 0); } api.commit(push); analyzeNow(); renderPanel(); draw(); if (msg) say(msg); }
   function setMode(m) {
     mode = m; route = null; routeBar.hidden = true;
     for (const [k, b] of Object.entries(modeBtns)) b.classList.toggle('on', k === m);
-    say({ move: 'Drag parts to place them. Tap a part for its footprint, tap empty board to pan. Then ⚡ Autoroute.', route: 'Tap a pad to start a trace, tap to add bends, tap a pad of the same net to finish.', delete: 'Tap a trace or a jumper wire to delete it.' }[m]);
+    syncNudge();
+    say({ move: 'Drag parts, labels and traces (corners or segments). Tap to select, arrows below for fine tuning. Tap empty board to pan.', route: 'Tap a pad to start a trace, tap to add bends, tap a pad of the same net to finish.', delete: 'Tap a trace or a jumper wire to delete it.' }[m]);
     draw();
   }
 
@@ -140,6 +147,12 @@ export function pcbView(api) {
       ctx.font = `600 ${Math.min(11, view.s * 0.8)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#1B1B1B';
       for (const pd of an.pads) if (pd.part && pd.pin >= 0) ctx.fillText(P.pinLabel(pd.part, pd.pin), sx(pd.x), sy(pd.y) + (pd.drill ? Math.max(pd.w, pd.h) / 2 * view.s + 6 : 0));
     }
+    // selected trace: corner handles, selected segment / corner brighter
+    if (sel?.kind === 'trace' && L.traces[sel.i]) {
+      const t = L.traces[sel.i];
+      if (sel.seg != null && t.pts[sel.seg + 1]) { ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = Math.max(2, t.w * view.s * 0.45); ctx.beginPath(); ctx.moveTo(sx(t.pts[sel.seg][0]), sy(t.pts[sel.seg][1])); ctx.lineTo(sx(t.pts[sel.seg + 1][0]), sy(t.pts[sel.seg + 1][1])); ctx.stroke(); }
+      t.pts.forEach(([x, y], k) => { const big = sel.pt === k; ctx.fillStyle = big ? '#FFFFFF' : COL.sel; ctx.strokeStyle = '#0F1317'; ctx.lineWidth = 1; const r = big ? 6 : 4; ctx.fillRect(sx(x) - r, sy(y) - r, 2 * r, 2 * r); ctx.strokeRect(sx(x) - r, sy(y) - r, 2 * r, 2 * r); });
+    }
     // jumper wires (on the parts side)
     for (const [ji, j] of (L.jumpers ?? []).entries()) {
       ctx.strokeStyle = sel?.kind === 'jumper' && sel.i === ji ? COL.sel : COL.jump; ctx.lineWidth = 3;
@@ -208,6 +221,69 @@ export function pcbView(api) {
     change('Trace added.');
   }
 
+  // ---------- trace editing ----------
+  const onPad = (pt) => an.pads.some(pd => Math.hypot(pd.x - pt[0], pd.y - pt[1]) < 0.05);
+  const same = (a, b) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+  // which part of trace i is under (x, y): a corner {pt} or a segment {seg}
+  function tracePart(i, x, y) {
+    const t = L.traces[i], tol = Math.max(0.5, 10 / view.s);
+    let bp = -1, bd = tol;
+    t.pts.forEach((q, k) => { const d = Math.hypot(q[0] - x, q[1] - y); if (d < bd) { bd = d; bp = k; } });
+    if (bp >= 0 && !((bp === 0 || bp === t.pts.length - 1) && onPad(t.pts[bp]))) return { pt: bp };
+    let bs = 0, bsd = Infinity;
+    for (let k = 0; k + 1 < t.pts.length; k++) { const d = P.segDist(x, y, x, y, t.pts[k][0], t.pts[k][1], t.pts[k + 1][0], t.pts[k + 1][1]); if (d < bsd) { bsd = d; bs = k; } }
+    return { seg: bs };
+  }
+  // move a corner or a segment of trace i by (dx, dy). Ends on a pad stay put (a short new piece keeps them connected).
+  // Other traces / jumpers that end on a moved point follow it. Returns the new traces and where the selection went.
+  function editTrace(orig, i, part, dx, dy) {
+    const T = structuredClone(orig), J = structuredClone(L.jumpers ?? []), tr = T[i];
+    let idx = part.pt != null ? [part.pt] : [part.seg, part.seg + 1];
+    if (part.pt != null && (part.pt === 0 || part.pt === tr.pts.length - 1) && onPad(tr.pts[part.pt])) return null;
+    if (part.seg != null) {
+      if (idx[1] === tr.pts.length - 1 && onPad(tr.pts[idx[1]])) tr.pts.push([...tr.pts[idx[1]]]);
+      if (idx[0] === 0 && onPad(tr.pts[0])) { tr.pts.unshift([...tr.pts[0]]); idx = idx.map(k => k + 1); }
+    }
+    const moved = [];
+    for (const k of idx) {
+      const o = [...tr.pts[k]], n = [Math.round((o[0] + dx) * 1000) / 1000, Math.round((o[1] + dy) * 1000) / 1000];
+      tr.pts[k] = n; moved.push(n);
+      const isEnd = k === 0 || k === tr.pts.length - 1;
+      if (!isEnd) continue;
+      T.forEach((t2, j) => { if (j === i) return; for (const e of [0, t2.pts.length - 1]) if (same(t2.pts[e], o)) t2.pts[e] = [...n]; });
+      for (const jp of J) { if (same([jp.x1, jp.y1], o)) { jp.x1 = n[0]; jp.y1 = n[1]; } if (same([jp.x2, jp.y2], o)) { jp.x2 = n[0]; jp.y2 = n[1]; } }
+    }
+    tr.auto = false;
+    return { T, J, moved, part: part.pt != null ? { pt: idx[0] } : { seg: idx[0] } };
+  }
+  // tidy (drop duplicate / straight-through points) and find the selection again
+  function tidyTrace(i, moved) {
+    const t = L.traces[i]; t.pts = cleanPath(t.pts);
+    if (moved.length === 2) { for (let k = 0; k + 1 < t.pts.length; k++) if (same(t.pts[k], moved[0]) && same(t.pts[k + 1], moved[1])) return { seg: k }; }
+    const k = t.pts.findIndex(q => same(q, moved[0]));
+    if (moved.length === 1 && k >= 0) return { pt: k };
+    let bs = 0, bd = Infinity; for (let q = 0; q + 1 < t.pts.length; q++) { const d = P.segDist(moved[0][0], moved[0][1], moved[0][0], moved[0][1], t.pts[q][0], t.pts[q][1], t.pts[q + 1][0], t.pts[q + 1][1]); if (d < bd) { bd = d; bs = q; } }
+    return { seg: bs };
+  }
+  function nudge(dx, dy) {
+    if (!sel) return;
+    if (sel.kind === 'part') { const bp = L.parts[sel.id]; bp.x = Math.round((bp.x + dx * step) * 1000) / 1000; bp.y = Math.round((bp.y + dy * step) * 1000) / 1000; change(); return; }
+    if (sel.kind === 'trace' && L.traces[sel.i]) {
+      const part = sel.pt != null ? { pt: sel.pt } : { seg: sel.seg ?? 0 };
+      const r = editTrace(L.traces, sel.i, part, dx * step, dy * step);
+      if (!r) return say('That end sits on a pad. Move the part, or pick a corner / segment.');
+      L.traces = r.T; L.jumpers = r.J;
+      sel = { kind: 'trace', i: sel.i, ...tidyTrace(sel.i, r.moved) };
+      change();
+    }
+  }
+  function syncNudge() { nudgeBar.hidden = !(mode === 'move' && (sel?.kind === 'part' || sel?.kind === 'trace')); }
+  addEventListener('keydown', (e) => {
+    if (box.hidden || !sel || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName ?? '')) return;
+    const m = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!m) return; e.preventDefault(); nudge(m[0] * (e.shiftKey ? 4 : 1), m[1] * (e.shiftKey ? 4 : 1));
+  });
+
   // ---------- pointer ----------
   const ptrs = new Map(); let down = null, pinch = 0;
   const pos = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
@@ -221,7 +297,9 @@ export function pcbView(api) {
     down = { px, py, x, y, moved: false };
     if (mode === 'move') {
       const nb = [...nameBoxes].reverse().find(b => px >= b.x0 && px <= b.x1 && py >= b.y0 && py <= b.y1);
+      const pd = padAt(x, y), ti = pd ? -1 : traceAt(x, y);
       if (nb) { const bp = L.parts[nb.p.id]; down.lab = nb.p; down.start = [...(bp.lbl ?? [0, 0])]; }
+      else if (ti >= 0) { down.tr = { i: ti, part: tracePart(ti, x, y), orig: structuredClone(L.traces), origJ: structuredClone(L.jumpers ?? []) }; }
       else { const p = partAt(x, y); if (p) { const bp = L.parts[p.id]; down.part = p; down.start = [bp.x, bp.y]; } }
     }
   });
@@ -235,7 +313,16 @@ export function pcbView(api) {
     }
     if (Math.hypot(px - down.px, py - down.py) > 6) down.moved = true;
     if (!down.moved) return;
-    if (down.lab) {
+    if (down.tr) {
+      const d = down.tr, dx = P.snap((px - down.px) / view.s, step), dy = P.snap((py - down.py) / view.s, step);
+      if (dx === d.dx && dy === d.dy) return;
+      d.dx = dx; d.dy = dy;
+      L.jumpers = structuredClone(d.origJ);
+      const r = editTrace(d.orig, d.i, d.part, dx, dy);
+      if (!r) { say('That end sits on a pad: drag a corner or a segment instead.'); return; }
+      L.traces = r.T; L.jumpers = r.J; d.res = r; sel = { kind: 'trace', i: d.i, ...r.part };
+      analyzeNow(); draw();
+    } else if (down.lab) {
       const bp = L.parts[down.lab.id];
       bp.lbl = [P.snap(down.start[0] + (px - down.px) / view.s, 0.5), P.snap(down.start[1] + (py - down.py) / view.s, 0.5)]; draw();
     } else if (down.part) {
@@ -249,6 +336,8 @@ export function pcbView(api) {
     const d = down; if (!d) return;
     if (d.pinch) { if (!ptrs.size) down = null; return; }
     down = null;
+    if (d.tr && d.moved && d.tr.res) { sel = { kind: 'trace', i: d.tr.i, ...tidyTrace(d.tr.i, d.tr.res.moved) }; change('Trace reshaped. Use the arrows for fine tuning.'); return; }
+    if (d.tr && !d.moved) { sel = { kind: 'trace', i: d.tr.i, ...d.tr.part }; renderPanel(); draw(); return; }
     if (d.lab && d.moved) { sel = { kind: 'part', id: d.lab.id }; change(`${d.lab.name} label moved.`); return; }
     if (d.lab) { sel = { kind: 'part', id: d.lab.id }; renderPanel(); draw(); return; }
     if (d.part && d.moved) { change(`${d.part.name} moved. ⚡ Autoroute again to redo the traces.`); return; }
@@ -282,7 +371,7 @@ export function pcbView(api) {
     }
     // move mode: select
     const ji = jumperAt(x, y), ti = traceAt(x, y), p = partAt(x, y), pd = padAt(x, y);
-    sel = pd && !p ? { kind: 'pad', pad: pd } : p ? { kind: 'part', id: p.id } : ti >= 0 ? { kind: 'trace', i: ti } : ji >= 0 ? { kind: 'jumper', i: ji } : null;
+    sel = pd && !p ? { kind: 'pad', pad: pd } : p ? { kind: 'part', id: p.id } : ti >= 0 ? { kind: 'trace', i: ti, ...tracePart(ti, x, y) } : ji >= 0 ? { kind: 'jumper', i: ji } : null;
     if (pd && p) sel.pad = pd;
     renderPanel(); draw();
   }
@@ -301,6 +390,7 @@ export function pcbView(api) {
   const grid = (...k) => el('div', { class: 'fields' }, ...k);
   function renderPanel() {
     if (!L) return;
+    syncNudge();
     panel.innerHTML = '';
     const c = api.getC();
     if (sel?.kind === 'part' && !L.parts[sel.id]) sel = null;
@@ -310,6 +400,7 @@ export function pcbView(api) {
       const nets = an.nl.pinNet.get(p.id);
       panel.append(el('div', { class: 'sp-head' }, el('b', { text: `${p.name} · ${p.type === 'R' ? 'resistor' : (p.props.model ?? '')}` })),
         grid(sel2('Footprint', f.key, P.fpChoices(p).map(k => [k, P.FOOTPRINTS[k].label]), v => { bp.fp = v; change(`${p.name}: ${P.FOOTPRINTS[v].label}.`); }),
+          ...(f.pitch ? [sel2('Lead spacing (hole to hole)', String(f.pitch), P.SPACINGS[f.key].map(v => [String(v), `${v} mm (${Math.round(v / 2.54)} holes)` + (Math.abs(v - (P.FOOTPRINTS[f.key].make({ order: [0, 1, 2] }).pads.reduce((a, q) => Math.abs(q.x) * 2, 0))) < 0.01 ? ' · normal' : '')]), v => { bp.pitch = +v; change(`${p.name} legs ${v} mm apart. ⚡ Autoroute again to use the space underneath.`); })] : []),
           ...(f.orderStr ? [sel2('Pin order (left → right, flat side / tab facing you)', f.orderStr, P.ORDERS[p.type].map(o => [o, [...o].join(' ')]), v => { bp.order = v; change(`${p.name} pin order ${v}.`); })] : [])),
         el('div', { class: 'pcb-pins' }, ...nets.map((n, i) => el('span', { class: 'pin', text: `${P.pinLabel(p, i)} → ${netName(n)}` }))),
         el('div', { class: 'row wrap' }, btn('↻ Rotate', () => rotateSel())),
@@ -318,7 +409,8 @@ export function pcbView(api) {
       const t = L.traces[sel.i];
       panel.append(el('div', { class: 'sp-head' }, el('b', { text: `Trace · ${netName(traceNet(sel.i))}${t.auto ? ' (autorouted)' : ''}` })),
         grid(sel2('Width', String(t.w), [[0.4, '0.4 mm (thin signal)'], [0.6, '0.6 mm (signal)'], [0.8, '0.8 mm'], [1.0, '1.0 mm (≈ 1.5 A)'], [1.5, '1.5 mm (≈ 2.5 A)'], [2.0, '2.0 mm (≈ 3.5 A)']].map(([v, s]) => [String(v), s]).concat(String(t.w) && ![0.4, 0.6, 0.8, 1, 1.5, 2].includes(t.w) ? [[String(t.w), `${t.w} mm`]] : []), v => { t.w = +v; t.auto = false; change('Width changed.'); })),
-        el('div', { class: 'row wrap' }, btn('🗑 Delete trace', () => { L.traces.splice(sel.i, 1); sel = null; change('Trace deleted.'); })));
+        el('div', { class: 'row wrap' }, btn('🗑 Delete trace', () => { L.traces.splice(sel.i, 1); sel = null; change('Trace deleted.'); })),
+        note(`Selected: ${sel.pt != null ? 'a corner (white square)' : 'a segment (white line)'}. Drag a corner or a segment to reshape, or use the ◀ ▲ ▼ ▶ arrows (keyboard arrows too, Shift = 4 steps). Ends on a pad stay connected.`));
     } else if (sel?.kind === 'jumper') {
       const j = L.jumpers[sel.i];
       panel.append(el('div', { class: 'sp-head' }, el('b', { text: `Jumper wire · ${Math.hypot(j.x2 - j.x1, j.y2 - j.y1).toFixed(2)} mm` })),

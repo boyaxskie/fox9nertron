@@ -223,3 +223,7 @@ svg text { fill: var(--dim); font: 11px var(--mono); }
 .pcb-wrap canvas { touch-action: none; }
 .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
 .sb.pcbbtn { color: #D9894A; border-color: color-mix(in srgb, #D9894A 50%, var(--line)); }
+.pcb-nudge { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pcb-nudge[hidden] { display: none !important; }
+.pcb-nudge .sb.icon { min-width: 44px; }
+.pcb-nudge .sel.sm { padding: 7px 6px; font-size: 13px; width: auto; }
