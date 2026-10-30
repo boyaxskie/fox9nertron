@@ -188,3 +188,9 @@ svg text { fill: var(--dim); font: 11px var(--mono); }
 .dlg-pad { padding: 8px 20px; }
 .sb.run { color: var(--good); border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
 .sb.run.on { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); background: var(--card); }
+.scope-box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.scope-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.scope-info { color: var(--dim); font: 12px ui-monospace, monospace; }
+.scope-cv { width: 100%; height: 210px; border-radius: 8px; display: block; }
+.scope-ctl { display: flex; gap: 6px; flex-wrap: wrap; }
+.scope-ctl .sel.sm { padding: 7px 6px; font-size: 13px; }

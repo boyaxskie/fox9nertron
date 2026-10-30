@@ -25,7 +25,33 @@ export function schematicTab(root) {
   let showDots = store.get('sch.dots', '1') === '1';
   let running = store.get('sch.run', '1') === '1';
   const STOPPED = 'Simulation stopped: no voltages or currents. Tap ▶ Run to start it again.';
-  function solve() { res = running ? S.solveCircuit(c) : { ok: false, stopped: true, error: STOPPED }; }
+  // time simulation (capacitors, coils, signal generator, scope)
+  const TDIVS = [1e-6, 2e-6, 5e-6, 1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1, 0.2, 0.5, 1];
+  const VDIVS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
+  const SAMPLES = 400;      // samples across one scope screen (10 divisions)
+  const sim = { t: 0, state: new Map(), buf: [], paused: false, tdiv: +store.get('sch.tdiv', '0.005'), speed: +store.get('sch.speed', '1'),
+    v1: store.get('sch.v1', 'auto'), v2: store.get('sch.v2', 'auto') };
+  const dtOf = () => sim.tdiv * 10 / SAMPLES;
+  const timeMode = () => running && S.isDynamic(c);
+  function solve() {
+    if (!running) { res = { ok: false, stopped: true, error: STOPPED }; return; }
+    res = timeMode() ? S.solveCircuit(c, { t: sim.t, dt: dtOf(), state: sim.state }) : S.solveCircuit(c);
+  }
+  function resetSim() { sim.t = 0; sim.state = new Map(); sim.buf = []; }
+  function stepSim(n) {
+    const dt = dtOf(), scope = c.parts.find(p => p.type === 'SCOPE');
+    for (let k = 0; k < n; k++) {
+      sim.t += dt;
+      const r = S.solveCircuit(c, { t: sim.t, dt, state: sim.state });
+      res = r;
+      if (!r.ok) return;
+      sim.state = r.next;
+      const sc = scope && r.parts.get(scope.id);
+      sim.buf.push([sim.t, sc ? sc.ch1 : NaN, sc ? sc.ch2 : NaN]);
+    }
+    if (sim.buf.length > SAMPLES * 3) sim.buf.splice(0, sim.buf.length - SAMPLES * 3);
+  }
+  let panelRefresh = null, lastPanel = 0;
 
   // ---------- DOM ----------
   const btn = (text, on, cls = '') => el('button', { class: 'sb ' + cls, type: 'button', text, onclick: on });
@@ -54,12 +80,39 @@ export function schematicTab(root) {
   const wrap = el('div', { class: 'sch-wrap' }, canvas);
   const status = el('div', { class: 'sch-status' });
   const panel = el('div', { class: 'sch-panel' });
-  root.append(top, tray, wrap, status, panel);
+  // oscilloscope + time controls (shown while a time simulation runs)
+  const scv = el('canvas', { class: 'scope-cv' });
+  const fmtT = (t) => si(t, 's', 3) + '/div', fmtV = (v) => si(v, 'V', 3) + '/div';
+  const tSel = el('select', { class: 'sel sm', 'aria-label': 'Time per division' }, TDIVS.map(t => el('option', { value: t, text: fmtT(t) })));
+  const v1Sel = el('select', { class: 'sel sm', 'aria-label': 'CH1 volts per division' }, el('option', { value: 'auto', text: 'CH1 auto' }), VDIVS.map(v => el('option', { value: v, text: 'CH1 ' + fmtV(v) })));
+  const v2Sel = el('select', { class: 'sel sm', 'aria-label': 'CH2 volts per division' }, el('option', { value: 'auto', text: 'CH2 auto' }), VDIVS.map(v => el('option', { value: v, text: 'CH2 ' + fmtV(v) })));
+  const spSel = el('select', { class: 'sel sm', 'aria-label': 'Speed' }, [[0.1, '0.1× slow'], [0.25, '0.25×'], [0.5, '0.5×'], [1, '1× speed'], [2, '2×'], [4, '4×'], [10, '10× fast']].map(([v, t]) => el('option', { value: v, text: t })));
+  tSel.value = String(sim.tdiv); if (tSel.value === '') { sim.tdiv = 0.005; tSel.value = '0.005'; }
+  v1Sel.value = sim.v1; v2Sel.value = sim.v2; spSel.value = String(sim.speed);
+  tSel.onchange = () => { sim.tdiv = +tSel.value; store.set('sch.tdiv', tSel.value); sim.buf = []; };
+  v1Sel.onchange = () => { sim.v1 = v1Sel.value; store.set('sch.v1', sim.v1); };
+  v2Sel.onchange = () => { sim.v2 = v2Sel.value; store.set('sch.v2', sim.v2); };
+  spSel.onchange = () => { sim.speed = +spSel.value; store.set('sch.speed', spSel.value); };
+  const pauseBtn = el('button', { class: 'sb', type: 'button', text: '⏸ Pause', onclick: () => { sim.paused = !sim.paused; pauseBtn.textContent = sim.paused ? '▶ Resume' : '⏸ Pause'; } });
+  const resetBtn = el('button', { class: 'sb', type: 'button', text: '⟲ t = 0', onclick: () => { resetSim(); solve(); draw(); say('Time reset: capacitors empty, coils without current.'); } });
+  const autoBtn = el('button', { class: 'sb', type: 'button', text: 'Auto time', onclick: () => autoTime() });
+  const tInfo = el('div', { class: 'scope-info' });
+  const scopeBox = el('div', { class: 'scope-box' }, el('div', { class: 'scope-head' }, el('b', { text: '📈 Oscilloscope' }), tInfo),
+    scv, el('div', { class: 'scope-ctl' }, pauseBtn, resetBtn, autoBtn, tSel, spSel, v1Sel, v2Sel));
+  scopeBox.hidden = true;
+  root.append(top, tray, wrap, status, scopeBox, panel);
+  function autoTimeQuiet() { const g = c.parts.find(p => p.type === 'SIG'); if (g) { const want = 2.5 / g.props.f / 10; sim.tdiv = TDIVS.find(t => t >= want) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; } else if (c.parts.some(p => p.type === 'L')) { sim.tdiv = 0.005; tSel.value = '0.005'; sim.buf = []; } }
+  function autoTime() {
+    const g = c.parts.find(p => p.type === 'SIG');
+    if (!g) { say('Auto time needs a signal generator. Pick a time/div by hand.'); return; }
+    autoTimeQuiet(); store.set('sch.tdiv', tSel.value);
+    say(`Time/div set to ${fmtT(sim.tdiv)} for the ${si(g.props.f, 'Hz')} signal.`);
+  }
   let ctx = canvas.getContext('2d');
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -142,7 +195,7 @@ export function schematicTab(root) {
     for (const p of c.parts) { const [a, b, cc, d] = S.TYPES[p.type].box; for (const q of [[a, b], [cc, d], [a, d], [cc, b]]) { const [x, y] = S.rotPt(q, p.rot); xs.push(p.x + x); ys.push(p.y + y); } }
     for (const w of c.wires) { xs.push(w.x1, w.x2); ys.push(w.y1, w.y2); }
     if (!xs.length || !W) { view.g = 22; view.ox = W / 2; view.oy = H / 2; return; }
-    const x0 = Math.min(...xs) - 4, x1 = Math.max(...xs) + 4, y0 = Math.min(...ys) - 2, y1 = Math.max(...ys) + 3;
+    const x0 = Math.min(...xs) - 7, x1 = Math.max(...xs) + 5, y0 = Math.min(...ys) - 2, y1 = Math.max(...ys) + 3;
     view.g = Math.max(8, Math.min(48, Math.min(W / (x1 - x0), H / (y1 - y0))));
     view.ox = W / 2 - (x0 + x1) / 2 * view.g; view.oy = H / 2 - (y0 + y1) / 2 * view.g;
   }
@@ -219,9 +272,10 @@ export function schematicTab(root) {
     };
     for (const w of pieces) dotsOn(w.x1, w.y1, w.x2, w.y2, w.i);
     for (const p of c.parts) {
-      const r = res.parts.get(p.id); if (!r || p.type === 'GND' || p.type === 'POT' || p.type === 'SPDT' || p.type === 'DPDT') continue;
-      const [[x1, y1], [x2, y2]] = S.pinsOf(p);
-      dotsOn(x1, y1, x2, y2, r.i);
+      const r = res.parts.get(p.id); if (!r || p.type === 'GND' || p.type === 'POT' || p.type === 'SPDT' || p.type === 'DPDT' || p.type === 'SCOPE') continue;
+      const pins = S.pinsOf(p);
+      dotsOn(pins[0][0], pins[0][1], pins[1][0], pins[1][1], r.i);
+      if (p.type === 'OPTO') dotsOn(pins[2][0], pins[2][1], pins[3][0], pins[3][1], r.ic);
     }
   }
 
@@ -243,8 +297,9 @@ export function schematicTab(root) {
   function drawLabel(p) {
     if (p.type === 'GND') return;
     const r = res?.ok ? res.parts.get(p.id) : null;
-    const [nx, ny] = S.rotPt([0, 1], p.rot);
+    let [nx, ny] = S.rotPt([0, 1], p.rot);
     const vert = p.rot & 1;
+    if (vert) { nx = 1; ny = 0; }          // vertical parts: label always on the right (never cut off at the left edge)
     const dist = Math.max(1.6, S.TYPES[p.type].box[3] + 0.9);
     const x = sx(p.x + nx * dist), y = sy(p.y + ny * dist);
     ctx.font = `600 ${Math.max(10, Math.min(13, view.g * 0.55))}px system-ui, sans-serif`;
@@ -257,6 +312,7 @@ export function schematicTab(root) {
     else { ctx.fillText(lines[0], x, y); if (lines[1]) { ctx.fillStyle = C.cur; ctx.font = '700 13px ui-monospace, monospace'; ctx.fillText(lines[1], x, y + 15); } }
   }
 
+  function capTxt(v) { return v >= 1e-6 && v < 1 ? plain(v * 1e6, 3) + ' µF' : si(v, 'F', 3); }
   function valueText(p) {
     const q = p.props;
     switch (p.type) {
@@ -270,6 +326,10 @@ export function schematicTab(root) {
       case 'SW': return q.on ? 'ON' : 'OFF';
       case 'SPDT': case 'DPDT': return q.on ? '▼ down' : '▲ up';
       case 'PB': return q.on ? 'pressed' : '';
+      case 'C': return capTxt(q.c);
+      case 'L': return si(q.l, 'H', 3);
+      case 'SIG': return `${q.wave} ${si(q.f, 'Hz', 3)} ${si(q.amp, 'V', 3)}`;
+      case 'OPTO': return 'PC817';
     }
     return '';
   }
@@ -277,10 +337,69 @@ export function schematicTab(root) {
   // ---------- animation ----------
   let raf = 0;
   function animate() {
-    cancelAnimationFrame(raf);
-    if (!showDots || !res?.ok) return;
-    const loop = (t) => { tAnim = t; if (!root.isConnected || root.hidden) { raf = requestAnimationFrame(loop); return; } draw(); raf = requestAnimationFrame(loop); };
+    if (raf) return;
+    const loop = (t) => {
+      raf = requestAnimationFrame(loop);
+      tAnim = t;
+      if (!root.isConnected || root.hidden || !W) return;
+      const tm = timeMode();
+      if (scopeBox.hidden === tm) scopeBox.hidden = !tm;
+      if (tm) {
+        if (!sim.paused && !down?.drag) stepSim(Math.max(1, Math.round(SAMPLES / 120 * sim.speed)));
+        draw(); drawScope();
+        if (t - lastPanel > 250) { lastPanel = t; panelRefresh?.(); }
+      } else if (showDots && res?.ok) draw();
+    };
     raf = requestAnimationFrame(loop);
+  }
+
+  // ---------- oscilloscope screen ----------
+  function drawScope() {
+    const dpr = devicePixelRatio || 1, r = scv.getBoundingClientRect(), w = Math.round(r.width), h = Math.round(r.height);
+    if (!w || !h) return;
+    if (scv.width !== w * dpr || scv.height !== h * dpr) { scv.width = w * dpr; scv.height = h * dpr; }
+    const x = scv.getContext('2d'); x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    x.fillStyle = '#07120C'; x.fillRect(0, 0, w, h);
+    x.strokeStyle = 'rgba(80,140,100,0.25)'; x.lineWidth = 1;
+    for (let i = 0; i <= 10; i++) { const px = Math.round(i * w / 10) + 0.5; x.beginPath(); x.moveTo(px, 0); x.lineTo(px, h); x.stroke(); }
+    for (let i = 0; i <= 8; i++) { const py = Math.round(i * h / 8) + 0.5; x.beginPath(); x.moveTo(0, py); x.lineTo(w, py); x.stroke(); }
+    x.strokeStyle = 'rgba(120,200,140,0.45)'; x.beginPath(); x.moveTo(0, h / 2 + 0.5); x.lineTo(w, h / 2 + 0.5); x.stroke();
+    const scope = c.parts.find(p => p.type === 'SCOPE');
+    tInfo.textContent = `t = ${si(sim.t, 's', 4)}  ·  ${fmtT(sim.tdiv)}${sim.paused ? '  ·  paused' : ''}`;
+    if (!scope) { x.fillStyle = '#9AD7A8'; x.font = '13px system-ui, sans-serif'; x.textAlign = 'center'; x.fillText('Add a Scope part and wire CH1 / CH2 to see waveforms', w / 2, h / 2 - 10); return; }
+    const b = sim.buf; if (b.length < 2) return;
+    // trigger: last rising crossing of CH1 through its middle level that still has a full screen after it
+    let start = Math.max(0, b.length - SAMPLES);
+    let lo = Infinity, hi = -Infinity; for (let i = start; i < b.length; i++) { lo = Math.min(lo, b[i][1]); hi = Math.max(hi, b[i][1]); }
+    const mid = (lo + hi) / 2;
+    if (hi - lo > 1e-6) for (let i = b.length - SAMPLES - 1; i > 0; i--) { if (b[i - 1][1] < mid && b[i][1] >= mid) { start = i; break; } }
+    const seg = b.slice(start, start + SAMPLES);
+    const scale = (sel, k) => {
+      if (sel !== 'auto') return +sel;
+      let m = 0; for (const s of seg) if (isFinite(s[k])) m = Math.max(m, Math.abs(s[k]));
+      return VDIVS.find(v => v * 3.8 >= m) ?? VDIVS[VDIVS.length - 1];
+    };
+    const d1 = scale(sim.v1, 1), d2 = scale(sim.v2, 2);
+    const pinsSc = S.pinsOf(scope), wired = (k) => { const kk = S.key(...pinsSc[k]); return c.wires.some(w => S.key(w.x1, w.y1) === kk || S.key(w.x2, w.y2) === kk) || c.parts.some(q => q !== scope && S.pinsOf(q).some(pp => S.key(...pp) === kk)); };
+    const on1 = wired(0), on2 = wired(1);
+    const clampY = (py) => Math.max(-5, Math.min(h + 5, py));
+    const plot = (k, vdiv, col) => {
+      x.strokeStyle = col; x.lineWidth = 2; x.beginPath();
+      seg.forEach((s, i) => { const px = i / (SAMPLES - 1) * w, py = clampY(h / 2 - s[k] / vdiv * (h / 8)); i ? x.lineTo(px, py) : x.moveTo(px, py); });
+      x.stroke();
+    };
+    if (on2) plot(2, d2, '#4FC3F7'); if (on1) plot(1, d1, '#FFE16B');
+    const meas = (k) => {
+      let mn = Infinity, mx = -Infinity, sum = 0, sq = 0;
+      for (const s of seg) { mn = Math.min(mn, s[k]); mx = Math.max(mx, s[k]); sum += s[k]; sq += s[k] * s[k]; }
+      const lvl = (mn + mx) / 2, cross = [];
+      seg.forEach((s, i) => { if (i && seg[i - 1][k] < lvl && s[k] >= lvl) cross.push(s[0]); });
+      const f = cross.length >= 2 && mx - mn > 1e-6 ? (cross.length - 1) / (cross[cross.length - 1] - cross[0]) : null;
+      return `${si(mx - mn, 'V', 3)}pp · avg ${si(sum / seg.length, 'V', 3)}${w > 520 ? ' · rms ' + si(Math.sqrt(sq / seg.length), 'V', 3) : ''}${f ? ' · ' + si(f, 'Hz', 3) : ''}`;
+    };
+    x.font = `600 ${w < 420 ? 10 : 11}px ui-monospace, monospace`; x.textAlign = 'left';
+    x.fillStyle = '#FFE16B'; x.fillText(on1 ? `CH1 ${fmtV(d1)} ${meas(1)}` : 'CH1 not connected', 6, 14);
+    x.fillStyle = '#4FC3F7'; x.fillText(on2 ? `CH2 ${fmtV(d2)} ${meas(2)}` : 'CH2 not connected', 6, h - 7);
   }
 
   // ---------- input ----------
@@ -424,6 +543,7 @@ export function schematicTab(root) {
 
   function renderPanel() {
     panel.innerHTML = '';
+    panelRefresh = null;
     if (!res) solve();
     if (sel?.kind === 'wire') {
       const w = c.wires[sel.i]; if (!w) { sel = null; return renderPanel(); }
@@ -432,11 +552,12 @@ export function schematicTab(root) {
       panel.append(el('div', { class: 'sp-head' }, el('b', { text: 'Wire' }), el('span', { class: 'muted', text: '0 Ω' })),
         readings([['Voltage to ground', v == null ? '—' : si(v, 'V'), true], ['Current', si(i, 'A'), true]], [], []),
         el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', text: '🗑 Delete wire', onclick: () => { c.wires.splice(sel.i, 1); sel = null; commit(); } })));
+      panelRefresh = () => renderPanel();
       return;
     }
     const p = selPart();
-    if (!p) return summary();
-    const t = S.TYPES[p.type], q = p.props, r = res.ok ? res.parts.get(p.id) : null;
+    if (!p) { summary(); const again = () => { panel.innerHTML = ''; summary(); panelRefresh = again; }; panelRefresh = again; return; }
+    const t = S.TYPES[p.type], q = p.props;
     const nameInp = el('input', { class: 'num nm', value: p.name, maxlength: 12 });
     nameInp.addEventListener('change', () => { p.name = nameInp.value.trim().slice(0, 12) || p.name; commit(); });
     panel.append(el('div', { class: 'sp-head' }, nameInp, el('span', { class: 'muted', text: t.label }),
@@ -468,10 +589,21 @@ export function schematicTab(root) {
       case 'LED': f.append(choice('Color', q.color, Object.entries(S.LED_COLORS).map(([k, v]) => [k, `${k} (${v.vf} V)`]), v => { q.color = v; }), field('Max current', plain(q.imax), 'A', v => { q.imax = v; })); break;
       case 'D': f.append(choice('Type', q.model, Object.entries(S.DIODES).map(([k, v]) => [k, `${k}: ${v.note}`]), v => { q.model = v; })); break;
       case 'LAMP': f.append(field('Rated voltage', plain(q.vr), 'V', v => { q.vr = v; }), field('Rated power', plain(q.wr), 'W', v => { q.wr = v; })); break;
+      case 'C': f.append(field('Capacitance', plain(q.c), 'F', v => { q.c = Math.max(v, 1e-15); }), field('Voltage rating', plain(q.vmax), 'V', v => { q.vmax = v; }),
+        choice('Type', q.polar ? 'e' : 'n', [['e', 'Electrolytic (has + and −)'], ['n', 'Ceramic / film (no polarity)']], v => { q.polar = v === 'e'; })); break;
+      case 'L': f.append(field('Inductance', plain(q.l), 'H', v => { q.l = Math.max(v, 1e-12); }), field('Coil resistance', plain(q.r), 'Ω', v => { q.r = v; })); break;
+      case 'SIG': f.append(choice('Wave', q.wave, [['sine', 'Sine'], ['square', 'Square (±)'], ['triangle', 'Triangle'], ['saw', 'Sawtooth'], ['pwm', 'PWM (0 to amplitude)']], v => { q.wave = v; }),
+        field('Frequency', plain(q.f), 'Hz', v => { q.f = Math.max(v, 1e-3); }), field('Amplitude (peak)', plain(q.amp), 'V', v => { q.amp = v; }),
+        field('DC offset', plain(q.off), 'V', v => { q.off = v; }), field('Duty (PWM)', plain(q.duty), '%', v => { q.duty = Math.min(100, v); })); break;
+      case 'SCOPE': f.append(note('CH1 (yellow) and CH2 (blue) measure against the bottom pin (COM). Usually wire COM to ground. Settings are under the scope screen.'),
+        el('button', { class: 'btn', type: 'button', text: 'Auto time/div', onclick: () => autoTime() })); break;
+      case 'OPTO': f.append(choice('CTR (current transfer ratio)', String(q.ctr), [[50, '50 %'], [80, '80 %'], [100, '100 % (typical)'], [160, '160 %'], [200, '200 %'], [300, '300 %'], [600, '600 %']].map(([v, t]) => [String(v), t]), v => { q.ctr = +v; }),
+        note('Pins: 1 anode, 2 cathode (LED, left) · 4 collector, 3 emitter (transistor, right). Ic = CTR × If until it saturates.')); break;
     }
     if (f.children.length) panel.append(f);
     const rd = el('div', { class: 'sp-read' }); panel.append(rd);
     updateReadings();
+    panelRefresh = updateReadings;
     function updateReadings() {
       const r = res.ok ? res.parts.get(p.id) : null;
       rd.innerHTML = '';
@@ -549,6 +681,36 @@ export function schematicTab(root) {
       }
       case 'VM': vals.push(['Reads', si(Vab, 'V'), true]); L.push('Voltmeter: + side (left pin) minus − side. 10 MΩ inside, like a real multimeter.'); break;
       case 'AM': vals.push(['Reads', si(r.i, 'A'), true]); L.push('Ammeter: current flowing in at the left pin. Put it IN the wire (in series), never across a battery.'); break;
+      case 'C':
+        vals.push(['Voltage', si(Vab, 'V'), true], ['Current', si(r.i, 'A'), true], ['Energy', si(r.energy, 'J')]);
+        L.push(`Charge Q = C × V = ${si(q.c * Vab, 'C')}`, 'Current only flows while the voltage changes: i = C × dV/dt.');
+        if (Math.abs(Vab) > q.vmax) warn.push(['bad', `Over its ${si(q.vmax, 'V')} rating: it can burst. Use a higher voltage capacitor (1.25× margin).`]);
+        else if (Math.abs(Vab) > 0.8 * q.vmax) warn.push(['warn', `Close to its ${si(q.vmax, 'V')} rating.`]);
+        if (q.polar && Vab < -0.5) warn.push(['bad', 'Electrolytic capacitor connected backwards (− side is higher): it heats up and can explode. Flip it.']);
+        break;
+      case 'L':
+        vals.push(['Current', si(r.i, 'A'), true], ['Voltage', si(Vab, 'V'), true], ['Energy', si(r.energy, 'J')]);
+        L.push(`Stored energy = ½ × L × I² = ${si(r.energy, 'J')}`, 'A coil fights changes in current. Switch it off suddenly and the voltage jumps (flyback spike): use a diode across it.');
+        if (Math.abs(Vab) > 60) warn.push(['bad', `${si(Math.abs(Vab), 'V')} across the coil: a switch-off spike. It can kill transistors and MOSFETs. Add a flyback diode.`]);
+        break;
+      case 'SIG': {
+        vals.push(['Output now', si(Vab, 'V'), true], ['Current', si(-r.i, 'A'), true], ['Frequency', si(q.f, 'Hz')], ['Period', si(1 / q.f, 's')]);
+        if (q.wave === 'sine') L.push(`Sine: peak ${si(q.amp, 'V')}, peak-to-peak ${si(2 * q.amp, 'V')}, RMS = peak ÷ √2 = ${si(q.amp / Math.SQRT2, 'V')}`);
+        if (q.wave === 'pwm') L.push(`PWM: ${q.duty} % high → average ${si(q.off + q.amp * q.duty / 100, 'V')}`);
+        break;
+      }
+      case 'SCOPE': vals.push(['CH1 now', si(r.ch1, 'V'), true], ['CH2 now', si(r.ch2, 'V'), true]); break;
+      case 'OPTO': {
+        const st = { off: 'OFF', act: 'ACTIVE (current-limited)', sat: 'SATURATED (fully on)' }[r.state];
+        vals.push(['LED current If', si(r.ifw, 'A'), true], ['Collector Ic', si(r.ic, 'A'), true], ['Vce', si(r.vce, 'V'), true], ['State', st]);
+        L.push(`Max Ic = CTR × If = ${q.ctr} % × ${si(r.ifw, 'A')} = ${si(r.ifw * q.ctr / 100, 'A')}`, 'LED side and transistor side are joined only by light: isolation up to 5 kV.');
+        if (r.ifw > 0.05) warn.push(['bad', 'LED current over 50 mA: the PC817 LED burns. Use a bigger series resistor.']);
+        else if (r.on && r.ifw < 0.001) warn.push(['warn', 'Weak drive (under 1 mA): the output may not switch fully. Aim for 5–10 mA.']);
+        if (r.state === 'sat') warn.push(['ok', 'Saturated: the output is fully ON (good for switching).']);
+        if (r.state === 'act') warn.push(['warn', 'Not saturated: the load wants more current than CTR × If. Increase If or use a bigger pull-up resistor.']);
+        if (r.vce > 35) warn.push(['bad', 'Vce over 35 V: above the PC817 rating.']);
+        break;
+      }
     }
     return readings(vals, L, warn);
   }
@@ -556,7 +718,7 @@ export function schematicTab(root) {
   function summary() {
     const box = el('div');
     if (!res.ok) { box.append(el('p', { class: 'flag ' + (res.stopped ? 'warn' : 'bad'), text: res.error })); panel.append(box); return; }
-    box.append(readings([['Power from sources', si(res.delivered, 'W'), true], ['Parts', String(c.parts.length)], ['Wires', String(c.wires.length)]], [],
+    box.append(readings([[timeMode() ? 'Power now' : 'Power from sources', si(res.delivered, 'W'), true], ...(timeMode() ? [['Time', si(sim.t, 's', 4)]] : []), ['Parts', String(c.parts.length)], ['Wires', String(c.wires.length)]], [],
       res.notes.map(t => [/SHORT/.test(t) ? 'bad' : 'warn', t])));
     box.append(note('Tap a part or wire for its voltage, current and power. Wire colors: <b style="color:#3DDC84">green = +</b>, grey = 0 V, <b style="color:#FF6B6B">red = −</b>. Yellow dots = current flow.'));
     panel.append(box);
@@ -574,9 +736,9 @@ export function schematicTab(root) {
     document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
     return d;
   }
-  function loadCircuit(j, msg) { c = j; sel = null; hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
+  function loadCircuit(j, msg) { resetSim(); c = j; sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -672,12 +834,60 @@ function symbol(ctx, p, r, g) {
       L(-2, 0, -0.85, 0); L(0.85, 0, 2, 0); ctx.strokeStyle = C.part; ctx.beginPath(); ctx.arc(0, 0, 0.85, 0, 7); ctx.stroke(); L(-0.6, -0.6, 0.6, 0.6); L(-0.6, 0.6, 0.6, -0.6); break;
     }
     case 'GND': L(0, 0, 0, 0.8); L(-0.75, 0.8, 0.75, 0.8); L(-0.5, 1.1, 0.5, 1.1); L(-0.25, 1.4, 0.25, 1.4); break;
+    case 'C': {
+      L(-2, 0, -0.25, 0); L(0.25, 0, 2, 0); ctx.lineWidth *= 1.5;
+      L(-0.25, -0.85, -0.25, 0.85);
+      if (q.polar) { ctx.beginPath(); ctx.arc(1.0, 0, 0.95, Math.PI * 0.72, Math.PI * 1.28); ctx.stroke(); T('+', -0.75, -0.75, 0.7, '#3DDC84'); }
+      else L(0.25, -0.85, 0.25, 0.85);
+      if (r && q.vmax && Math.abs(r.v) > q.vmax) { ctx.strokeStyle = '#FF6B6B'; L(-0.25, -0.85, -0.25, 0.85); }
+      break;
+    }
+    case 'L': {
+      L(-2, 0, -1.6, 0); L(1.6, 0, 2, 0);
+      ctx.beginPath(); for (let k = 0; k < 4; k++) { const cx = -1.2 + k * 0.8; ctx.moveTo(cx - 0.4, 0); ctx.arc(cx, 0, 0.4, Math.PI, 0); } ctx.stroke();
+      break;
+    }
+    case 'SIG': {
+      L(-2, 0, -0.95, 0); L(0.95, 0, 2, 0); ctx.strokeStyle = C.sel; ctx.beginPath(); ctx.arc(0, 0, 0.95, 0, 7); ctx.stroke();
+      ctx.save(); ctx.rotate(-(p.rot || 0) * Math.PI / 2); ctx.strokeStyle = C.part; ctx.lineWidth *= 0.9; ctx.beginPath();
+      const w = q.wave;
+      for (let i = 0; i <= 24; i++) {
+        const u = i / 24, xx = -0.55 + 1.1 * u, ph = u * 1.5 % 1;
+        const yv = w === 'square' ? (ph < 0.5 ? -1 : 1) : w === 'triangle' ? (ph < 0.5 ? 4 * ph - 1 : 3 - 4 * ph) : w === 'saw' ? 2 * ph - 1 : w === 'pwm' ? (ph < 0.3 ? -1 : 1) : Math.sin(u * 3 * Math.PI);
+        i ? ctx.lineTo(xx, yv * 0.35 * -1) : ctx.moveTo(xx, yv * 0.35 * -1);
+      }
+      ctx.stroke(); ctx.restore();
+      T('+', -1.35, -0.6, 0.7, '#3DDC84');
+      break;
+    }
+    case 'SCOPE': {
+      L(-3, -1, -2.1, -1); L(-3, 1, -2.1, 1); L(0, 2, 0, 1.55);
+      ctx.fillStyle = '#07120C'; ctx.fillRect(-2.1, -1.55, 4.2, 3.1); ctx.strokeStyle = C.part; ctx.strokeRect(-2.1, -1.55, 4.2, 3.1);
+      ctx.strokeStyle = '#FFE16B'; ctx.beginPath(); for (let i = 0; i <= 30; i++) { const u = i / 30; const xx = -1.2 + 3 * u, yy = -0.35 + Math.sin(u * 4 * Math.PI) * 0.45; i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); } ctx.stroke();
+      ctx.strokeStyle = '#4FC3F7'; ctx.beginPath(); for (let i = 0; i <= 30; i++) { const u = i / 30; const xx = -1.2 + 3 * u, yy = 0.65 + ((u * 2) % 1 < 0.5 ? -0.3 : 0.3); i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); } ctx.stroke();
+      T('1', -1.75, -1, 0.55, '#FFE16B'); T('2', -1.75, 1, 0.55, '#4FC3F7'); T('⏚', 0, 1.15, 0.6, C.dim);
+      break;
+    }
+    case 'OPTO': {
+      const lit = r?.on && r.ifw > 1e-4;
+      ctx.setLineDash([0.25, 0.18]); ctx.strokeStyle = C.dim; ctx.strokeRect(-1.4, -1.75, 2.8, 3.5); ctx.setLineDash([]); ctx.strokeStyle = C.part;
+      if (lit) { const gr = ctx.createRadialGradient(-0.8, 0, 0.05, -0.8, 0, 1.1); gr.addColorStop(0, 'rgba(255,90,60,0.9)'); gr.addColorStop(1, 'rgba(255,90,60,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(-0.8, 0, 1.1, 0, 7); ctx.fill(); }
+      L(-2, -1, -0.8, -1, -0.8, -0.4); L(-0.8, 0.35, -0.8, 1, -2, 1);
+      ctx.beginPath(); ctx.moveTo(-1.2, -0.4); ctx.lineTo(-0.4, -0.4); ctx.lineTo(-0.8, 0.35); ctx.closePath(); ctx.fillStyle = lit ? '#FF5A3C' : 'rgba(255,90,60,0.25)'; ctx.fill(); ctx.stroke();
+      L(-1.2, 0.35, -0.4, 0.35);
+      ctx.strokeStyle = lit ? '#FFB199' : C.dim; L(-0.2, -0.35, 0.25, -0.1); L(0.1, -0.08, 0.25, -0.1, 0.18, -0.25); L(-0.2, 0.15, 0.25, 0.4); L(0.1, 0.42, 0.25, 0.4, 0.18, 0.25);
+      ctx.strokeStyle = C.part; ctx.lineWidth *= 1.4; L(0.55, -0.65, 0.55, 0.65); ctx.lineWidth /= 1.4;
+      L(0.55, -0.25, 1.2, -0.8, 1.2, -1, 2, -1); L(0.55, 0.25, 1.2, 0.8, 1.2, 1, 2, 1);
+      ctx.beginPath(); ctx.moveTo(1.2, 0.8); ctx.lineTo(0.9, 0.75); ctx.lineTo(1.08, 0.55); ctx.closePath(); ctx.fillStyle = C.part; ctx.fill();
+      T('1', -1.7, -1.4, 0.5, C.dim); T('2', -1.7, 1.4, 0.5, C.dim); T('4', 1.7, -1.4, 0.5, C.dim); T('3', 1.7, 1.4, 0.5, C.dim);
+      break;
+    }
     case 'VM': case 'AM': L(-2, 0, -1, 0); L(1, 0, 2, 0); ctx.beginPath(); ctx.arc(0, 0, 1, 0, 7); ctx.stroke(); T(p.type === 'VM' ? 'V' : 'A', 0, 0.05, 1.0, C.sel); T('+', -1.45, -0.55, 0.7, '#3DDC84'); break;
   }
 }
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = type === 'DPDT' ? 7 : type === 'SPDT' ? 14 : g; x.translate(w / 2, type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = type === 'DPDT' ? 7 : type === 'SPDT' ? 14 : type === 'SCOPE' ? 11 : type === 'OPTO' ? 12 : g; x.translate(w / 2, type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }
