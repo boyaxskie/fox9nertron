@@ -76,6 +76,8 @@ export function schematicTab(root) {
     tray.append(b);
     requestAnimationFrame(() => drawIcon(cv, t));
   }
+  // mouse wheel scrolls the rows sideways (when they don't wrap)
+  for (const row of [top, tray]) row.addEventListener('wheel', (e) => { if (row.scrollWidth > row.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { row.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
   const canvas = el('canvas', { class: 'sch-canvas' });
   const wrap = el('div', { class: 'sch-wrap' }, canvas);
   const status = el('div', { class: 'sch-status' });

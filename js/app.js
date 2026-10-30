@@ -9,7 +9,7 @@ import { timingTab } from './tabs/timing.js';
 import { partsTab } from './tabs/parts.js';
 import { schematicTab } from './tabs/schematic.js';
 
-export const VERSION = '1.2';
+export const VERSION = '1.2.1';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],

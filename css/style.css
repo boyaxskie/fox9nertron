@@ -194,3 +194,7 @@ svg text { fill: var(--dim); font: 11px var(--mono); }
 .scope-cv { width: 100%; height: 210px; border-radius: 8px; display: block; }
 .scope-ctl { display: flex; gap: 6px; flex-wrap: wrap; }
 .scope-ctl .sel.sm { padding: 7px 6px; font-size: 13px; }
+/* PC / mouse: no swiping, so tray and tools wrap onto more rows instead of scrolling */
+@media (pointer: fine), (min-width: 900px) {
+  .sch-tools, .sch-tray { flex-wrap: wrap; overflow: visible; }
+}
