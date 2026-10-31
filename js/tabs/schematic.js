@@ -130,7 +130,13 @@ export function schematicTab(root) {
   const scopeBox = el('div', { class: 'scope-box' }, el('div', { class: 'scope-head' }, el('b', { text: '📈 Oscilloscope' }), tInfo),
     scv, el('div', { class: 'scope-ctl' }, pauseBtn, resetBtn, autoBtn, tSel, spSel, v1Sel, v2Sel));
   scopeBox.hidden = true;
-  root.append(top, tray, wrap, status, scopeBox, panel);
+  // nudge arrows: move the selected part (wires follow), wire, or label one step
+  let nudgeWhat = 'part';
+  const whatSel = el('select', { class: 'sel sm', 'aria-label': 'What to move' }, el('option', { value: 'part', text: 'move part' }), el('option', { value: 'label', text: 'move label' }));
+  whatSel.onchange = () => { nudgeWhat = whatSel.value; };
+  const nudgeBar = el('div', { class: 'pcb-nudge', hidden: true }, el('span', { class: 'muted', text: 'Nudge' }),
+    btn('◀', () => nudgeSch(-1, 0), 'icon'), btn('▲', () => nudgeSch(0, -1), 'icon'), btn('▼', () => nudgeSch(0, 1), 'icon'), btn('▶', () => nudgeSch(1, 0), 'icon'), whatSel);
+  root.append(top, tray, wrap, nudgeBar, status, scopeBox, panel);
   // ---------- PCB view (same circuit, board layout + G-code) ----------
   let view2 = 'sch';
   const pcb = pcbView({ getC: () => c, commit: (push = true) => commit(push), undo: () => undo(), redo: () => redo(), say: (t) => say(t), shareFile: (n, t, m) => shareFile(n, t, m), toSchematic: () => setView('sch') });
@@ -138,6 +144,7 @@ export function schematicTab(root) {
   function setView(v) {
     view2 = v; store.set('sch.view', v);
     for (const e of [top, tray, wrap, status, panel]) e.hidden = v === 'pcb';
+    if (v === 'pcb') nudgeBar.hidden = true; else syncNudgeSch();
     if (v === 'pcb') { scopeBox.hidden = true; pcb.show(); } else { pcb.hide(); resize(); commit(false); }
     scrollTo({ top: 0 });
   }
@@ -163,6 +170,7 @@ export function schematicTab(root) {
   function setMode(m) {
     mode = m; wireStart = null;
     for (const [k, b] of Object.entries(modeBtns)) b.classList.toggle('on', k === m);
+    syncNudgeSch();
     for (const b of tray.children) b.classList.toggle('on', m === 'place' && b.dataset.type === placeType);
     say({
       select: 'Tap a part to see its readings. Drag to move. Tap a switch to flip it, hold a button to press it.',
@@ -544,6 +552,41 @@ export function schematicTab(root) {
   function mid() { const v = [...ptrs.values()]; return [(v[0][0] + v[1][0]) / 2, (v[0][1] + v[1][1]) / 2]; }
   function zoomAt(k, fx, fy) { const ng = Math.max(6, Math.min(80, view.g * k)), kk = ng / view.g; view.ox = fx - (fx - view.ox) * kk; view.oy = fy - (fy - view.oy) * kk; view.g = ng; }
 
+  // ---------- nudge (arrows) ----------
+  function syncNudgeSch() {
+    if (typeof nudgeBar === 'undefined') return;
+    const on = view2 !== 'pcb' && mode === 'select' && (sel?.kind === 'wire' ? !!c.wires[sel.i] : !!selPart());
+    nudgeBar.hidden = !on;
+    whatSel.hidden = sel?.kind !== 'part';
+    if (sel?.kind !== 'part') { nudgeWhat = 'part'; whatSel.value = 'part'; }
+  }
+  function nudgeSch(dx, dy) {
+    if (sel?.kind === 'wire' && c.wires[sel.i]) {
+      const w = c.wires[sel.i], horiz = w.y1 === w.y2, vert = w.x1 === w.x2;
+      if ((horiz && !dy) || (vert && !dx)) return say('A straight wire slides sideways only: use ▲ ▼ for a flat wire, ◀ ▶ for a standing one.');
+      const keep = { ...w, x1: w.x1 + dx, x2: w.x2 + dx, y1: w.y1 + dy, y2: w.y2 + dy };
+      c.wires = moveWire(c.wires, sel.i, dx, dy);
+      const ni = c.wires.findIndex(q => S.key(q.x1, q.y1) === S.key(keep.x1, keep.y1) && S.key(q.x2, q.y2) === S.key(keep.x2, keep.y2));
+      sel = ni >= 0 ? { kind: 'wire', i: ni } : null;
+      commit(); return;
+    }
+    const p = selPart(); if (!p) return;
+    if (nudgeWhat === 'label') { const o = p.lbl ?? [0, 0]; p.lbl = [o[0] + dx * 0.5, o[1] + dy * 0.5]; commit(); return; }
+    // wires on the pins: stretch them if they stay straight, otherwise add a short straight piece (no crooked wires)
+    const old = S.pinsOf(p);
+    const ends = attachedEnds(p);
+    p.x += dx; p.y += dy;
+    const now = S.pinsOf(p), add = [];
+    for (const [i, end, k] of ends) {
+      const w = c.wires[i]; if (!w) continue;
+      const straight = (w.x1 === w.x2 && dx === 0) || (w.y1 === w.y2 && dy === 0);
+      if (straight) { w['x' + end] = now[k][0]; w['y' + end] = now[k][1]; }
+      else add.push({ x1: old[k][0], y1: old[k][1], x2: now[k][0], y2: now[k][1] });
+    }
+    c.wires.push(...add);
+    c.wires = c.wires.filter(w => w.x1 !== w.x2 || w.y1 !== w.y2);
+    commit();
+  }
   // microcontroller boards: which pin the panel shows
   const boardPinSel = new Map();
   function boardPin(p) { const B = S.BOARDS[p.type]; const n = boardPinSel.get(p.id); return B.pins.some(x => x.n === n) ? n : (Object.keys(p.props.pins ?? {})[0] ?? B.pins.find(x => x.k === 'gpio').n); }
@@ -671,6 +714,7 @@ export function schematicTab(root) {
     if (k === 'r') rotateSel();
     else if (k === 'w') setMode('wire');
     else if (k === 'escape') { setMode('select'); sel = null; renderPanel(); }
+    else if (k.startsWith('arrow') && mode === 'select' && sel) { e.preventDefault(); const m = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] }[k]; nudgeSch(m[0], m[1]); }
     else if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSel(); } else if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
   });
@@ -777,6 +821,7 @@ export function schematicTab(root) {
   }
 
   function renderPanel() {
+    syncNudgeSch();
     panel.innerHTML = '';
     panelRefresh = null;
     if (!res) solve();
