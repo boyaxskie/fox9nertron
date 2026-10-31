@@ -214,6 +214,21 @@ export function sigValue(q, t) {
   }
 }
 
+// average of a PWM wave over [t0, t1] (exact, so pulse widths stay exact even with big time steps)
+export function pwmAvg(f, duty, amp, t0, t1) {
+  const T = 1 / f, D = Math.min(1, Math.max(0, duty / 100)) * T;
+  const I = (t) => { const n = Math.floor(t / T), ph = t - n * T; return n * D + Math.min(ph, D); };
+  return t1 > t0 ? amp * (I(t1) - I(t0)) / (t1 - t0) : (((t0 / T) % 1) * T < D ? amp : 0);
+}
+// fastest repeating signal in the circuit (Hz): the simulation time step follows it
+export function fastestFreq(c) {
+  let f = 0;
+  for (const p of c.parts) {
+    if (p.type === 'SIG') f = Math.max(f, p.props.f);
+    if (isBoard(p.type)) for (const q of Object.values(p.props.pins ?? {})) if (q.mode === 'pwm') f = Math.max(f, q.f ?? 1000);
+  }
+  return f;
+}
 const R_WIRE = 1e-4, R_OPEN = 1e12, G_MIN = 1e-12;
 
 export const rotPt = ([x, y], rot) => { for (let k = 0; k < (rot & 3); k++) [x, y] = [-y, x]; return [x, y]; };
@@ -417,7 +432,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
           else if (m === 'low') R(G, nd, B.rout, p, 'pin:' + q.n);
           else if (m === 'pwm') {
             const c0 = cfg[q.n], n2 = inner();
-            const val = sim ? sigValue({ wave: 'pwm', f: c0.f ?? 1000, amp: B.vcc, off: 0, duty: c0.duty ?? 50 }, sim.t) : B.vcc * (c0.duty ?? 50) / 100;
+            const val = sim ? pwmAvg(c0.f ?? 1000, c0.duty ?? 50, B.vcc, sim.t - sim.dt, sim.t) : B.vcc * (c0.duty ?? 50) / 100;
             V(n2, G, val, p, 'src:' + q.n); R(n2, nd, B.rout, p, 'pin:' + q.n);
           }
           else if (m === 'pu') R(vccN, nd, B.pullR, p, 'pin:' + q.n);
@@ -667,16 +682,20 @@ export function solveCircuit(c, sim = null, opts = {}) {
       continue;
     }
     if (p.type === 'SERVO') {
-      const m = SERVOS[p.props.model] ?? SERVOS.SG90, prev = st.get(p.id) ?? { ang: 90, tgt: 90, lvl: 0, tr: null, w: null };
+      // pulse width = time the signal is high, added up step by step (a step that is partly high counts partly)
+      const m = SERVOS[p.props.model] ?? SERVOS.SG90, prev = st.get(p.id) ?? { ang: 90, tgt: 90, acc: 0, hi: 0, vh: 0, w: null };
       const vg = res.v[pins[2]], vs = res.v[pins[0]] - vg, vcc = res.v[pins[1]] - vg, load = mine.find(e => e.role === 'load');
-      let { ang, tgt, lvl, tr, w } = prev;
-      const hi = vs > 1.5 ? 1 : 0, t = sim ? sim.t : 0;
+      let { ang, tgt, acc, hi, vh, w } = prev;
       if (sim) {
-        if (hi && !lvl) tr = t;
-        if (!hi && lvl && tr != null) { const pw = t - tr; if (pw > 0.3e-3 && pw < 3e-3) { w = pw; tgt = Math.max(0, Math.min(180, (pw - 0.5e-3) / 2e-3 * 180)); } }
+        vh = Math.max(vh * 0.9999, vs);
+        const fr = vh > 1.2 ? Math.max(0, Math.min(1, vs / vh)) : 0, now = fr > 0.02 ? 1 : 0;
+        if (now) acc += fr * sim.dt;
+        if (!now && hi) { const pw = acc; if (pw > 0.3e-3 && pw < 3e-3) { w = pw; tgt = Math.max(0, Math.min(180, (pw - 0.5e-3) / 2e-3 * 180)); } acc = 0; }
+        if (!now) acc = 0;
+        hi = now;
         if (vcc >= m.vmin * 0.9) { const stp = m.speed * sim.dt; ang = Math.abs(tgt - ang) <= stp ? tgt : ang + Math.sign(tgt - ang) * stp; }
       }
-      parts.set(p.id, { va, vb, vsig: vs, vcc, icc: load.i, ang, tgt, w, moving: Math.abs(tgt - ang) > 0.5, v: vcc, i: load.i, p: vcc * load.i, lvl: hi, tr, dots: [] });
+      parts.set(p.id, { va, vb, vsig: vs, vcc, icc: load.i, ang, tgt, w, moving: Math.abs(tgt - ang) > 0.5, v: vcc, i: load.i, p: vcc * load.i, acc, hi, vh, dots: [] });
       continue;
     }
     if (p.type === 'STEPPER') {
@@ -743,7 +762,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
     else if (p.type === 'REG') next.set(p.id, { rs: r.state });
     else if (p.type === 'RELAY') next.set(p.id, { i: r.icoil, on: r.on });
     else if (p.type === 'T555') next.set(p.id, { q: r.q });
-    else if (p.type === 'SERVO') next.set(p.id, { ang: r.ang, tgt: r.tgt, lvl: r.lvl, tr: r.tr, w: r.w, moving: r.moving });
+    else if (p.type === 'SERVO') next.set(p.id, { ang: r.ang, tgt: r.tgt, acc: r.acc, hi: r.hi, vh: r.vh, w: r.w, moving: r.moving });
     else if (p.type === 'STEPPER') next.set(p.id, { ang: r.ang, lvl: r.lvl, n: r.n, en: r.en, last: r.last, rate: r.rate });
   }
   return { ok: true, parts, wires, vAt, notes, delivered, nodes: nextNode, next, t: sim?.t ?? 0 };

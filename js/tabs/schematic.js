@@ -32,7 +32,7 @@ export function schematicTab(root) {
   const TDIVS = [1e-6, 2e-6, 5e-6, 1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1, 0.2, 0.5, 1];
   const VDIVS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
   const SAMPLES = 400;      // samples across one scope screen (10 divisions)
-  const sim = { t: 0, state: new Map(), buf: [], paused: false, tdiv: +store.get('sch.tdiv', '0.005'), speed: +store.get('sch.speed', '1'),
+  const sim = { t: 0, state: new Map(), buf: [], paused: false, tdiv: +store.get('sch.tdiv', '0.005'), speed: store.get('sch.speed2', 'screen'), next: null,
     v1: store.get('sch.v1', 'auto'), v2: store.get('sch.v2', 'auto') };
   const dtOf = () => sim.tdiv * 10 / SAMPLES;
   const timeMode = () => running && S.isDynamic(c);
@@ -41,19 +41,34 @@ export function schematicTab(root) {
     res = timeMode() ? S.solveCircuit(c, { t: sim.t, dt: dtOf(), state: sim.state }) : S.solveCircuit(c);
   }
   // time 0 starts from the DC operating point (signals at their offset): amplifier coupling capacitors are already charged
-  function resetSim() { sim.t = 0; sim.buf = []; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
-  function stepSim(n) {
-    const dt = dtOf(), scope = c.parts.find(p => p.type === 'SCOPE');
+  function resetSim() { sim.t = 0; sim.buf = []; sim.next = null; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
+  // run the circuit for `span` seconds of circuit time. The step is fine enough for the fastest signal (≥ 40 per period),
+  // independent of the scope. The scope only takes samples every time/div × 10 ÷ 400.
+  const MAX_STEPS = 600;
+  function simDt() {
+    const fs = S.fastestFreq(c), sd = dtOf();
+    // real-time runs: step size from the fastest signal only (20 per period), so zooming the scope doesn't slow the motors
+    if (sim.speed !== 'screen') return Math.max(1e-7, Math.min(fs > 0 ? 1 / fs / 20 : 0.002, 0.002));
+    return Math.max(1e-7, Math.min(sd, fs > 0 ? 1 / fs / 40 : sd, 0.002));
+  }
+  function stepSim(span) {
+    const dt = simDt(), sd = dtOf(), scope = c.parts.find(p => p.type === 'SCOPE');
+    let n = Math.max(1, Math.ceil(span / dt - 1e-9));
+    const lag = n > MAX_STEPS; n = Math.min(n, MAX_STEPS);
+    if (sim.next == null || sim.next < sim.t - sd) sim.next = sim.t;
     for (let k = 0; k < n; k++) {
       sim.t += dt;
       const r = S.solveCircuit(c, { t: sim.t, dt, state: sim.state });
       res = r;
-      if (!r.ok) return;
+      if (!r.ok) return lag;
       sim.state = r.next;
-      const sc = scope && r.parts.get(scope.id);
-      sim.buf.push([sim.t, sc ? sc.ch1 : NaN, sc ? sc.ch2 : NaN]);
+      if (sim.t + 1e-12 >= sim.next) {
+        const sc = scope && r.parts.get(scope.id);
+        while (sim.t + 1e-12 >= sim.next) { sim.buf.push([sim.next, sc ? sc.ch1 : NaN, sc ? sc.ch2 : NaN]); sim.next += sd; }
+      }
     }
     if (sim.buf.length > SAMPLES * 3) sim.buf.splice(0, sim.buf.length - SAMPLES * 3);
+    return lag;
   }
   let panelRefresh = null, lastPanel = 0;
 
@@ -100,13 +115,14 @@ export function schematicTab(root) {
   const tSel = el('select', { class: 'sel sm', 'aria-label': 'Time per division' }, TDIVS.map(t => el('option', { value: t, text: fmtT(t) })));
   const v1Sel = el('select', { class: 'sel sm', 'aria-label': 'CH1 volts per division' }, el('option', { value: 'auto', text: 'CH1 auto' }), VDIVS.map(v => el('option', { value: v, text: 'CH1 ' + fmtV(v) })));
   const v2Sel = el('select', { class: 'sel sm', 'aria-label': 'CH2 volts per division' }, el('option', { value: 'auto', text: 'CH2 auto' }), VDIVS.map(v => el('option', { value: v, text: 'CH2 ' + fmtV(v) })));
-  const spSel = el('select', { class: 'sel sm', 'aria-label': 'Speed' }, [[0.1, '0.1× slow'], [0.25, '0.25×'], [0.5, '0.5×'], [1, '1× speed'], [2, '2×'], [4, '4×'], [10, '10× fast']].map(([v, t]) => el('option', { value: v, text: t })));
+  // speed: 'screen' = one scope screen every 2 s (good for fast signals), numbers = × real time
+  const spSel = el('select', { class: 'sel sm', 'aria-label': 'Speed' }, [['screen', '📺 scope pace'], [1, 'real time 1×'], [2, '2×'], [0.5, '½× slow'], [0.1, '0.1× slow'], [0.01, '0.01× slow'], [0.001, '0.001× slow']].map(([v, t]) => el('option', { value: v, text: t })));
   tSel.value = String(sim.tdiv); if (tSel.value === '') { sim.tdiv = 0.005; tSel.value = '0.005'; }
   v1Sel.value = sim.v1; v2Sel.value = sim.v2; spSel.value = String(sim.speed);
-  tSel.onchange = () => { sim.tdiv = +tSel.value; store.set('sch.tdiv', tSel.value); sim.buf = []; };
+  tSel.onchange = () => { sim.tdiv = +tSel.value; store.set('sch.tdiv', tSel.value); sim.buf = []; sim.next = null; };
   v1Sel.onchange = () => { sim.v1 = v1Sel.value; store.set('sch.v1', sim.v1); };
   v2Sel.onchange = () => { sim.v2 = v2Sel.value; store.set('sch.v2', sim.v2); };
-  spSel.onchange = () => { sim.speed = +spSel.value; store.set('sch.speed', spSel.value); };
+  spSel.onchange = () => { sim.speed = spSel.value; store.set('sch.speed2', spSel.value); };
   const pauseBtn = el('button', { class: 'sb', type: 'button', text: '⏸ Pause', onclick: () => { sim.paused = !sim.paused; pauseBtn.textContent = sim.paused ? '▶ Resume' : '⏸ Pause'; } });
   const resetBtn = el('button', { class: 'sb', type: 'button', text: '⟲ t = 0', onclick: () => { resetSim(); solve(); draw(); say('Time reset: capacitors empty, coils without current.'); } });
   const autoBtn = el('button', { class: 'sb', type: 'button', text: 'Auto time', onclick: () => autoTime() });
@@ -125,6 +141,7 @@ export function schematicTab(root) {
     if (v === 'pcb') { scopeBox.hidden = true; pcb.show(); } else { pcb.hide(); resize(); commit(false); }
     scrollTo({ top: 0 });
   }
+  function autoSpeed() { const slow = c.parts.some(p => ['SERVO', 'STEPPER', 'T555', 'RELAY'].includes(p.type)) && !c.parts.some(p => p.type === 'SIG'); sim.speed = slow ? '1' : 'screen'; spSel.value = sim.speed; store.set('sch.speed2', sim.speed); }
   function autoTimeQuiet() { if (c.tdiv) { sim.tdiv = TDIVS.find(t => t >= c.tdiv) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; return; } const g = c.parts.find(p => p.type === 'SIG'); if (g) { const want = 2.5 / g.props.f / 10; sim.tdiv = TDIVS.find(t => t >= want) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; } else if (c.parts.some(p => p.type === 'L')) { sim.tdiv = 0.005; tSel.value = '0.005'; sim.buf = []; } }
   function autoTime() {
     const g = c.parts.find(p => p.type === 'SIG');
@@ -385,6 +402,7 @@ export function schematicTab(root) {
 
   // ---------- animation ----------
   let raf = 0;
+  let lastFrame = null;
   function animate() {
     if (raf) return;
     const loop = (t) => {
@@ -394,7 +412,8 @@ export function schematicTab(root) {
       const tm = timeMode();
       const tm2 = tm && view2 !== 'pcb'; if (scopeBox.hidden === tm2) scopeBox.hidden = !tm2;
       if (tm) {
-        if (!sim.paused && !down?.drag) stepSim(Math.max(1, Math.round(SAMPLES / 120 * sim.speed)));
+        const fdt = Math.min(0.05, Math.max(0, (t - (lastFrame ?? t)) / 1000)); lastFrame = t;
+        if (!sim.paused && !down?.drag) sim.lag = stepSim(sim.speed === 'screen' ? sim.tdiv * 10 / 120 : (+sim.speed) * (fdt || 1 / 60));
         draw(); drawScope();
         if (t - lastPanel > 250) { lastPanel = t; panelRefresh?.(); }
       } else if (showDots && res?.ok) draw();
@@ -414,7 +433,7 @@ export function schematicTab(root) {
     for (let i = 0; i <= 8; i++) { const py = Math.round(i * h / 8) + 0.5; x.beginPath(); x.moveTo(0, py); x.lineTo(w, py); x.stroke(); }
     x.strokeStyle = 'rgba(120,200,140,0.45)'; x.beginPath(); x.moveTo(0, h / 2 + 0.5); x.lineTo(w, h / 2 + 0.5); x.stroke();
     const scope = c.parts.find(p => p.type === 'SCOPE');
-    tInfo.textContent = `t = ${si(sim.t, 's', 4)}  ·  ${fmtT(sim.tdiv)}${sim.paused ? '  ·  paused' : ''}`;
+    tInfo.textContent = `t = ${si(sim.t, 's', 4)}  ·  ${fmtT(sim.tdiv)}${sim.paused ? '  ·  paused' : ''}${sim.lag && !sim.paused ? '  ·  ⚠ slower than real time (circuit too fast)' : ''}`;
     if (!scope) { x.fillStyle = '#9AD7A8'; x.font = '13px system-ui, sans-serif'; x.textAlign = 'center'; x.fillText('Add a Scope part and wire CH1 / CH2 to see waveforms', w / 2, h / 2 - 10); return; }
     const b = sim.buf; if (b.length < 2) return;
     // trigger: last rising crossing of CH1 through its middle level that still has a full screen after it
@@ -1144,7 +1163,7 @@ export function schematicTab(root) {
     document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
     return d;
   }
-  function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
+  function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); autoSpeed(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
     const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
