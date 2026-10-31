@@ -80,13 +80,15 @@ export function schematicTab(root) {
     select: btn('↖ Select', () => setMode('select')),
     wire: btn('〰 Wire', () => setMode('wire')),
     delete: btn('🗑 Delete', () => { if (mode === 'select' && deleteSel()) return; setMode('delete'); }),
+    meter: btn('🔍 Meter', () => setMode('meter')),
   };
+  let probes = [];        // multimeter: [red point, black point] in grid units
   const voltsBtn = btn('', () => { showVolts = !showVolts; store.set('sch.volts', showVolts ? '1' : '0'); syncTop(); draw(); });
   const dotsBtn = btn('', () => { showDots = !showDots; store.set('sch.dots', showDots ? '1' : '0'); syncTop(); draw(); });
   const runBtn = btn('', () => { running = !running; store.set('sch.run', running ? '1' : '0'); syncTop(); commit(false); say(running ? 'Simulation running.' : 'Simulation stopped. Edit freely; tap ▶ Run to see the results.'); }, 'run');
   const floatBtn = btn('🪟 Float', () => setFloat(!floating));
   const top = el('div', { class: 'sch-tools' },
-    runBtn, modeBtns.select, modeBtns.wire, modeBtns.delete,
+    runBtn, modeBtns.select, modeBtns.wire, modeBtns.delete, modeBtns.meter,
     btn('↻', () => rotateSel(), 'icon'), btn('↶', () => undo(), 'icon'), btn('↷', () => redo(), 'icon'),
     btn('Fit', () => { fit(); draw(); }), voltsBtn, dotsBtn, floatBtn,
     btn('Projects', () => projects()), btn('Examples', () => examples()), btn('🟫 PCB', () => setView('pcb'), 'pcbbtn'));
@@ -210,6 +212,7 @@ export function schematicTab(root) {
       select: 'Tap a part to see its readings. Drag to move. Tap a switch to flip it, hold a button to press it.',
       wire: 'Tap a pin (yellow dot) or grid point to start, tap again to bend / finish. Ends automatically on a pin or wire.',
       delete: 'Tap a part or a wire to delete it.',
+      meter: '🔍 Multimeter: tap a point for the RED probe, then a point for the BLACK probe. Reads red minus black. Tap again to move the red probe. Break parts with 🔧 Fault in their panel.',
       place: `Tap the grid to place the ${S.TYPES[placeType]?.label}.`,
     }[m]);
     draw();
@@ -338,10 +341,36 @@ export function schematicTab(root) {
       if (wireStart) { ctx.strokeStyle = C.sel; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(wireStart[0]), sy(wireStart[1]), 7, 0, 7); ctx.stroke(); }
     }
     drawTip();
+    drawProbes();
     if (mode === 'place' && hover) {
       const ghost = { id: -1, type: placeType, x: Math.round(hover[0]), y: Math.round(hover[1]), rot: 0, props: S.TYPES[placeType].props, name: '' };
       ctx.globalAlpha = 0.45; drawPart(ghost); ctx.globalAlpha = 1;
     }
+  }
+
+  // multimeter probes + the meter reading
+  function drawProbes() {
+    if (mode !== 'meter' || !probes.length) return;
+    const cols = ['#FF4D4D', '#E8EEF4'];
+    probes.forEach(([x, y], k) => {
+      const X = sx(x), Y = sy(y);
+      ctx.strokeStyle = cols[k]; ctx.fillStyle = cols[k]; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X + 14, Y - 26); ctx.stroke();
+      ctx.beginPath(); ctx.arc(X, Y, 4.5, 0, 7); ctx.fill();
+      ctx.font = '800 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = cols[k]; ctx.fillRect(X + 8, Y - 38, 14, 14); ctx.fillStyle = '#111'; ctx.fillText(k ? '−' : '+', X + 15, Y - 31);
+    });
+    if (!res?.ok) return;
+    const va = res.vAt(...probes[0]), vb = probes[1] ? res.vAt(...probes[1]) : 0;
+    const dv = va == null || vb == null ? null : va - vb, txt = dv == null ? '— —' : Math.abs(dv) < 5e-4 ? '0.000 V' : si(dv, 'V', 4);   // a real DMM shows 0.000 for µV
+    const sub = probes[1] ? 'DC V  (red − black)' : 'DC V  (red to ground)';
+    ctx.save(); ctx.font = '800 22px ui-monospace, monospace';
+    const w = Math.max(150, ctx.measureText(txt).width + 30), h = 58, bx = W - w - 8, by = 8;
+    ctx.globalAlpha = 0.95; ctx.fillStyle = '#1E2A1E'; ctx.strokeStyle = '#FFB020'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, w, h, 8) : ctx.rect(bx, by, w, h); ctx.fill(); ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.fillStyle = '#B6F09C'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + w - 12, by + 24);
+    ctx.font = '600 10px system-ui, sans-serif'; ctx.fillStyle = '#8B97A6'; ctx.textAlign = 'left'; ctx.fillText(sub, bx + 10, by + 48);
+    ctx.restore();
   }
 
   // tip bubble: live readings next to the selected wire or part, so you don't have to scroll down to the panel
@@ -400,6 +429,14 @@ export function schematicTab(root) {
       ctx.fillRect(a - 0.25, b - 0.25, cc - a + 0.5, d - b + 0.5); ctx.strokeRect(a - 0.25, b - 0.25, cc - a + 0.5, d - b + 0.5); ctx.setLineDash([]);
     }
     symbol(ctx, p, r, view.g);
+    const fl = S.faultOf(p);
+    if (fl) {
+      const [a, b, cc] = S.TYPES[p.type].box;
+      ctx.save(); ctx.translate((a + cc) / 2, b - 0.2); ctx.rotate(-p.rot * Math.PI / 2);
+      ctx.fillStyle = fl === 'weak' ? '#FFB020' : '#FF4D4D'; ctx.beginPath(); ctx.arc(0, 0, 0.55, 0, 7); ctx.fill();
+      ctx.fillStyle = '#111'; ctx.font = `800 ${0.75}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(fl === 'open' ? 'O' : fl === 'short' ? 'S' : 'W', 0, 0.04); ctx.restore();
+    }
     if (S.isBoard(p.type) && isSel) {
       const k = S.BOARDS[p.type].pins.findIndex(x => x.n === boardPin(p)), pt = S.TYPES[p.type].pins[k];
       if (pt) { ctx.strokeStyle = C.sel; ctx.lineWidth = 2.5 / view.g; ctx.beginPath(); ctx.arc(pt[0], pt[1], 0.55, 0, 7); ctx.stroke(); }
@@ -722,6 +759,13 @@ export function schematicTab(root) {
       if (wi >= 0) { c.wires.splice(wi, 1); sel = null; commit(); say('Wire deleted.'); return; }
       say('Nothing here. Tap a part or a wire.'); return;
     }
+    if (mode === 'meter') {
+      const pt = snapPoint(x, y);
+      if (!res?.ok || res.vAt(pt[0], pt[1]) == null) { say('Nothing connected here. Tap a wire, a pin or a junction.'); return; }
+      probes = probes.length >= 2 || probes.length === 0 ? [pt] : [probes[0], pt];
+      say(probes.length === 1 ? 'Red probe placed. Now tap where the black probe goes (tap ground for "voltage to ground").' : 'Measuring. Tap a new point to move the red probe.');
+      draw(); return;
+    }
     if (mode === 'wire') {
       const pt = snapPoint(x, y);
       if (!wireStart) { wireStart = pt; draw(); say('Now tap where the wire goes. It bends once (L-shape).'); return; }
@@ -998,6 +1042,12 @@ export function schematicTab(root) {
         note('Pins: 1 anode, 2 cathode (LED, left) · 4 collector, 3 emitter (transistor, right). Ic = CTR × If until it saturates.')); break;
     }
     if (f.children.length) panel.append(f);
+    const fopts = S.faultOptions(p.type);
+    if (fopts.length) {
+      const fc = choice('🔧 Fault (troubleshoot)', q.fault ?? 'ok', fopts, v => { if (v === 'ok') delete q.fault; else q.fault = v; say(v === 'ok' ? `${p.name} repaired.` : `${p.name} is now ${fopts.find(o => o[0] === v)[1]}. Measure it with 🔍 Meter.`); });
+      fc.classList.add('fault-pick'); if (q.fault && q.fault !== 'ok') fc.classList.add('on');
+      panel.append(fc);
+    }
     const rd = el('div', { class: 'sp-read' }); panel.append(rd);
     updateReadings();
     panelRefresh = updateReadings;
@@ -1022,6 +1072,14 @@ export function schematicTab(root) {
   function partReadings(p, r) {
     const c0 = (v) => (Math.abs(v) < 1e-9 ? 0 : v);
     const q = p.props, vals = [], L = [], warn = [];
+    if (r.fault) {
+      const txt = S.faultOptions(p.type).find(o => o[0] === r.fault)?.[1] ?? r.fault;
+      vals.push(['Fault', txt, true], [r.fault === 'short' ? 'Volts across short' : 'Volts across', si(r.v, 'V'), true], ['Current', si(Math.abs(r.i), 'A'), true]);
+      warn.push(['bad', r.fault === 'open' ? 'OPEN: no current flows through it. On the bench: the full voltage appears across it, and everything after it reads 0 V.' : 'SHORT: it acts like a wire. On the bench: ≈ 0 V across it, extra current, the part after it gets the full voltage (or a fuse blows).']);
+      L.push('Set Fault back to OK to repair it.');
+      return readings(vals, L, warn);
+    }
+    if (q.fault === 'weak') warn.push(['warn', 'Fault: ' + (S.faultOptions(p.type).find(o => o[0] === 'weak')?.[1] ?? 'weak') + '. Readings below include the fault.']);
     const I = Math.abs(r.i), Vab = r.v;
     switch (p.type) {
       case 'R': {
@@ -1278,7 +1336,7 @@ export function schematicTab(root) {
     document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
     return d;
   }
-  function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); autoSpeed(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
+  function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; probes = []; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); autoSpeed(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
     const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));

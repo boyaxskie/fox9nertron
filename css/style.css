@@ -281,3 +281,4 @@ svg text { fill: var(--dim); font: 11px var(--mono); }
 .foot a { color: var(--accent); }
 .top-btns .info { font-size: 18px; padding-inline: 12px; }
 .help-text .fine { color: var(--dim); font-size: 13px; }
+.fault-pick.on .sel { border-color: #FF4D4D; color: #FF8A8A; }

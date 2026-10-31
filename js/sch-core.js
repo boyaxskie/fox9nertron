@@ -286,6 +286,31 @@ export function junctions(c) {
   return [...count.entries()].filter(([, n]) => n >= 3).map(([k]) => k.split(',').map(Number));
 }
 
+// ---------- faults (Troubleshoot mode): break a part on purpose and measure it like on the bench ----------
+// open = no connection between any pins · short = the two pins below welded together (others float) · weak = drifted value
+export const FAULT_SHORT = { NPN: [1, 2], PNP: [1, 2], NMOS: [1, 2], PMOS: [1, 2], OPAMP: [3, 4], T555: [7, 0], REG: [0, 1], RELAY: [2, 4], OPTO: [2, 3], XFMR: [0, 1] };
+const FAULTABLE = new Set(['R', 'POT', 'C', 'L', 'D', 'LED', 'ZD', 'LAMP', 'SW', 'PB', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'REG', 'T555', 'RELAY', 'OPTO', 'XFMR', 'BAT']);
+export function faultOptions(type) {
+  if (!FAULTABLE.has(type)) return [];
+  const shortTxt = { NPN: 'shorted C–E (blown)', PNP: 'shorted C–E (blown)', NMOS: 'shorted D–S (blown)', PMOS: 'shorted D–S (blown)', OPAMP: 'shorted supply (dead chip)', T555: 'shorted VCC–GND (dead chip)', REG: 'shorted IN–OUT (blown)',
+    RELAY: 'contacts welded (always ON)', OPTO: 'shorted output (always ON)', XFMR: 'shorted primary turns', SW: 'stuck closed', PB: 'stuck pressed', BAT: 'shorted cell' }[type] ?? 'shorted';
+  const openTxt = { R: 'open (burnt)', C: 'open (broken lead)', L: 'open (broken wire)', LAMP: 'open (filament gone)', SW: 'stuck open', PB: 'never closes', BAT: 'dead / disconnected', XFMR: 'open winding', RELAY: 'dead (coil + contacts open)', POT: 'open (worn track)' }[type] ?? 'open (dead)';
+  const o = [['ok', 'OK (working)'], ['open', openTxt], ['short', shortTxt]];
+  const weak = { R: 'drifted high (×5)', C: 'dried out (10 % left)', BAT: 'low / weak' }[type];
+  if (weak) o.push(['weak', weak]);
+  return o;
+}
+export const faultOf = (p) => (FAULTABLE.has(p.type) && p.props.fault && p.props.fault !== 'ok' ? p.props.fault : null);
+const deadFault = (p) => { const f = faultOf(p); return f === 'open' || f === 'short' ? f : null; };
+function propsWithFault(p) {
+  if (faultOf(p) !== 'weak') return p.props;
+  const q = { ...p.props };
+  if (p.type === 'R') q.r *= 5;
+  if (p.type === 'C') q.c *= 0.1;
+  if (p.type === 'BAT') { q.v *= 0.7; q.rint = (q.rint || 0) + 2; }
+  return q;
+}
+
 // MOSFET: on-resistance falls as the gate voltage rises; saturation current k·(Vgs − Vth)²
 export const fetRds = (m, vc) => m.rdson * Math.max(0.7, (m.vfull - m.vth) / Math.max(1e-3, vc - m.vth));
 export const fetK = (m) => 3 * m.imax / (m.vfull - m.vth) ** 2;
@@ -325,7 +350,9 @@ export function solveCircuit(c, sim = null, opts = {}) {
   for (const p of c.parts) {
     if (p.type === 'GND') continue;
     const pins = pinsOf(p).map(([x, y]) => node(x, y));
-    const [a, b] = pins, pr = p.props;
+    const [a, b] = pins, pr = propsWithFault(p), dead = deadFault(p);
+    if (dead === 'open') { for (let k = 1; k < pins.length; k++) R(pins[0], pins[k], R_OPEN, p, k === 1 ? 'main' : 'open' + k); continue; }
+    if (dead === 'short') { const [i, j] = FAULT_SHORT[p.type] ?? [0, 1]; R(pins[i], pins[j], 0.01, p, 'main'); continue; }
     switch (p.type) {
       case 'R': R(a, b, Math.max(pr.r, 1e-6), p, 'main'); break;
       case 'POT': {
@@ -630,6 +657,13 @@ export function solveCircuit(c, sim = null, opts = {}) {
     const va = res.v[pins[0]], vb = res.v[pins[1]];
     const mine = res.els.filter(e => e.owner === p);
     let i = 0, pw = 0;
+    const dead = deadFault(p);
+    if (dead) {
+      const m = mine.find(e => e.role === 'main'), [si2, sj] = dead === 'short' ? (FAULT_SHORT[p.type] ?? [0, 1]) : [0, 1];
+      const v = res.v[pins[si2]] - res.v[pins[sj]];
+      parts.set(p.id, { va, vb, v, i: m ? m.i : 0, p: m ? m.i * m.i * m.val : 0, fault: dead, dots: dead === 'short' ? [[si2, sj, m ? m.i : 0]] : [] });
+      continue;
+    }
     const main = mine.find(e => e.role === 'main');
     if (p.type === 'POT') {
       const aw = mine.find(e => e.role === 'aw'), wb = mine.find(e => e.role === 'wb');
@@ -644,8 +678,8 @@ export function solveCircuit(c, sim = null, opts = {}) {
     }
     if (p.type === 'C') {
       const s0 = st.get(p.id) ?? { v: 0 }, v = va - vb;
-      const ic = sim ? (p.props.c / sim.dt) * (v - s0.v) : 0;
-      parts.set(p.id, { va, vb, v, i: ic, p: v * ic, energy: 0.5 * p.props.c * v * v });
+      const ic = sim ? (propsWithFault(p).c / sim.dt) * (v - s0.v) : 0;
+      parts.set(p.id, { va, vb, v, i: ic, p: v * ic, energy: 0.5 * propsWithFault(p).c * v * v });
       continue;
     }
     if (p.type === 'L') {
@@ -776,7 +810,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
   // state to carry into the next time step
   const next = new Map();
   for (const p of c.parts) {
-    const r = parts.get(p.id); if (!r) continue;
+    const r = parts.get(p.id); if (!r || r.fault) continue;
     if (p.type === 'C') next.set(p.id, { v: r.v });
     else if (p.type === 'L') next.set(p.id, { i: r.i });
     else if (p.type === 'XFMR') next.set(p.id, { im: r.im });

@@ -78,6 +78,21 @@ const ARTICLES = [
     tryit: ['Flip POWER and watch Vout rise (scope CH2) with the switching node on CH1.', 'Change RV1 SET to 10 %: Vout ≈ 19.5 V. To 80 %: ≈ 5 V.', 'Flip LOAD2 ON: Vout dips a little and recovers.', 'Change VIN to 15 V and RV1 to 5 %: Vout tops out below 15 V (dropout).', 'Delete CSS, flip POWER off/on: the output overshoots at start-up.'],
   },
   {
+    id: 'trouble', title: 'Troubleshooting: find the bad part with a meter', example: 'buckreg', tag: 'Repair',
+    intro: 'Real repair work: something is dead, you have a multimeter. 🔍 Meter puts red and black probes anywhere on the drawing. 🔧 Fault (in any part\'s panel) breaks a part on purpose: open, shorted or weak. Break one, then find it by measuring, the way you would on the bench.',
+    parts: [['🔍 Meter', 'toolbar button: tap = red probe, tap again = black probe. Reads red − black (DC volts)'], ['🔧 Fault', 'part panel: OK / open / shorted / weak. A red O or S (or yellow W) badge marks broken parts'], ['Example', 'the regulated buck (flip POWER first)']],
+    steps: [
+      ['1. Start from the input', 'Black probe on ground. Red on VIN, then after the POWER switch, then after each part along the path. The voltage should only drop where you expect it.'],
+      ['2. OPEN part', 'An open part blocks current: the full voltage appears ACROSS it (red on one leg, black on the other) and everything after it reads 0 V. Burnt resistors, broken wires, blown fuses, dead switches.'],
+      ['3. SHORTED part', 'A shorted part reads ≈ 0 V across it, even when it should be blocking. Blown MOSFETs and transistors usually short. Buck module with Vout = Vin? Measure across Q1: 0 V = shorted switch.'],
+      ['4. Try it: shorted Q1', 'Set Q1 Fault = shorted, flip POWER: VOUT reads ≈ 23 V whatever RV1 says. Meter across Q1 (S and D): ≈ 0 V. That is the classic dead buck module.'],
+      ['5. Try it: dead reference', 'Set ZD2 Fault = open: nothing holds the reference at 5.1 V, it rises with VIN and the output goes to ≈ 23 V (full on). Set it to shorted: reference 0 V, the output falls to a few volts whatever RV1 says. Measure the RV1 wiper to see why.'],
+      ['6. Weak parts', 'Not everything dies completely: a dried capacitor (10 % left) gives more ripple, a resistor drifted ×5 shifts a divider, a weak battery sags under load. These need comparing with the expected value.'],
+      ['Real-bench tips', 'Measure with the power ON for volts, OFF for resistance and continuity. A shorted part fools in-circuit resistance checks of its neighbours, so lift one leg if unsure. Electrolytic caps bulging on top = dried out.'],
+    ],
+    tryit: ['Break LOAD (open) in the plain LED example and find it.', 'SMPS: set U2 (opto) to open → output shoots up. Measure CTRL: stuck at ≈ 3.8 V (max duty).', 'Fridge guard: set D1 to open → fast off/on restarts the compressor at once.', 'Inverter: set Q2 shorted → huge battery current and the battery note warns.'],
+  },
+  {
     id: 'inverter', title: 'Inverter 12 V DC → 220 V AC', example: 'inverter', tag: 'Power',
     intro: 'A push-pull inverter: two MOSFETs take turns connecting each half of a center-tapped transformer to ground, 50 times a second. The transformer steps the 12 V square wave up to ≈ 220 V. This is how simple "modified sine" inverters work.',
     parts: [['BATT', '12 V battery'], ['OSC', '50 Hz oscillator (a CD4047, SG3525 or 555 in real life)'], ['Q1, Q2', 'IRFZ44N, 10 V gate'], ['Q3 + R3 + R4', 'inverts OSC so Q2 is ON when Q1 is OFF'], ['TR1', 'center-tap 10 + 10 : 190 turns (12-0-12 V : 230 V)'], ['LOAD', '220 V 60 W bulb']],
