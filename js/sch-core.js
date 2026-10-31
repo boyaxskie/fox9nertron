@@ -32,6 +32,8 @@ export const FETS = {
   'IRFZ44N': { pol: 'n', vth: 3, rdson: 0.0175, vfull: 10, imax: 49, vmax: 55, pmax: 2, logic: false, note: 'N, needs 10 V gate, 49 A' },
   '2N7000': { pol: 'n', vth: 2.1, rdson: 1.8, vfull: 10, imax: 0.2, vmax: 60, pmax: 0.4, logic: false, note: 'N, small 200 mA' },
   'AO3401': { pol: 'p', vth: 0.9, rdson: 0.05, vfull: 4.5, imax: 4, vmax: 30, pmax: 1.4, logic: true, note: 'P, SOT-23, 4 A' },
+  'IRFBC40': { pol: 'n', vth: 3, rdson: 1.2, vfull: 10, imax: 6.2, vmax: 600, pmax: 2, logic: false, note: 'N, 600 V, 6 A: off-line SMPS / flyback (220 V)' },
+  'IRF840': { pol: 'n', vth: 3, rdson: 0.85, vfull: 10, imax: 8, vmax: 500, pmax: 2, logic: false, note: 'N, 500 V, 8 A: SMPS, inverters' },
   'IRF9540N': { pol: 'p', vth: 3, rdson: 0.117, vfull: 10, imax: 23, vmax: 100, pmax: 2, logic: false, note: 'P, needs 10 V gate, 23 A' },
 };
 // dh / dl = how close the output gets to the top / bottom supply
@@ -194,12 +196,13 @@ export const TYPES = {
   STEPPER: { label: 'Stepper motor + A4988 driver', prefix: 'M', pins: [[-4, -2], [-4, -1], [-4, 0], [-4, 1], [-4, 2], [-4, 3]], box: [-4, -3.4, 5.6, 3.8], props: { micro: 1, ilim: 1.0, steps: 200 } },
   T555: { label: '555 timer', prefix: 'U', pins: [[0, 4], [-4, 2], [4, 0], [1, -4], [2, 4], [-4, 0], [-4, -2], [-1, -4]], box: [-4, -4, 4, 4], props: { model: 'NE555' } },
   RELAY: { label: 'Relay (coil + changeover)', prefix: 'K', pins: [[-3, -2], [-3, 2], [0, 2], [0, -2], [2, -2]], box: [-3.7, -2.4, 2.4, 2.4], props: { vcoil: 5, rcoil: 70, l: 0.02 } },
+  XFMR: { label: 'Transformer (center tap)', prefix: 'TR', pins: [[-3, -2], [-3, 0], [-3, 2], [3, -2], [3, 2]], box: [-3, -2.6, 3, 2.6], props: { n1: 10, n2: 10, ns: 190, lm: 0.3, r1: 0.02, r2: 0.02, rs: 2 } },
   GND: { label: 'Ground', prefix: 'GND', pins: [[0, 0]], box: [-0.8, 0, 0.8, 1.6], props: {} },
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
-export const DYNAMIC = new Set(['C', 'L', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm')));
 
 // signal generator value at time t
@@ -351,6 +354,20 @@ export function solveCircuit(c, sim = null, opts = {}) {
         const s0 = st.get(p.id) ?? { i: 0 }, n = inner();
         if (sim) { R(a, n, pr.l / sim.dt, p, 'main'); I(a, n, s0.i, p, 'hist'); } else R(a, n, R_WIRE, p, 'main');
         R(n, b, Math.max(pr.r, 1e-4), p, 'dcr');
+        break;
+      }
+      case 'XFMR': {
+        // ideal transformer + magnetizing inductance on winding A (P1–CT). Winding B (CT–P2) and the secondary (S1–S2) copy A's voltage × turns ratio,
+        // and their currents are reflected back into A (power in = power out). Dots at P1 and S1.
+        const [P1, CT, P2, S1, S2] = pins, s0 = st.get(p.id) ?? { im: 0 }, nA = inner(), nB = inner(), nS = inner(), n1 = Math.max(pr.n1, 1e-6);
+        R(P1, nA, Math.max(pr.r1, 1e-4), p, 'r1');
+        if (sim) { R(nA, CT, Math.max(pr.lm, 1e-9) / sim.dt, p, 'lm'); I(nA, CT, s0.im, p, 'hist'); } else R(nA, CT, R_OPEN, p, 'lm');   // DC: a transformer passes no DC (start with zero magnetizing current)
+        R(CT, nB, Math.max(pr.r2, 1e-4), p, 'r2');
+        const vb = { kind: 'V', a: nB, b: P2, val: 0, gp: nA, gn: CT, gain: pr.n2 / n1, owner: p, role: 'wb' }; els.push(vb);
+        els.push({ kind: 'F', a: nA, b: CT, ctrl: vb, val: -pr.n2 / n1, owner: p, role: 'fb' });
+        R(S1, nS, Math.max(pr.rs, 1e-4), p, 'rs');
+        const vsx = { kind: 'V', a: nS, b: S2, val: 0, gp: nA, gn: CT, gain: pr.ns / n1, owner: p, role: 'ws' }; els.push(vsx);
+        els.push({ kind: 'F', a: nA, b: CT, ctrl: vsx, val: -pr.ns / n1, owner: p, role: 'fs' });
         break;
       }
       case 'SIG': V(a, b, opts.sigOff ? pr.off : sigValue(pr, sim ? sim.t : 0), p, 'main'); break;
@@ -637,6 +654,14 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, v: va - vb, i: il, p: (va - vb) * il, energy: 0.5 * p.props.l * il * il });
       continue;
     }
+    if (p.type === 'XFMR') {
+      const s0 = st.get(p.id) ?? { im: 0 }, g = (role) => mine.find(e => e.role === role), lm = g('lm');
+      const im = sim ? lm.i + s0.im : lm.i, i1 = g('r1').i, i2 = g('r2').i, is = g('rs').i;
+      const v1 = res.v[pins[0]] - res.v[pins[1]], v2 = res.v[pins[1]] - res.v[pins[2]], vs = res.v[pins[3]] - res.v[pins[4]];
+      const pin = v1 * i1 + v2 * i2, pout = -vs * is;
+      parts.set(p.id, { va, vb, v1, v2, vs, i1, i2, is, im, v: v1, i: i1, pin, pout, p: pin - pout, dots: [[0, 1, i1], [1, 2, i2], [3, 4, is]] });
+      continue;
+    }
     if (p.type === 'SCOPE') { parts.set(p.id, { ch1: res.v[pins[0]] - res.v[pins[2]], ch2: res.v[pins[1]] - res.v[pins[2]], v: 0, i: 0, p: 0 }); continue; }
     if (p.type === 'OPTO' || p.type === 'NPN' || p.type === 'PNP') {
       const o = trans.find(x => x.p === p), d = o.d, inV = d.on ? mine.find(e => e.role === d.role && e.kind === 'V') : null, ce = mine.find(e => e.role === 'ce');
@@ -754,6 +779,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
     const r = parts.get(p.id); if (!r) continue;
     if (p.type === 'C') next.set(p.id, { v: r.v });
     else if (p.type === 'L') next.set(p.id, { i: r.i });
+    else if (p.type === 'XFMR') next.set(p.id, { im: r.im });
     else if (p.type === 'LED' || p.type === 'D') next.set(p.id, { on: r.on });
     else if (p.type === 'OPTO' || p.type === 'NPN' || p.type === 'PNP') { const o = trans.find(x => x.p === p); next.set(p.id, { on: o.d.on, ts: o.state, ib: o.d.ib }); }
     else if (p.type === 'NMOS' || p.type === 'PMOS') { const f = fets.find(x => x.p === p); next.set(p.id, { ts: f.state, vc: f.vc, bon: diodes.find(x => x.p === p).on }); }
@@ -1064,6 +1090,89 @@ export function example(name) {
     W(0, 12, 0, 18); W(0, 18, 44, 18); W(44, 16, 44, 18);
     W(10, 10, 10, -4); W(10, -4, 41, -4); W(41, -4, 41, 13);
     W(32, 8, 39, 8); W(39, 8, 39, 15); W(39, 15, 41, 15);
+  } else if (name === 'buck') {
+    // DC-DC buck: 30 V in, IRLZ44N high-side switch at 50 kHz, gate driven by a floating PWM (like a bootstrap driver), 1N5819 freewheel diode,
+    // 330 µH + 47 µF filter. No feedback: Vout ≈ duty × Vin (40 % → ≈ 11.8 V). Real modules (LM2596 / XL4015) add the feedback loop.
+    c.tdiv = 0.002;
+    const b = addPart(c, 'BAT', 0, 6, 1); b.name = 'VIN'; b.props.v = 30;
+    const ci = addPart(c, 'C', 4, 6, 1); ci.name = 'CIN'; Object.assign(ci.props, { c: 100e-6, vmax: 50 });
+    addPart(c, 'NMOS', 10, 2).props.model = 'IRLZ44N';
+    const g = addPart(c, 'SIG', 8, 8, 1); g.name = 'PWM'; Object.assign(g.props, { wave: 'pwm', f: 50000, amp: 10, off: 0, duty: 40 });
+    const rg = addPart(c, 'R', 8, 4, 1); rg.name = 'RG'; rg.props.r = 10;
+    const d = addPart(c, 'D', 14, 8, 3); d.name = 'D1'; d.props.model = '1N5819';
+    const l = addPart(c, 'L', 18, 6); l.name = 'L1'; Object.assign(l.props, { l: 330e-6, r: 0.05 });
+    const co = addPart(c, 'C', 24, 8, 1); co.name = 'COUT'; Object.assign(co.props, { c: 47e-6, vmax: 35 });
+    const rl = addPart(c, 'R', 28, 8, 1); rl.name = 'LOAD'; rl.props.r = 22;
+    addPart(c, 'VM', 32, 8, 1).name = 'VOUT';
+    addPart(c, 'SCOPE', 40, 10);
+    addPart(c, 'GND', 0, 12);
+    W(0, 4, 0, -2); W(0, -2, 11, -2); W(11, -2, 11, 0); W(4, 4, 4, -2);
+    W(0, 8, 0, 12); W(4, 8, 4, 12); W(0, 12, 40, 12);
+    W(11, 4, 11, 6); W(11, 6, 16, 6); W(8, 12 - 2, 11, 10); W(11, 10, 11, 6);
+    W(14, 10, 14, 12);
+    W(20, 6, 24, 6); W(24, 10, 24, 12); W(24, 6, 28, 6); W(28, 10, 28, 12); W(28, 6, 32, 6); W(32, 10, 32, 12);
+    W(32, 6, 35, 6); W(35, 6, 35, 11); W(35, 11, 37, 11);
+    W(13, 6, 13, -4); W(13, -4, 37, -4); W(37, -4, 37, 9);
+  } else if (name === 'inverter') {
+    // 12 V DC → 220 V AC push-pull inverter (square wave, "modified sine" style). Q1 / Q2 take turns pulling each half of the
+    // center-tapped primary to ground at 50 Hz; Q3 makes Q2's gate the opposite of Q1's. Transformer 10 + 10 : 190 turns.
+    c.tdiv = 0.01;
+    const b = addPart(c, 'BAT', 4, 8, 1); b.name = 'BATT'; b.props.v = 12;
+    const g = addPart(c, 'SIG', 2, 0, 1); g.name = 'OSC'; Object.assign(g.props, { wave: 'pwm', f: 50, amp: 10, off: 0, duty: 50 });
+    const q1 = addPart(c, 'NMOS', 13, -2); q1.name = 'Q1'; q1.props.model = 'IRFZ44N';
+    const q2 = addPart(c, 'NMOS', 13, 12); q2.name = 'Q2'; q2.props.model = 'IRFZ44N';
+    const q3 = addPart(c, 'NPN', 6, 16); q3.name = 'Q3'; q3.props.model = '2N2222';
+    const r1 = addPart(c, 'R', 8, -2); r1.name = 'R1'; r1.props.r = 100;
+    const r3 = addPart(c, 'R', 0, 12, 1); r3.name = 'R3'; r3.props.r = 10000;
+    const r4 = addPart(c, 'R', 9, 8, 1); r4.name = 'R4'; r4.props.r = 1000;
+    const t = addPart(c, 'XFMR', 20, 6); t.name = 'TR1'; Object.assign(t.props, { n1: 10, n2: 10, ns: 190, lm: 0.3, r1: 0.02, r2: 0.02, rs: 2 });
+    const lp = addPart(c, 'LAMP', 28, 6, 1); lp.name = 'LOAD'; Object.assign(lp.props, { vr: 220, wr: 60 });
+    addPart(c, 'SCOPE', 36, 8);
+    for (const [x, y] of [[2, 4], [4, 12], [14, 2], [14, 16], [7, 20], [28, 12], [36, 12]]) addPart(c, 'GND', x, y);
+    W(2, 2, 2, 4); W(4, 10, 4, 12); W(4, 6, 9, 6); W(9, 6, 17, 6);
+    W(2, -2, 6, -2); W(10, -2, 11, -2); W(14, 0, 14, 2);
+    W(14, -4, 17, -4); W(17, -4, 17, 4); W(14, 10, 17, 10); W(17, 10, 17, 8); W(14, 14, 14, 16);
+    W(2, -2, 0, -2); W(0, -2, 0, 10); W(0, 14, 0, 16); W(0, 16, 4, 16); W(7, 18, 7, 20);
+    W(7, 14, 9, 14); W(9, 14, 9, 12); W(9, 12, 11, 12); W(9, 10, 9, 12);
+    W(23, 4, 28, 4); W(23, 8, 28, 8); W(28, 8, 28, 12); W(36, 10, 36, 12);
+    W(28, 4, 33, 4); W(33, 4, 33, 7); W(17, -4, 31, -4); W(31, -4, 31, 9); W(31, 9, 33, 9);
+  } else if (name === 'smps') {
+    // 220 V AC → 5 V DC flyback (how phone chargers work). Bridge + C1 make ≈ 310 V DC. Q1 switches the primary at 20 kHz:
+    // ON stores energy in the transformer, OFF dumps it through D5 into the 5 V side. U1 + RAMP = the PWM controller (what a UC3842 does inside).
+    // Feedback: above ≈ 5 V the opto LED lights (ZD1 3.3 V + LED 1.2 V + R7), its transistor pulls CTRL down → shorter pulses.
+    c.tdiv = 0.005;
+    const g = addPart(c, 'SIG', 6, 7); g.name = 'AC 220V'; Object.assign(g.props, { wave: 'sine', f: 50, amp: 311, off: 0, duty: 50 }); g.lbl = [-7, 3];
+    [[4, 4, 'D1', -5], [4, 10, 'D2', -5], [8, 4, 'D3', 0], [8, 10, 'D4', 0]].forEach(([x, y, n, lx]) => { const d = addPart(c, 'D', x, y, 3); d.name = n; d.props.model = '1N4007'; if (lx) d.lbl = [lx, 0]; });
+    const c1 = addPart(c, 'C', 10, 7, 1); c1.name = 'C1'; Object.assign(c1.props, { c: 47e-6, vmax: 400 });
+    const t = addPart(c, 'XFMR', 20, 4); t.name = 'TR1'; Object.assign(t.props, { n1: 100, n2: 100, ns: 5, lm: 0.01, r1: 0.5, r2: 0.5, rs: 0.01 });
+    const q = addPart(c, 'NMOS', 15, 8); q.name = 'Q1'; q.props.model = 'IRFBC40'; q.lbl = [3, 1];
+    const r5 = addPart(c, 'R', 13, 14, 1); r5.name = 'R5'; r5.props.r = 10;
+    const u = addPart(c, 'OPAMP', 10, 18); u.name = 'U1'; u.props.model = 'LM358';
+    const vcc = addPart(c, 'BAT', 0, 20, 1); vcc.name = 'VCC 12V'; vcc.props.v = 12;
+    const rp = addPart(c, 'SIG', 5, 19, 1); rp.name = 'RAMP'; Object.assign(rp.props, { wave: 'saw', f: 20000, amp: 5, off: 5, duty: 50 });
+    const r6 = addPart(c, 'R', 2, 22, 1); r6.name = 'R6'; r6.props.r = 10000;
+    const r8 = addPart(c, 'R', 16, 28, 1); r8.name = 'R8'; r8.props.r = 4700;
+    const c4 = addPart(c, 'C', 12, 28, 1); c4.name = 'C4'; Object.assign(c4.props, { c: 10e-9, vmax: 50, polar: false });
+    const d5 = addPart(c, 'D', 26, 6); d5.name = 'D5'; d5.props.model = '1N5819';
+    const co = addPart(c, 'C', 30, 8, 1); co.name = 'C2'; Object.assign(co.props, { c: 470e-6, vmax: 16 });
+    const rl = addPart(c, 'R', 34, 8, 1); rl.name = 'LOAD'; rl.props.r = 5;
+    addPart(c, 'VM', 38, 8, 1).name = 'VOUT';
+    const r7 = addPart(c, 'R', 29, 14, 1); r7.name = 'R7'; r7.props.r = 680;
+    const o = addPart(c, 'OPTO', 28, 20, 1); o.name = 'U2';
+    const z = addPart(c, 'ZD', 24, 18); z.name = 'ZD1'; z.props.vz = 3.3;
+    addPart(c, 'SCOPE', 46, 14);
+    for (const [x, y] of [[10, 12], [16, 12], [0, 22], [5, 22], [10, 22], [12, 30], [16, 30], [25, 2], [30, 10], [34, 10], [38, 10], [22, 18], [27, 24], [46, 16]]) addPart(c, 'GND', x, y);
+    W(4, 6, 4, 8); W(8, 6, 8, 8); W(4, 2, 8, 2); W(8, 2, 10, 2); W(10, 2, 17, 2); W(4, 12, 8, 12); W(8, 12, 10, 12);
+    W(10, 2, 10, 5); W(10, 9, 10, 12);
+    W(16, 6, 16, 4); W(16, 4, 17, 4); W(16, 10, 16, 12);
+    W(13, 8, 13, 12); W(13, 16, 13, 18);
+    W(0, 18, 0, 15); W(0, 15, 10, 15); W(10, 15, 10, 16); W(10, 20, 10, 22); W(5, 17, 7, 17); W(5, 21, 5, 22);
+    W(2, 20, 2, 15); W(2, 24, 2, 26); W(2, 26, 7, 26); W(7, 26, 7, 19);
+    W(7, 26, 12, 26); W(12, 26, 16, 26); W(16, 26, 29, 26); W(29, 26, 29, 22);
+    W(23, 2, 25, 2); W(23, 6, 24, 6); W(28, 6, 30, 6); W(30, 6, 34, 6); W(34, 6, 38, 6);
+    W(32, 6, 32, 12); W(32, 12, 29, 12); W(29, 16, 29, 18); W(26, 18, 27, 18); W(27, 22, 27, 24);
+    W(38, 6, 41, 6); W(41, 6, 41, 15); W(41, 15, 43, 15);
+    W(16, 4, 16, -2); W(16, -2, 43, -2); W(43, -2, 43, 13);
   } else if (name === 'esp32io') {
     // ESP32 pins set by hand: D23 OUTPUT HIGH → 330 Ω → LED · D15 INPUT_PULLUP + button to GND · D34 analogRead of a 10 kΩ pot on 3.3 V
     const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';

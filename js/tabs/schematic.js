@@ -54,9 +54,11 @@ export function schematicTab(root) {
   function stepSim(span) {
     const dt = simDt(), sd = dtOf(), scope = c.parts.find(p => p.type === 'SCOPE');
     let n = Math.max(1, Math.ceil(span / dt - 1e-9));
-    const lag = n > MAX_STEPS; n = Math.min(n, MAX_STEPS);
+    let lag = n > MAX_STEPS; n = Math.min(n, MAX_STEPS);
     if (sim.next == null || sim.next < sim.t - sd) sim.next = sim.t;
+    const t0 = performance.now();
     for (let k = 0; k < n; k++) {
+      if (k > 0 && (k & 7) === 0 && performance.now() - t0 > 40) { lag = true; break; }   // keep the screen smooth on big circuits (SMPS)
       sim.t += dt;
       const r = S.solveCircuit(c, { t: sim.t, dt, state: sim.state });
       res = r;
@@ -422,6 +424,7 @@ export function schematicTab(root) {
       case 'LED': return q.color;
       case 'D': return q.model;
       case 'LAMP': return `${si(q.vr, 'V', 3)} ${si(q.wr, 'W', 3)}`;
+      case 'XFMR': return `${plain(q.n1)}+${plain(q.n2)} : ${plain(q.ns)} turns`;
       case 'SW': return q.on ? 'ON' : 'OFF';
       case 'SPDT': case 'DPDT': return q.on ? '▼ down' : '▲ up';
       case 'PB': return q.on ? 'pressed' : '';
@@ -905,6 +908,9 @@ export function schematicTab(root) {
       }
       case 'LED': f.append(modelChoice(p, 'Color / part', 'LED', q.color, Object.entries(S.LED_COLORS).filter(([, v]) => !v.custom).map(([k, v]) => [k, `${k} (${v.vf} V)`]), v => { q.color = v; }), field('Max current', plain(q.imax), 'A', v => { q.imax = v; })); break;
       case 'D': f.append(modelChoice(p, 'Type', 'DIODE', q.model, builtins(S.DIODES), v => { q.model = v; })); break;
+      case 'XFMR': f.append(field('Turns P1–CT', plain(q.n1), 'turns', v => { q.n1 = Math.max(v, 1e-3); }), field('Turns CT–P2', plain(q.n2), 'turns', v => { q.n2 = v; }),
+        field('Turns secondary', plain(q.ns), 'turns', v => { q.ns = v; }), field('Inductance P1–CT', plain(q.lm), 'H', v => { q.lm = Math.max(v, 1e-9); }),
+        field('Resistance P1–CT', plain(q.r1), 'Ω', v => { q.r1 = v; }), field('Resistance CT–P2', plain(q.r2), 'Ω', v => { q.r2 = v; }), field('Resistance secondary', plain(q.rs), 'Ω', v => { q.rs = v; })); break;
       case 'LAMP': f.append(field('Rated voltage', plain(q.vr), 'V', v => { q.vr = v; }), field('Rated power', plain(q.wr), 'W', v => { q.wr = v; })); break;
       case 'C': f.append(field('Capacitance', plain(q.c), 'F', v => { q.c = Math.max(v, 1e-15); }), field('Voltage rating', plain(q.vmax), 'V', v => { q.vmax = v; }),
         choice('Type', q.polar ? 'e' : 'n', [['e', 'Electrolytic (has + and −)'], ['n', 'Ceramic / film (no polarity)']], v => { q.polar = v === 'e'; })); break;
@@ -1040,6 +1046,14 @@ export function schematicTab(root) {
         vals.push(['Current', si(I, 'A'), true], ['Voltage', si(Vab, 'V'), true], ['Power', si(r.p, 'W')]);
         warn.push(r.on ? [I > m.imax ? 'bad' : 'ok', I > m.imax ? `Over ${si(m.imax, 'A')}: use a bigger diode.` : `Conducting (${m.vf} V drop).`] : ['ok', Vab < 0 ? `Blocking ${si(-Vab, 'V')} (rated ${m.piv} V).` : 'Not conducting.']);
         if (-Vab > m.piv) warn.push(['bad', `Reverse voltage over ${m.piv} V: it breaks down.`]);
+        break;
+      }
+      case 'XFMR': {
+        vals.push(['Secondary', si(r.vs, 'V'), true], ['P1–CT', si(r.v1, 'V'), true], ['CT–P2', si(r.v2, 'V')], ['I secondary', si(r.is, 'A')], ['I P1', si(r.i1, 'A')], ['I P2', si(r.i2, 'A')],
+          ['Magnetizing', si(r.im, 'A')], ['Power out', si(r.pout, 'W')]);
+        L.push(`Volts follow turns: V secondary = V(P1–CT) × ${plain(q.ns)} ÷ ${plain(q.n1)} = × ${plain(+(q.ns / q.n1).toFixed(3))}`, 'Amps go the other way: the side with more turns carries less current (power in ≈ power out).',
+          'A transformer only passes changing voltage (AC or switched DC). Steady DC just makes the magnetizing current climb: the core saturates and it overheats.', 'Dots: P1 and S1 go positive at the same moment.');
+        if (Math.abs(r.im) > 5 * Math.max(0.1, Math.abs(r.i1) + Math.abs(r.i2))) warn.push(['warn', 'Magnetizing current is large compared to the load current: DC on the winding or the frequency is too low for this inductance.']);
         break;
       }
       case 'LAMP': {
@@ -1242,7 +1256,7 @@ export function schematicTab(root) {
   }
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); autoSpeed(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -1338,6 +1352,15 @@ function symbol(ctx, p, r, g) {
       const b = r ? Math.min(1, r.p / Math.max(q.wr, 1e-9)) : 0;
       if (b > 0.02) { const gr = ctx.createRadialGradient(0, 0, 0.1, 0, 0, 1.7); gr.addColorStop(0, `rgba(255,225,107,${0.25 + 0.75 * b})`); gr.addColorStop(1, 'rgba(255,225,107,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, 1.7, 0, 7); ctx.fill(); }
       L(-2, 0, -0.85, 0); L(0.85, 0, 2, 0); ctx.strokeStyle = C.part; ctx.beginPath(); ctx.arc(0, 0, 0.85, 0, 7); ctx.stroke(); L(-0.6, -0.6, 0.6, 0.6); L(-0.6, 0.6, 0.6, -0.6); break;
+    }
+    case 'XFMR': {
+      L(-3, -2, -1.2, -2); L(-3, 0, -1.2, 0); L(-3, 2, -1.2, 2); L(1.2, -2, 3, -2); L(1.2, 2, 3, 2);
+      ctx.beginPath(); for (let k = 0; k < 4; k++) { const cy = -1.5 + k; ctx.moveTo(-1.2, cy - 0.5); ctx.arc(-1.2, cy, 0.5, -Math.PI / 2, Math.PI / 2); } ctx.stroke();
+      ctx.beginPath(); for (let k = 0; k < 4; k++) { const cy = -1.5 + k; ctx.moveTo(1.2, cy - 0.5); ctx.arc(1.2, cy, 0.5, -Math.PI / 2, Math.PI / 2, true); } ctx.stroke();
+      L(-0.22, -2.3, -0.22, 2.3); L(0.22, -2.3, 0.22, 2.3);
+      ctx.fillStyle = C.part; for (const x of [-1.7, 1.7]) { ctx.beginPath(); ctx.arc(x, -2.35, 0.17, 0, 7); ctx.fill(); }
+      T('CT', -2.4, -0.45, 0.45, C.dim);
+      break;
     }
     case 'GND': L(0, 0, 0, 0.8); L(-0.75, 0.8, 0.75, 0.8); L(-0.5, 1.1, 0.5, 1.1); L(-0.25, 1.4, 0.25, 1.4); break;
     case 'C': {
@@ -1523,6 +1546,6 @@ function arrowHead(ctx, x1, y1, x2, y2, f) {
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

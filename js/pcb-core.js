@@ -66,6 +66,8 @@ export const FOOTPRINTS = {
     R.forEach((n, k) => pads.push({ ...th(6.35, (k - 3.5) * PITCH, idx[n] ?? -1, 1.8, 1.0), name: n }));
     return { pads, body: [box(-7.6, -10.2, 7.6, 10.2)] };
   } },
+  // small mains / inverter transformer: primary P1, CT, P2 on one side, secondary S1, S2 on the other, 10 mm apart (high voltage gap)
+  XF5: { label: 'Transformer 5-pin (P1 CT P2 | S1 S2)', n: 5, make: () => ({ pads: square1([th(-7.5, -5, 0, 2.6, 1.2), th(-7.5, 0, 1, 2.6, 1.2), th(-7.5, 5, 2, 2.6, 1.2), th(7.5, -5, 3, 2.6, 1.2), th(7.5, 5, 4, 2.6, 1.2)]), body: [box(-10.5, -9, 10.5, 9), [[0, -9], [0, 9]]] }) },
   // SRD-05VDC-SL-C style relay (check against your relay's datasheet)
   SRD: { label: 'Relay SRD (Songle) 5-pin', n: 5, make: () => ({ pads: [th(-6, -2, 0, 2.2, 1.2), th(-6, 10, 1, 2.2, 1.2), th(-8, 4, 2, 2.4, 1.3), th(6.2, -2, 3, 2.4, 1.3), th(6.2, 10, 4, 2.4, 1.3)], body: [box(-9.8, -4.3, 9.2, 11.2)] }) },
 };
@@ -103,6 +105,7 @@ export function fpChoices(p) {
   if (p.type === 'ESP32') return ['DK30W', 'DK30N'];
   if (p.type === 'UNO') return ['UNOSH'];
   if (p.type === 'RELAY') return ['SRD'];
+  if (p.type === 'XFMR') return ['XF5'];
   if (p.type === 'DPDT') return ['HDR2x3'];
   if (p.type === 'PB') return ['TACT6', 'HDR2', 'TERM2'];
   if (p.type === 'POT') return ['POT3', 'HDR3'];
@@ -183,7 +186,7 @@ export function netlist(c) {
     const bat = n.members.find(m => m.part.type === 'BAT' && m.pin === 0);
     const m = bat ?? n.members[0];
     n.name = m ? `${m.part.name}.${pinLabel(m.part, m.pin)}` : `N${n.id}`;
-    n.power = n.members.some(m => ['BAT', 'LAMP', 'REG', 'L'].includes(m.part.type) || (m.part.type === 'STEPPER' && m.pin >= 4) || (m.part.type === 'SERVO' && m.pin >= 1) || (m.part.type === 'RELAY' && m.pin >= 2) || (isBoard(m.part.type) && /pwr|gnd/.test(BOARDS[m.part.type].pins[m.pin].k)));
+    n.power = n.members.some(m => ['BAT', 'LAMP', 'REG', 'L', 'XFMR'].includes(m.part.type) || (m.part.type === 'STEPPER' && m.pin >= 4) || (m.part.type === 'SERVO' && m.pin >= 1) || (m.part.type === 'RELAY' && m.pin >= 2) || (isBoard(m.part.type) && /pwr|gnd/.test(BOARDS[m.part.type].pins[m.pin].k)));
   }
   nets[0].power = true;
   return { nets, pinNet };
