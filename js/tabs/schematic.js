@@ -72,7 +72,7 @@ export function schematicTab(root) {
     if (sim.buf.length > SAMPLES * 3) sim.buf.splice(0, sim.buf.length - SAMPLES * 3);
     return lag;
   }
-  let panelRefresh = null, lastPanel = 0;
+  let panelRefresh = null, lastPanel = 0, tipVals = [];
 
   // ---------- DOM ----------
   const btn = (text, on, cls = '') => el('button', { class: 'sb ' + cls, type: 'button', text, onclick: on });
@@ -337,10 +337,32 @@ export function schematicTab(root) {
       }
       if (wireStart) { ctx.strokeStyle = C.sel; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(wireStart[0]), sy(wireStart[1]), 7, 0, 7); ctx.stroke(); }
     }
+    drawTip();
     if (mode === 'place' && hover) {
       const ghost = { id: -1, type: placeType, x: Math.round(hover[0]), y: Math.round(hover[1]), rot: 0, props: S.TYPES[placeType].props, name: '' };
       ctx.globalAlpha = 0.45; drawPart(ghost); ctx.globalAlpha = 1;
     }
+  }
+
+  // tip bubble: live readings next to the selected wire or part, so you don't have to scroll down to the panel
+  function drawTip() {
+    if (mode !== 'select' || !sel || !tipVals.length || !res?.ok || down?.drag) return;
+    let ax, ay;
+    if (sel.kind === 'wire') { const w = c.wires[sel.i]; if (!w) return; ax = sx((w.x1 + w.x2) / 2); ay = sy((w.y1 + w.y2) / 2); }
+    else { const p = selPart(); if (!p || p.type === 'GND') return; ax = sx(p.x); ay = sy(p.y); }
+    ctx.save(); ctx.font = '600 12px system-ui, sans-serif';
+    const rows = tipVals.map(([l, v]) => [l + ':', v]);
+    const lw = Math.max(...rows.map(r => ctx.measureText(r[0]).width)), vw = Math.max(...rows.map(r => ctx.measureText(r[1]).width));
+    const pad = 7, lh = 16, bw = lw + vw + pad * 3, bh = rows.length * lh + pad * 1.4;
+    const gap = (sel.kind === 'wire' ? 0.8 : 2.6) * view.g;
+    let bx = ax - bw / 2, by = ay - bh - gap;
+    if (by < 4) by = ay + gap;
+    bx = Math.max(4, Math.min(W - bw - 4, bx)); by = Math.max(4, Math.min(H - bh - 4, by));
+    ctx.globalAlpha = 0.93; ctx.fillStyle = '#0B0F13'; ctx.strokeStyle = C.sel; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, bw, bh, 7) : ctx.rect(bx, by, bw, bh); ctx.fill(); ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.textBaseline = 'middle';
+    rows.forEach(([l, v], k) => { const y = by + pad * 0.7 + lh * (k + 0.5); ctx.fillStyle = '#8B97A6'; ctx.textAlign = 'left'; ctx.fillText(l, bx + pad, y); ctx.fillStyle = '#FFE16B'; ctx.textAlign = 'right'; ctx.fillText(v, bx + bw - pad, y); });
+    ctx.restore();
   }
 
   function drawDots(pieces) {
@@ -989,6 +1011,8 @@ export function schematicTab(root) {
   }
 
   function readings(vals, lines, warn) {
+    // the highlighted values also go into the little tip bubble drawn next to the selected wire / part
+    const hi = vals.filter(v => v[2]); tipVals = (hi.length ? hi : vals).slice(0, 3).map(([l, v]) => [l, v]);
     return el('div', {},
       el('div', { class: 'readouts' }, vals.map(([l, v, hi]) => el('div', { class: 'ro' + (hi ? ' hi' : '') }, el('span', { class: 'rl', text: l }), el('span', { class: 'rv', text: v })))),
       warn.length ? el('div', { class: 'flags' }, warn.map(([lvl, t]) => el('div', { class: 'flag ' + lvl, text: t }))) : null,
