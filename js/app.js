@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '1.8.4';
+export const VERSION = '1.8.5';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -63,7 +63,11 @@ function start() {
     el('div', { class: 'brand' }, el('img', { src: 'icons/icon-192.png', alt: '', class: 'logo' }), el('span', { class: 'name', text: 'Fox9nertron' }), el('span', { class: 'ver', text: 'v' + VERSION })),
     el('button', { class: 'btn ghost help', type: 'button', text: '? Help', onclick: help }));
   for (const [id, label] of TABS) nav.append(el('a', { href: '#' + id, class: 'tab', 'data-id': id, text: label }));
-  document.getElementById('app').append(el('div', { class: 'appbar' }, header, nav), main);
+  const bar = el('div', { class: 'appbar' }, header, nav);
+  document.getElementById('app').append(bar, main);
+  // second-layer toolbars stick right under the app bar, whatever its real height
+  const setH = () => document.documentElement.style.setProperty('--appbar-h', bar.offsetHeight + 'px');
+  setH(); if ('ResizeObserver' in globalThis) new ResizeObserver(setH).observe(bar); else addEventListener('resize', setH);
   const route = () => show(location.hash.slice(1) || store.get('tab', 'ohm'));
   addEventListener('hashchange', route);
   route();

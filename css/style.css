@@ -17,6 +17,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 code { font-family: var(--mono); font-size: .92em; background: var(--line); padding: 1px 5px; border-radius: 4px; }
 
 .appbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; }
+.sch-sticky { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--appbar-h, 98px)); z-index: 8; display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg); padding-block: 8px; margin-block: -8px; }
 .top { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px;
   background: var(--panel); border-bottom: 1px solid var(--line); padding-block: 8px;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }

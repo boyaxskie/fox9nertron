@@ -136,7 +136,7 @@ export function schematicTab(root) {
   whatSel.onchange = () => { nudgeWhat = whatSel.value; };
   const nudgeBar = el('div', { class: 'pcb-nudge', hidden: true }, el('span', { class: 'muted', text: 'Nudge' }),
     btn('◀', () => nudgeSch(-1, 0), 'icon'), btn('▲', () => nudgeSch(0, -1), 'icon'), btn('▼', () => nudgeSch(0, 1), 'icon'), btn('▶', () => nudgeSch(1, 0), 'icon'), whatSel);
-  root.append(top, tray, wrap, nudgeBar, status, scopeBox, panel);
+  root.append(el('div', { class: 'sch-sticky' }, top, tray), wrap, nudgeBar, status, scopeBox, panel);
   // ---------- PCB view (same circuit, board layout + G-code) ----------
   let view2 = 'sch';
   const pcb = pcbView({ getC: () => c, commit: (push = true) => commit(push), undo: () => undo(), redo: () => redo(), say: (t) => say(t), shareFile: (n, t, m) => shareFile(n, t, m), toSchematic: () => setView('sch') });
