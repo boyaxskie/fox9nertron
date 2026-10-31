@@ -986,7 +986,7 @@ export function example(name) {
     addPart(c, 'R', 7, 6).props.r = 220;
     addPart(c, 'LED', 12, 6).props.color = 'red';
     const pb = addPart(c, 'PB', 10, -5); pb.name = 'BTN';
-    const pot = addPart(c, 'POT', -10, 0, 1); pot.props.pos = 50;
+    const pot = addPart(c, 'POT', -10, 0, 1); pot.props.pos = 50; pot.lbl = [-1.5, 3.5];
     addPart(c, 'GND', 16, 10);
     W(4, 6, 5, 6); W(9, 6, 10, 6); W(14, 6, 16, 6); W(16, 6, 16, 10);
     W(4, -5, 8, -5); W(12, -5, 16, -5); W(16, -5, 16, 6);

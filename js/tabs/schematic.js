@@ -1319,6 +1319,14 @@ function symbol(ctx, p, r, g) {
         const m = pin.k === 'gpio' ? (cfg[pin.n]?.mode ?? 'in') : pin.k;
         T(pin.n, x > 0 ? 2.05 : -2.05, y, 0.42, pin.k === 'gnd' ? C.dim : pin.k === 'pwr' ? '#FF9F43' : col[m] ?? C.text);
         if (col[m]) { ctx.fillStyle = col[m]; ctx.beginPath(); ctx.arc(x > 0 ? 3.5 : -3.5, y, 0.17, 0, 7); ctx.fill(); }
+        // live readings next to input pins: analogRead value or digitalRead H / L
+        const rp = r?.pins?.[pin.n];
+        if (rp && pin.k === 'gpio' && /adc|in|pu|pd/.test(m) && (m !== 'in' || Math.abs(rp.v) > 0.01)) {
+          const txt = m === 'adc' ? String(Math.round(Math.max(0, Math.min(1, rp.v / B.adcRef)) * (2 ** B.adcBits - 1))) : rp.v >= B.vih ? 'H' : rp.v <= B.vil ? 'L' : '?';
+          const tw = txt.length * 0.32 + 0.4, cx = x > 0 ? x + 0.6 + tw / 2 : x - 0.6 - tw / 2;
+          ctx.fillStyle = 'rgba(15,19,23,0.85)'; ctx.fillRect(cx - tw / 2, y - 0.38, tw, 0.76);
+          T(txt, cx, y + 0.02, 0.52, m === 'adc' ? '#C084FC' : txt === 'H' ? '#3DDC84' : txt === 'L' ? '#FF6B6B' : '#FFC857');
+        }
       });
       break;
     }
