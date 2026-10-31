@@ -979,6 +979,19 @@ export function example(name) {
     W(-8, 0, -6, 0); W(-6, 0, -6, -4); W(-6, -4, -4, -4);
     W(-10, 2, -10, 6); W(-10, 6, -4, 6);
     W(-10, -2, -12, -2); W(-12, -2, -12, 9); W(-12, 9, 4, 9); W(4, 9, 4, 7);
+  } else if (name === 'unoio') {
+    // Arduino UNO pins set by hand: D13 OUTPUT HIGH → 220 Ω → LED · D2 INPUT_PULLUP + button to GND · A0 analogRead of a 10 kΩ pot on 5 V
+    const m = addPart(c, 'UNO', 0, 0); m.name = 'UNO';
+    m.props.pins = { D13: { mode: 'high' }, D2: { mode: 'pu' }, A0: { mode: 'adc' } };
+    addPart(c, 'R', 7, 6).props.r = 220;
+    addPart(c, 'LED', 12, 6).props.color = 'red';
+    const pb = addPart(c, 'PB', 10, -5); pb.name = 'BTN';
+    const pot = addPart(c, 'POT', -10, 0, 1); pot.props.pos = 50;
+    addPart(c, 'GND', 16, 10);
+    W(4, 6, 5, 6); W(9, 6, 10, 6); W(14, 6, 16, 6); W(16, 6, 16, 10);
+    W(4, -5, 8, -5); W(12, -5, 16, -5); W(16, -5, 16, 6);
+    W(-4, -2, -6, -2); W(-6, -2, -6, 10); W(-10, 10, 16, 10);
+    W(-8, 0, -4, 0); W(-10, -2, -10, -5); W(-10, -5, -4, -5); W(-10, 2, -10, 10);
   } else if (name === 'bridge') {
     const b = addPart(c, 'BAT', 0, 8, 1); b.props.v = 10;
     addPart(c, 'R', 6, 4, 1).props.r = 1000;   // R1 top-left

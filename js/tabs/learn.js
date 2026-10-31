@@ -48,6 +48,24 @@ const ARTICLES = [
       ['7. Power pins', 'ESP32 3V3 comes from its regulator (keep extra loads to a few hundred mA), VIN ≈ 4.7 V from USB. UNO 3V3 only 50 mA, 5V about 500 mA from USB. Motors, solenoids and relay banks need their own supply (common GND).'],
     ],
     tryit: ['Hold BTN: D15 reads LOW.', 'Turn RV1: D34 analogRead follows (0–4095).', 'Change R1 to 47 Ω: the D23 panel warns about the current.', 'Set D2 to PWM 50 %: the scope appears (time simulation).', 'Open 🟫 PCB: the DevKit footprint is ready for a carrier board.'],
+    build: ['Parts: ESP32 DevKit (30 pin) + USB cable, 330 Ω resistor, red LED, push button, 10 kΩ pot, breadboard, jumper wires.', 'LED: D23 → 330 Ω → LED long leg (+); LED short leg (−) → GND.', 'Button: D15 → button → GND (no resistor: INPUT_PULLUP is inside).', 'Pot: outer legs to 3V3 and GND, middle leg (wiper) → D34.', 'Arduino IDE → board "ESP32 Dev Module" → upload the code below → Serial Monitor at 115200.'],
+    code: "const int LED = 23;\nconst int BTN = 15;\nconst int POT = 34;\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(LED, OUTPUT);\n  pinMode(BTN, INPUT_PULLUP);   // pressed = LOW\n  // D34 is input-only: analogRead works without pinMode\n}\n\nvoid loop() {\n  bool pressed = digitalRead(BTN) == LOW;\n  int pot = analogRead(POT);    // 0 ... 4095\n  digitalWrite(LED, pressed ? LOW : HIGH);   // LED on, off while pressed\n  Serial.print(\"button: \"); Serial.print(pressed ? \"PRESSED\" : \"up\");\n  Serial.print(\"   pot: \"); Serial.println(pot);\n  delay(200);\n}",
+    note2: 'In the simulator no program runs: pins stay as you set them, so the LED does not react to the button by itself. The code joins them on the real board: it reads D15 and switches D23.',
+  },
+  {
+    id: 'unoio', title: 'Arduino UNO: LED, button, pot', example: 'unoio', tag: 'Microcontroller',
+    intro: 'The same idea as the ESP32 page on a 5 V board: D13 drives an LED, D2 reads a button with the internal pull-up, A0 reads a pot.',
+    parts: [['UNO', 'Arduino UNO, USB powered, 5 V logic'], ['R1 + LED1', 'D13 OUTPUT HIGH → 220 Ω → red LED'], ['BTN', 'D2 INPUT_PULLUP, button to GND'], ['RV1', '10 kΩ pot on 5 V, wiper → A0']],
+    steps: [
+      ['LED current', '(5 − 1.8) ÷ (220 + 25) ≈ <b>12.5 mA</b> (the simulator shows 12.4 mA). Under the 20 mA a pin likes. D13 also has the small on-board "L" LED.'],
+      ['Button', 'INPUT_PULLUP (≈ 35 kΩ inside) holds D2 at 5 V = HIGH. Pressed → 0 V = LOW. D0 and D1 are the USB serial pins: keep them free.'],
+      ['Pot', 'A0 reads 0–1023 for 0–5 V. Middle = 2.5 V → about 511.'],
+      ['PWM', 'Only D3, D5, D6, D9, D10, D11 (marked ~) can do analogWrite.'],
+    ],
+    tryit: ['Hold BTN: D2 reads LOW.', 'Turn RV1: A0 follows 0–1023.', 'Change R1 to 100 Ω: about 26 mA, the D13 panel warns.', 'Set D9 to PWM and add an LED + 220 Ω: dimming.'],
+    build: ['Parts: Arduino UNO + USB cable, 220 Ω resistor, red LED, push button, 10 kΩ pot, breadboard, jumper wires.', 'LED: D13 → 220 Ω → LED long leg (+); LED short leg (−) → GND.', 'Button: D2 → button → GND.', 'Pot: outer legs to 5V and GND, middle leg → A0.', 'Arduino IDE → board "Arduino Uno" → upload → Serial Monitor at 9600.'],
+    code: "const int LED = 13;\nconst int BTN = 2;\nconst int POT = A0;\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(LED, OUTPUT);\n  pinMode(BTN, INPUT_PULLUP);   // pressed = LOW\n}\n\nvoid loop() {\n  bool pressed = digitalRead(BTN) == LOW;\n  int pot = analogRead(POT);    // 0 ... 1023\n  digitalWrite(LED, pressed ? LOW : HIGH);   // LED on, off while pressed\n  Serial.print(\"button: \"); Serial.print(pressed ? \"PRESSED\" : \"up\");\n  Serial.print(\"   pot: \"); Serial.println(pot);\n  delay(200);\n}",
+    note2: 'In the simulator no program runs: pins stay as you set them. On the real board the code reads D2 and switches D13.',
   },
   {
     id: 'led', title: 'LED resistor', example: 'led', tag: 'Basics',
@@ -113,6 +131,11 @@ export function learnTab(root) {
     dispatchEvent(new CustomEvent('f9t-example', { detail: name }));
     location.hash = '#schematic';
   }
+  function codeBox(code) {
+    const b = el('button', { class: 'btn', type: 'button', text: '📋 Copy code', onclick: async () => { try { await navigator.clipboard.writeText(code); b.textContent = '✓ Copied'; } catch { const r = document.createRange(); r.selectNodeContents(pre); getSelection().removeAllRanges(); getSelection().addRange(r); b.textContent = 'Selected: copy it'; } setTimeout(() => (b.textContent = '📋 Copy code'), 1800); } });
+    const pre = el('pre', { class: 'steps learn-code', text: code });
+    return el('div', { class: 'learn-step' }, el('div', { class: 'row wrap', style: 'justify-content:space-between;align-items:center' }, el('h3', { text: '💻 Code (Arduino IDE)' }), b), pre);
+  }
   function show(id) {
     const a = ARTICLES.find(x => x.id === id) ?? ARTICLES[0];
     store.set('learn.cur', a.id);
@@ -124,7 +147,10 @@ export function learnTab(root) {
       a.example ? el('div', { class: 'row wrap' }, el('button', { class: 'btn primary', type: 'button', text: '⚡ Open in Schematic', onclick: () => openExample(a.example) })) : null,
       a.parts ? el('div', { class: 'learn-parts' }, a.parts.map(([k, v]) => el('div', {}, el('b', { text: k }), el('span', { text: v })))) : null,
       ...a.steps.map(([h, html]) => el('div', { class: 'learn-step' }, el('h3', { text: h }), el('p', { html }))),
-      a.tryit ? el('div', { class: 'learn-try' }, el('h3', { text: '🧪 Try it in the simulator' }), el('ul', {}, a.tryit.map(t => el('li', { text: t })))) : null);
+      a.tryit ? el('div', { class: 'learn-try' }, el('h3', { text: '🧪 Try it in the simulator' }), el('ul', {}, a.tryit.map(t => el('li', { text: t })))) : null,
+      a.note2 ? el('p', { class: 'note', text: a.note2 }) : null,
+      a.build ? el('div', { class: 'learn-step' }, el('h3', { text: '🔧 Build it for real' }), el('ol', { class: 'learn-ol' }, a.build.map(t => el('li', { text: t })))) : null,
+      a.code ? codeBox(a.code) : null);
     view.append(card);
   }
   show(store.get('learn.cur', 'preamp'));
