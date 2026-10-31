@@ -20,6 +20,21 @@ const ARTICLES = [
     tryit: ['Raise MIC amplitude to 50 mV: the bottom of the wave flattens (clipping, distortion).', 'Delete CE: gain drops to RC ÷ RE ≈ 3 (4.7k ∥ 10k ÷ 1k), but distortion almost disappears. Gain vs. clean sound is the classic trade-off.', 'Change RC to 2.2 kΩ: collector moves up to ≈ 7 V, gain halves.', 'Swap BC547 for 2N2222: almost nothing changes. That\'s RE doing its job.'],
   },
   {
+    id: 'delay555', title: '555 power-on delay', example: 'delay555', tag: 'Timer',
+    intro: 'Turn the power on and the output waits about 1 second before switching ON. Used to delay a relay, a speaker (no "pop" at switch-on) or a motor until the supply is steady.',
+    parts: [['U1', 'NE555 timer'], ['C1', '10 µF from +12 V to TRIG + THR'], ['R1', '100 kΩ from TRIG + THR to ground'], ['C2', '10 nF on CTRL (pin 5), noise filter'], ['R2 + ON', '1 kΩ + green LED on the output'], ['POWER', 'switch to try it']],
+    steps: [
+      ['1. How a 555 thinks', 'Inside are two comparators and a memory (latch). A divider of three 5 kΩ resistors makes ⅓ Vcc and ⅔ Vcc.<br><b>TRIG (pin 2) below ⅓ Vcc → output HIGH.</b> <b>THR (pin 6) above ⅔ Vcc → output LOW.</b> In between, it remembers the last state.'],
+      ['2. The moment power comes on', 'C1 is empty, and an empty capacitor acts like a wire. So TRIG and THR jump up to the full 12 V with the supply. THR is above ⅔ Vcc (8 V) → <b>output LOW</b>, LED off.'],
+      ['3. The wait', 'C1 now charges through R1. Its bottom end (TRIG + THR) slides down from 12 V toward 0 V with time constant τ = R1 × C1 = 100 kΩ × 10 µF = <b>1 s</b>.'],
+      ['4. The switch', 'When TRIG drops below ⅓ Vcc (4 V), the output flips <b>HIGH</b> and stays there.<br>Time to fall from 12 V to 4 V: t = R × C × ln(3) = <b>1.1 × R × C ≈ 1.1 s</b>. The simulator switches at 1.09 s. ✔'],
+      ['5. Changing the delay', 't ≈ 1.1 × R1 × C1. 470 kΩ + 10 µF ≈ 5 s, 1 MΩ + 47 µF ≈ 52 s. Keep R1 under about 1 MΩ (electrolytic leakage), and use a good capacitor for long delays.'],
+      ['6. Driving a load', 'An NE555 output can source about 200 mA, so it drives an LED or a small 12 V relay straight away (add a 1N4148 across the coil). For anything bigger use a transistor or MOSFET. With an NE555 on 12 V the HIGH output is about 10.3 V (Vcc − 1.7 V); a TLC555 (CMOS) goes almost to 12 V.'],
+      ['7. Fast reset when power goes off', 'After the delay C1 is full (12 V across it). When power is cut, its bottom end swings to about −12 V and C1 empties only slowly through R1, so a quick off-on gives a shorter delay.<br>Fix: a <b>1N4148 across R1, anode to ground, cathode to TRIG/THR</b>. While running it is reversed and does nothing; at switch-off it clamps the negative swing and empties C1 at once.'],
+    ],
+    tryit: ['Flip POWER on and watch the scope: blue = capacitor (TRIG/THR) falling, yellow = output stepping up after ≈ 1.1 s.', 'Change C1 to 47 µF: about 5 s.', 'Change the 555 to TLC555: the output HIGH goes to almost 12 V.', 'Flip POWER off and on again quickly: the delay is shorter because C1 did not empty. That is why the reset diode helps.'],
+  },
+  {
     id: 'led', title: 'LED resistor', example: 'led', tag: 'Basics',
     intro: 'An LED needs a fixed voltage (its forward voltage) and the resistor sets the current.',
     steps: [

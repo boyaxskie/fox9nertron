@@ -46,6 +46,11 @@ export const FOOTPRINTS = {
     for (let n = 1; n <= 8; n++) { const x = n <= 4 ? -3.81 : 3.81, y = n <= 4 ? -3.81 + (n - 1) * PITCH : 3.81 - (n - 5) * PITCH; pads.push({ ...th(x, y, map[n] ?? -1, 1.7, 0.8, n === 1 ? 'rect' : 'oval', 2.2, 1.6), num: n }); }
     return { pads, body: [box(-2.6, -5, 2.6, 5)] };
   } },
+  DIP8N: { label: 'DIP-8 (pin 1…8 in order)', n: 8, make: () => {
+    const pads = [];
+    for (let n = 1; n <= 8; n++) { const x = n <= 4 ? -3.81 : 3.81, y = n <= 4 ? -3.81 + (n - 1) * PITCH : 3.81 - (n - 5) * PITCH; pads.push({ ...th(x, y, n - 1, 1.7, 0.8, n === 1 ? 'rect' : 'oval', 2.2, 1.6), num: n }); }
+    return { pads, body: [box(-2.6, -5, 2.6, 5)] };
+  } },
   // SRD-05VDC-SL-C style relay (check against your relay's datasheet)
   SRD: { label: 'Relay SRD (Songle) 5-pin', n: 5, make: () => ({ pads: [th(-6, -2, 0, 2.2, 1.2), th(-6, 10, 1, 2.2, 1.2), th(-8, 4, 2, 2.4, 1.3), th(6.2, -2, 3, 2.4, 1.3), th(6.2, 10, 4, 2.4, 1.3)], body: [box(-9.8, -4.3, 9.2, 11.2)] }) },
 };
@@ -58,6 +63,7 @@ export function fpChoices(p) {
   const n = TYPES[p.type].pins.length;
   if (p.type === 'OPAMP') return ['DIP8'];
   if (p.type === 'OPTO') return ['DIP4'];
+  if (p.type === 'T555') return ['DIP8N'];
   if (p.type === 'RELAY') return ['SRD'];
   if (p.type === 'DPDT') return ['HDR2x3'];
   if (p.type === 'PB') return ['TACT6', 'HDR2', 'TERM2'];
@@ -102,7 +108,7 @@ export function footprintOf(p, bp = {}) {
 // pad name shown on the board
 export function pinLabel(p, i) {
   const L = { BAT: ['+', '−'], LED: ['A', 'K'], D: ['A', 'K'], ZD: ['A', 'K'], C: ['+', '−'], NPN: ['B', 'C', 'E'], PNP: ['B', 'C', 'E'], NMOS: ['G', 'D', 'S'], PMOS: ['G', 'D', 'S'],
-    OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
+    OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
   return L?.[i] ?? String(i + 1);
 }
 

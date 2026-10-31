@@ -125,7 +125,7 @@ export function schematicTab(root) {
     if (v === 'pcb') { scopeBox.hidden = true; pcb.show(); } else { pcb.hide(); resize(); commit(false); }
     scrollTo({ top: 0 });
   }
-  function autoTimeQuiet() { const g = c.parts.find(p => p.type === 'SIG'); if (g) { const want = 2.5 / g.props.f / 10; sim.tdiv = TDIVS.find(t => t >= want) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; } else if (c.parts.some(p => p.type === 'L')) { sim.tdiv = 0.005; tSel.value = '0.005'; sim.buf = []; } }
+  function autoTimeQuiet() { if (c.tdiv) { sim.tdiv = TDIVS.find(t => t >= c.tdiv) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; return; } const g = c.parts.find(p => p.type === 'SIG'); if (g) { const want = 2.5 / g.props.f / 10; sim.tdiv = TDIVS.find(t => t >= want) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; } else if (c.parts.some(p => p.type === 'L')) { sim.tdiv = 0.005; tSel.value = '0.005'; sim.buf = []; } }
   function autoTime() {
     const g = c.parts.find(p => p.type === 'SIG');
     if (!g) { say('Auto time needs a signal generator. Pick a time/div by hand.'); return; }
@@ -136,7 +136,7 @@ export function schematicTab(root) {
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -371,6 +371,7 @@ export function schematicTab(root) {
       case 'ZD': return S.ZENER_PARTS[q.model] ? `${q.model} ${si(S.ZENER_PARTS[q.model].vz, 'V', 3)}` : si(q.vz, 'V', 3);
       case 'NPN': case 'PNP': case 'NMOS': case 'PMOS': case 'OPAMP': return q.model;
       case 'RELAY': return S.getCustom('RELAY', q.relay) ? q.relay : `${q.vcoil} V coil`;
+      case 'T555': return q.model;
     }
     return '';
   }
@@ -815,6 +816,8 @@ export function schematicTab(root) {
         note('Pins: − input top-left, + input bottom-left, output right, supply V+ top, V− bottom (to ground on a single supply).')); break;
       case 'REG': f.append(modelChoice(p, 'Type', 'REG', q.model, builtins(S.REGS), v => { q.model = v; }),
         note(S.REGS[q.model]?.adj ? 'Pins: IN left, OUT right, ADJ bottom. R1 (240 Ω) from OUT to ADJ, R2 from ADJ to ground: Vout = 1.25 × (1 + R2 ÷ R1).' : 'Pins: IN left, OUT right, GND bottom. Real circuit: 0.33 µF on IN and 0.1 µF on OUT, close to the pins.')); break;
+      case 'T555': f.append(choice('Type', q.model, Object.entries(S.TIMERS).map(([k, m]) => [k, `${k}: ${m.note}`]), v => { q.model = v; }),
+        note('Pins: 1 GND · 2 TRIG · 3 OUT · 4 RESET · 5 CTRL · 6 THR · 7 DIS · 8 VCC. TRIG below ⅓ Vcc → output HIGH. THR above ⅔ Vcc → output LOW (and DIS shorts to ground). RESET to + for normal use. 10 nF from CTRL to ground keeps it steady.')); break;
       case 'RELAY': {
         const cust = S.getCustom('RELAY', q.relay);
         f.append(modelChoice(p, 'Coil', 'RELAY', cust ? q.relay : String(q.vcoil), Object.entries(S.RELAYS).filter(([, m]) => !m.custom).map(([v, m]) => [v, `${v} V coil (${m.rcoil} Ω)`]),
@@ -988,6 +991,15 @@ export function schematicTab(root) {
         if (m.adj && r.iout < 0.0095) warn.push(['warn', 'LM317 needs ≥ 10 mA load or the output creeps up. Use R1 = 120–240 Ω.']);
         break;
       }
+      case 'T555': {
+        const m = S.TIMERS[q.model] ?? S.TIMERS.NE555;
+        vals.push(['Output', r.q ? `HIGH ${si(r.vout, 'V')}` : `LOW ${si(r.vout, 'V')}`, true], ['Supply Vcc', si(r.vcc, 'V'), true], ['TRIG (pin 2)', si(c0(r.vtrig), 'V')], ['THR (pin 6)', si(c0(r.vthr), 'V')], ['Output current', si(c0(r.iout), 'A')], ['Power', si(c0(r.p), 'W')]);
+        L.push(`Switch points: ⅓ Vcc = ${si(r.vlo, 'V')} (TRIG) and ⅔ Vcc = ${si(r.vhi, 'V')} (THR)`, 'Monostable (one pulse): t = 1.1 × R × C', 'Astable (blinks): f = 1.44 ÷ ((R1 + 2·R2) × C), high time 0.693·(R1+R2)·C, low time 0.693·R2·C', 'Power-on delay: C from Vcc to TRIG+THR, R to ground → output goes HIGH after t ≈ 1.1 × R × C');
+        if (r.vcc < m.vmin) warn.push(['warn', `Supply ${si(r.vcc, 'V')} is below the ${m.vmin} V minimum: not running.`]);
+        if (r.vcc > m.vmax) warn.push(['bad', `Supply over ${m.vmax} V: the ${q.model} can be damaged.`]);
+        if (Math.abs(r.iout) > m.iout) warn.push(['bad', `Output current ${si(Math.abs(r.iout), 'A')} is over ${si(m.iout, 'A')}: drive a transistor / MOSFET for bigger loads.`]);
+        break;
+      }
       case 'RELAY': {
         const rq = S.relayOf(q), inom = rq.vcoil / rq.rcoil;
         vals.push(['Contacts', r.on ? 'ON (COM → NO)' : 'OFF (COM → NC)', true], ['Coil current', si(Math.abs(r.icoil), 'A'), true], ['Coil voltage', si(Math.abs(r.v), 'V'), true], ['Contact current', si(Math.abs(r.icon), 'A')], ['Coil power', si(c0(r.p), 'W')]);
@@ -1037,7 +1049,7 @@ export function schematicTab(root) {
   }
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -1233,6 +1245,15 @@ function symbol(ctx, p, r, g) {
       T('IN', -1.45, 0.55, 0.42, C.dim); T('OUT', 1.35, 0.55, 0.42, C.dim); T(m.adj ? 'ADJ' : 'GND', 0, 0.7, 0.42, C.dim);
       break;
     }
+    case 'T555': {
+      const on = !!r?.q;
+      ctx.fillStyle = '#161C22'; ctx.fillRect(-3, -3, 6, 6); ctx.strokeStyle = on ? '#3DDC84' : C.part; ctx.strokeRect(-3, -3, 6, 6); ctx.strokeStyle = C.part;
+      L(0, 3, 0, 4); L(-4, 2, -3, 2); L(3, 0, 4, 0); L(1, -4, 1, -3); L(2, 3, 2, 4); L(-4, 0, -3, 0); L(-4, -2, -3, -2); L(-1, -4, -1, -3);
+      T(q.model === 'NE555' ? '555' : q.model, 0, 0.1, 0.95, C.part);
+      for (const [t, x, y] of [['DIS', -2.15, -2], ['THR', -2.15, 0], ['TRIG', -2.05, 2], ['OUT', 2.15, 0], ['VCC', -1, -2.45], ['RST', 1, -2.45], ['GND', 0, 2.45], ['CV', 2, 2.45]]) T(t, x, y, 0.42, C.dim);
+      if (r) T(on ? 'HIGH' : 'LOW', 2.1, -1.1, 0.45, on ? '#3DDC84' : '#FF6B6B');
+      break;
+    }
     case 'RELAY': {
       const on = !!r?.on;
       L(-3, -2, -3, -1); L(-3, 1, -3, 2);
@@ -1258,6 +1279,6 @@ function arrowHead(ctx, x1, y1, x2, y2, f) {
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

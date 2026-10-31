@@ -49,6 +49,11 @@ export const REGS = {
   'AMS1117-5.0': { vout: 5, drop: 1.1, ilim: 1, iq: 0.005, vinmax: 15, note: '5 V, 1 A low-drop' },
   'LM317': { vout: 1.25, drop: 2, ilim: 1.5, iq: 0, iadj: 50e-6, vinmax: 40, adj: true, note: 'adjustable: Vout = 1.25 × (1 + R2 ÷ R1)' },
 };
+// 555 timer: dh = how far the output HIGH sits below Vcc, iq = supply current
+export const TIMERS = {
+  NE555: { dh: 1.7, vmin: 4.5, vmax: 16, iq: 0.006, iout: 0.2, note: 'bipolar, 4.5–16 V, output 200 mA, HIGH ≈ Vcc − 1.7 V' },
+  TLC555: { dh: 0.1, vmin: 2, vmax: 15, iq: 0.0002, iout: 0.1, note: 'CMOS, 2–15 V, rail-to-rail, low power (also 7555, LMC555)' },
+};
 export const RELAYS = { 5: { rcoil: 70, l: 0.02 }, 12: { rcoil: 400, l: 0.12 }, 24: { rcoil: 1600, l: 0.5 } };
 export const ZENERS = [2.7, 3.3, 3.9, 4.7, 5.1, 5.6, 6.2, 6.8, 8.2, 9.1, 10, 12, 15, 18, 24];
 
@@ -136,12 +141,13 @@ export const TYPES = {
   PMOS: { label: 'P-channel MOSFET', prefix: 'Q', pins: [[-2, 0], [1, 2], [1, -2]], box: [-2, -2, 1.8, 2], props: { model: 'AO3401' } },
   OPAMP: { label: 'Op-amp', prefix: 'U', pins: [[-3, 1], [-3, -1], [3, 0], [0, -2], [0, 2]], box: [-3, -2, 3, 2], props: { model: 'LM358' } },
   REG: { label: 'Voltage regulator', prefix: 'U', pins: [[-3, 0], [3, 0], [0, 2]], box: [-3, -1.2, 3, 2], props: { model: '7805' } },
+  T555: { label: '555 timer', prefix: 'U', pins: [[0, 4], [-4, 2], [4, 0], [1, -4], [2, 4], [-4, 0], [-4, -2], [-1, -4]], box: [-4, -4, 4, 4], props: { model: 'NE555' } },
   RELAY: { label: 'Relay (coil + changeover)', prefix: 'K', pins: [[-3, -2], [-3, 2], [0, 2], [0, -2], [2, -2]], box: [-3.7, -2.4, 2.4, 2.4], props: { vcoil: 5, rcoil: 70, l: 0.02 } },
   GND: { label: 'Ground', prefix: 'GND', pins: [[0, 0]], box: [-0.8, 0, 0.8, 1.6], props: {} },
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
 export const DYNAMIC = new Set(['C', 'L', 'SIG', 'SCOPE', 'RELAY']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type));
 
@@ -245,7 +251,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
     if (b) { const [x, y] = pinsOf(b)[1]; gkeys.add(key(x, y)); autoGround = b.name; }
   }
   pieces.forEach((w, k) => R(node(w.x1, w.y1), node(w.x2, w.y2), R_WIRE, null, 'wire' + k));
-  const diodes = [], trans = [], fets = [], zeners = [], amps = [], regs = [], relays = [];
+  const diodes = [], trans = [], fets = [], zeners = [], amps = [], regs = [], relays = [], timers = [];
   for (const p of c.parts) {
     if (p.type === 'GND') continue;
     const pins = pinsOf(p).map(([x, y]) => node(x, y));
@@ -325,6 +331,15 @@ export function solveCircuit(c, sim = null, opts = {}) {
         regs.push({ p, m, i: IN, o: OUT, r: REF, state: prev?.rs ?? 'reg' });
         break;
       }
+      case 'T555': {
+        // pins: 1 GND, 2 TRIG, 3 OUT, 4 RESET, 5 CTRL, 6 THR, 7 DIS, 8 VCC. Inside: 3 × 5 kΩ divider (2/3 and 1/3 Vcc), two comparators, a latch.
+        const m = TIMERS[pr.model] ?? TIMERS.NE555, prev = st.get(p.id), [G, TR, OUT, RST, CV, TH, DIS, VCC] = pins, n13 = inner(), no = inner();
+        R(VCC, CV, 5000, p, 'div1'); R(CV, n13, 5000, p, 'div2'); R(n13, G, 5000, p, 'div3');
+        R(VCC, G, 12 / m.iq, p, 'iq');           // supply current (≈ iq at 12 V), a resistor so an unpowered chip draws nothing
+        R(no, OUT, m === TIMERS.NE555 ? 10 : 25, p, 'rout');
+        timers.push({ p, m, G, TR, OUT, RST, CV, TH, DIS, VCC, n13, no, q: prev?.q ?? 0 });
+        break;
+      }
       case 'RELAY': {
         const prev = st.get(p.id), n = inner(), rm = relayOf(pr);
         if (sim) { R(pins[0], n, Math.max(rm.l, 1e-9) / sim.dt, p, 'coil'); I(pins[0], n, prev?.i ?? 0, p, 'hist'); } else R(pins[0], n, R_WIRE, p, 'coil');
@@ -388,6 +403,10 @@ export function solveCircuit(c, sim = null, opts = {}) {
       else if (g.state === 'drop') all.push({ kind: 'V', a: g.i, b: g.o, val: m.drop, owner: g.p, role: 'pass' });
       else if (g.state === 'lim') all.push({ kind: 'I', a: g.i, b: g.o, val: m.ilim, owner: g.p, role: 'pass' });
       else all.push({ kind: 'R', a: g.i, b: g.o, val: R_OPEN, owner: g.p, role: 'pass' });
+    }
+    for (const t of timers) {
+      if (t.q) all.push({ kind: 'V', a: t.VCC, b: t.no, val: t.m.dh, owner: t.p, role: 'o' }); else all.push({ kind: 'V', a: t.no, b: t.G, val: 0.1, owner: t.p, role: 'o' });
+      all.push({ kind: 'R', a: t.DIS, b: t.G, val: t.q ? R_OPEN : 10, owner: t.p, role: 'dis' });
     }
     for (const k of relays) {
       all.push({ kind: 'R', a: k.com, b: k.nc, val: k.on ? R_OPEN : R_WIRE, owner: k.p, role: 'nc' });
@@ -459,6 +478,15 @@ export function solveCircuit(c, sim = null, opts = {}) {
       if (ns !== g.state) { g.state = ns; changed = true; }
     }
     // relays only switch once everything else has settled (avoids pull-in from a half-solved step)
+    // 555 latch: RESET low → 0; TRIG below 1/3 → 1 (wins); THR above 2/3 → 0; otherwise keep
+    for (const t of timers) {
+      const vg = V_[t.G], vcc = V_[t.VCC] - vg, lo = V_[t.n13], hi = V_[t.CV];
+      let q = t.q;
+      if (vcc < 1 || V_[t.RST] - vg < 0.7) q = 0;
+      else if (V_[t.TR] < lo) q = 1;
+      else if (V_[t.TH] > hi) q = 0;
+      if (q !== t.q) { t.q = q; changed = true; }
+    }
     if (!changed) for (const k of relays) {
       const rm = relayOf(k.p.props), ic = Math.abs(findEl(res.els, k.p, 'rc').i), inom = rm.vcoil / Math.max(rm.rcoil, 1e-3);
       const on = k.on ? ic >= 0.3 * inom : ic >= 0.75 * inom;
@@ -543,6 +571,13 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, vin: vin - gr, vout: vout - gr, vadj: vout - vref, vio: vin - vout, iin: j + iq, iout: j, state: g.state, v: vout - gr, i: j, p: (vin - vout) * j + (vin - vref) * iq, dots: [] });
       continue;
     }
+    if (p.type === 'T555') {
+      const t = timers.find(x => x.p === p), ro = mine.find(e => e.role === 'rout'), dis = mine.find(e => e.role === 'dis'), o = mine.find(e => e.role === 'o');
+      const vg = res.v[t.G], vcc = res.v[t.VCC] - vg;
+      const pw = Math.abs(o.i * o.val) + vcc * vcc / (12 / t.m.iq) + Math.abs(ro.i) * Math.abs(ro.i) * ro.val + (t.q ? 0 : dis.i * dis.i * dis.val);
+      parts.set(p.id, { va, vb, q: t.q, vcc, vout: res.v[t.OUT] - vg, iout: ro.i, vtrig: res.v[t.TR] - vg, vthr: res.v[t.TH] - vg, vlo: res.v[t.n13] - vg, vhi: res.v[t.CV] - vg, idis: t.q ? 0 : dis.i, v: res.v[t.OUT] - vg, i: ro.i, p: pw, dots: [] });
+      continue;
+    }
     if (p.type === 'RELAY') {
       const k = relays.find(x => x.p === p), rc = mine.find(e => e.role === 'rc'), nc = mine.find(e => e.role === 'nc'), no = mine.find(e => e.role === 'no');
       const ic = rc.i, icon = k.on ? no.i : nc.i;
@@ -572,6 +607,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
     else if (p.type === 'OPAMP') next.set(p.id, { os: r.state });
     else if (p.type === 'REG') next.set(p.id, { rs: r.state });
     else if (p.type === 'RELAY') next.set(p.id, { i: r.icoil, on: r.on });
+    else if (p.type === 'T555') next.set(p.id, { q: r.q });
   }
   return { ok: true, parts, wires, vAt, notes, delivered, nodes: nextNode, next, t: sim?.t ?? 0 };
 }
@@ -823,6 +859,26 @@ export function example(name) {
     W(0, 16, 0, 20); W(0, 20, 36, 20); W(10, 17, 10, 20); W(15, 17, 15, 20); W(19, 17, 19, 20); W(24, 13, 24, 20); W(36, 12, 36, 20);
     W(24, 8, 27, 8); W(27, 8, 27, 24); W(27, 24, 11, 24);
     W(0, 10, -2, 10); W(-2, 10, -2, 26); W(-2, 26, 11, 26);
+  } else if (name === 'delay555') {
+    // power-on delay: flip POWER on → C1 pulls TRIG/THR high (output LOW), R1 drains it → below 1/3 Vcc the output goes HIGH. t ≈ 1.1 × R1 × C1 ≈ 1.1 s
+    c.tdiv = 0.2;
+    const b = addPart(c, 'BAT', 0, 10, 1); b.props.v = 12;
+    const sw = addPart(c, 'SW', 3, 2); sw.name = 'POWER'; sw.props.on = false;
+    addPart(c, 'T555', 16, 10).props.model = 'NE555';
+    const c1 = addPart(c, 'C', 9, 6, 1); c1.name = 'C1'; Object.assign(c1.props, { c: 10e-6, vmax: 25 });
+    const r1 = addPart(c, 'R', 9, 14, 1); r1.name = 'R1'; r1.props.r = 100000;
+    const c2 = addPart(c, 'C', 18, 16, 1); c2.name = 'C2'; Object.assign(c2.props, { c: 10e-9, vmax: 50, polar: false });
+    const r2 = addPart(c, 'R', 24, 10); r2.name = 'R2'; r2.props.r = 1000;
+    const l = addPart(c, 'LED', 29, 10); l.name = 'ON'; l.props.color = 'green';
+    addPart(c, 'SCOPE', 36, 14);
+    addPart(c, 'GND', 0, 18);
+    W(0, 8, 0, 2); W(0, 2, 1, 2); W(5, 2, 17, 2); W(15, 6, 15, 2); W(17, 6, 17, 2);
+    W(9, 4, 9, 2); W(9, 8, 9, 10); W(9, 10, 12, 10); W(12, 10, 12, 12); W(9, 12, 12, 12); W(9, 16, 9, 18);
+    W(16, 14, 16, 18);
+    W(20, 10, 22, 10); W(26, 10, 27, 10); W(31, 10, 31, 18);
+    W(0, 12, 0, 18); W(0, 18, 36, 18); W(36, 16, 36, 18);
+    W(21, 10, 21, 8); W(21, 8, 33, 8); W(33, 8, 33, 13);
+    W(10, 10, 10, 0); W(10, 0, 34, 0); W(34, 0, 34, 15); W(34, 15, 33, 15);
   } else if (name === 'bridge') {
     const b = addPart(c, 'BAT', 0, 8, 1); b.props.v = 10;
     addPart(c, 'R', 6, 4, 1).props.r = 1000;   // R1 top-left
