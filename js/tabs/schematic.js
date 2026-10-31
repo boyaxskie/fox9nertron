@@ -136,7 +136,7 @@ export function schematicTab(root) {
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -377,6 +377,8 @@ export function schematicTab(root) {
       case 'RELAY': return S.getCustom('RELAY', q.relay) ? q.relay : `${q.vcoil} V coil`;
       case 'T555': return q.model;
       case 'ESP32': case 'UNO': return '';
+      case 'SERVO': return q.model;
+      case 'STEPPER': return q.micro > 1 ? `1/${q.micro} step` : 'full step';
     }
     return '';
   }
@@ -831,6 +833,12 @@ export function schematicTab(root) {
         note('Pins: − input top-left, + input bottom-left, output right, supply V+ top, V− bottom (to ground on a single supply).')); break;
       case 'REG': f.append(modelChoice(p, 'Type', 'REG', q.model, builtins(S.REGS), v => { q.model = v; }),
         note(S.REGS[q.model]?.adj ? 'Pins: IN left, OUT right, ADJ bottom. R1 (240 Ω) from OUT to ADJ, R2 from ADJ to ground: Vout = 1.25 × (1 + R2 ÷ R1).' : 'Pins: IN left, OUT right, GND bottom. Real circuit: 0.33 µF on IN and 0.1 µF on OUT, close to the pins.')); break;
+      case 'SERVO': f.append(choice('Type', q.model, Object.entries(S.SERVOS).map(([k, m]) => [k, `${k}: ${m.note}`]), v => { q.model = v; }),
+        note('Wires: SIG (orange / yellow), V+ (red), GND (brown / black). Signal: a pulse every 20 ms (50 Hz). 0.5 ms = 0°, 1.5 ms = 90°, 2.5 ms = 180° → PWM duty 2.5 %, 7.5 %, 12.5 %.')); break;
+      case 'STEPPER': f.append(choice('Microstepping (MS1–MS3)', String(q.micro), [[1, 'Full step (all MS LOW)'], [2, '1/2 (MS1 HIGH)'], [4, '1/4 (MS2 HIGH)'], [8, '1/8 (MS1 + MS2 HIGH)'], [16, '1/16 (all MS HIGH)']].map(([v, t]) => [String(v), t]), v => { q.micro = +v; }),
+        choice('Motor', String(q.steps), [['200', '1.8° / step (200 steps per turn, NEMA 17)'], ['400', '0.9° / step (400 steps per turn)'], ['2048', '28BYJ-48 geared (≈ 2048 steps per turn)']], v => { q.steps = +v; }),
+        field('Current limit (set with the trimpot)', plain(q.ilim), 'A', v => { q.ilim = Math.max(0.05, Math.min(2, v)); }),
+        note('A4988: each rising edge on STEP = one (micro)step. DIR picks the direction. EN LOW (or open) = driver on. VDD = logic 3–5.5 V, VMOT = motor 8–35 V with a 100 µF capacitor close by. Tie RST to SLP on the module.')); break;
       case 'ESP32': case 'UNO': {
         const B = S.BOARDS[p.type]; q.pins ??= {};
         const cur = boardPin(p), pin = B.pins.find(x => x.n === cur);
@@ -1021,6 +1029,25 @@ export function schematicTab(root) {
         if (m.adj && r.iout < 0.0095) warn.push(['warn', 'LM317 needs ≥ 10 mA load or the output creeps up. Use R1 = 120–240 Ω.']);
         break;
       }
+      case 'SERVO': {
+        const m = S.SERVOS[q.model] ?? S.SERVOS.SG90;
+        vals.push(['Angle', `${Math.round(r.ang)}°`, true], ['Pulse width', r.w ? si(r.w, 's') : '—', true], ['Target', `${Math.round(r.tgt)}°`], ['Supply', si(r.vcc, 'V')], ['Current now', si(c0(r.icc), 'A')]);
+        L.push('Angle = (pulse − 0.5 ms) ÷ 2 ms × 180°', `${q.model}: about ${si(m.run, 'A')} while moving, up to ${si(m.stall, 'A')} when blocked (stall).`, 'Power it from 5 V (VIN / USB or a 5–6 V supply), not from the 3.3 V pin. Common GND with the board.');
+        if (!r.w) warn.push(['warn', 'No valid pulse yet: give SIG a 50 Hz PWM with 2.5–12.5 % duty (0.5–2.5 ms).']);
+        if (r.vcc < m.vmin) warn.push(['bad', `Supply ${si(r.vcc, 'V')} is too low (needs ${m.vmin}–${m.vmax} V): it jitters or doesn't move.`]);
+        if (r.vcc > m.vmax) warn.push(['bad', `Supply over ${m.vmax} V: it can burn.`]);
+        if (m.stall > 0.5) warn.push(['warn', `Stall current ${si(m.stall, 'A')}: use a separate 5–6 V supply that can give it, not the USB pin.`]);
+        break;
+      }
+      case 'STEPPER': {
+        vals.push(['Speed', `${Math.round(Math.abs(r.rpm))} RPM ${r.rpm < 0 ? '(reverse)' : ''}`, true], ['Steps counted', String(r.n), true], ['Shaft angle', `${r.ang.toFixed(1)}°`], ['Driver', r.en ? 'ON' : 'OFF'], ['VMOT', si(r.vmot, 'V')], ['Motor supply current', si(c0(r.imot), 'A')]);
+        L.push(`Step angle = 360° ÷ ${q.steps} ÷ ${q.micro} = ${(360 / q.steps / q.micro).toFixed(3)}°`, `RPM = step rate × 60 ÷ (${q.steps} × ${q.micro})`, 'Current limit: Vref = I × 8 × Rsense (Rsense often 0.1 Ω → Vref = 0.8 × I). Measure Vref on the trimpot.');
+        if (!r.en) warn.push(['warn', r.vdd < 3 ? 'No logic power on VDD (3–5.5 V).' : r.vmot < 8 ? 'VMOT below 8 V: the A4988 shuts down.' : 'EN is HIGH: driver off (motor free).']);
+        if (r.vmot > 35) warn.push(['bad', 'VMOT over 35 V: the A4988 can be destroyed.']);
+        if (q.ilim > 1.2) warn.push(['warn', 'Above about 1.2 A the A4988 needs a heatsink and a fan.']);
+        if (Math.abs(r.rpm) > 600 / q.micro && q.micro <= 2) warn.push(['warn', 'Very fast for full / half step: a real motor may stall. Ramp the speed up.']);
+        break;
+      }
       case 'ESP32': case 'UNO': {
         const B = S.BOARDS[p.type], cur = boardPin(p), pin = B.pins.find(x => x.n === cur), pr0 = r.pins[cur] ?? { v: 0, i: 0, mode: 'in' };
         const ma = (v) => si(c0(v), 'A');
@@ -1112,7 +1139,7 @@ export function schematicTab(root) {
   }
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -1308,6 +1335,35 @@ function symbol(ctx, p, r, g) {
       T('IN', -1.45, 0.55, 0.42, C.dim); T('OUT', 1.35, 0.55, 0.42, C.dim); T(m.adj ? 'ADJ' : 'GND', 0, 0.7, 0.42, C.dim);
       break;
     }
+    case 'SERVO': {
+      const ang = r?.ang ?? 90;
+      L(-3, -1, -2, -1); L(-3, 0, -2, 0); L(-3, 1, -2, 1);
+      ctx.fillStyle = '#1E2A36'; ctx.fillRect(-2, -1.6, 4.6, 3.2); ctx.strokeStyle = C.part; ctx.strokeRect(-2, -1.6, 4.6, 3.2);
+      T('SIG', -1.35, -1, 0.38, '#FFC857'); T('V+', -1.35, 0, 0.38, '#FF6B6B'); T('GND', -1.35, 1, 0.38, C.dim);
+      // horn: 0° points left, 180° right (seen from the top)
+      ctx.save(); ctx.translate(1.1, 0); ctx.rotate(-(p.rot || 0) * Math.PI / 2);
+      const a = Math.PI - ang * Math.PI / 180;
+      ctx.strokeStyle = '#E8EDF2'; ctx.lineWidth *= 2.4; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * 1.4, -Math.sin(a) * 1.4); ctx.stroke(); ctx.lineWidth /= 2.4;
+      ctx.fillStyle = '#E8EDF2'; ctx.beginPath(); ctx.arc(0, 0, 0.3, 0, 7); ctx.fill();
+      ctx.restore();
+      if (r) T(`${Math.round(ang)}°`, 1.1, 1.25, 0.45, '#4FC3F7');
+      break;
+    }
+    case 'STEPPER': {
+      L(-4, -2, -3, -2); L(-4, -1, -3, -1); L(-4, 0, -3, 0); L(-4, 1, -3, 1); L(-4, 2, -3, 2); L(-4, 3, -3, 3);
+      ctx.fillStyle = '#0E3A2A'; ctx.fillRect(-3, -2.8, 3.2, 6.4); ctx.strokeStyle = C.part; ctx.strokeRect(-3, -2.8, 3.2, 6.4);
+      T('A4988', -1.4, -2.35, 0.42, '#3DDC84');
+      for (const [t, y] of [['STEP', -2], ['DIR', -1], ['EN', 0], ['VDD', 1], ['GND', 2], ['VMOT', 3]]) T(t, -2.15, y, 0.36, t === 'VMOT' ? '#FF9F43' : C.dim);
+      // motor
+      L(0.2, -0.5, 1.2, -0.5); L(0.2, 0.5, 1.2, 0.5);
+      ctx.fillStyle = '#1E2A36'; ctx.fillRect(1.2, -1.6, 3.2, 3.2); ctx.strokeStyle = C.part; ctx.strokeRect(1.2, -1.6, 3.2, 3.2);
+      ctx.beginPath(); ctx.arc(2.8, 0, 1.15, 0, 7); ctx.stroke();
+      ctx.save(); ctx.translate(2.8, 0); ctx.rotate(-(p.rot || 0) * Math.PI / 2 + (r?.ang ?? 0) * Math.PI / 180);
+      ctx.strokeStyle = r?.en ? '#3DDC84' : C.dim; ctx.lineWidth *= 2.2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -1); ctx.stroke(); ctx.lineWidth /= 2.2; ctx.restore();
+      ctx.fillStyle = '#E8EDF2'; ctx.beginPath(); ctx.arc(2.8, 0, 0.22, 0, 7); ctx.fill();
+      if (r) T(`${Math.round(r.rpm)} RPM`, 2.8, 2.25, 0.45, '#4FC3F7');
+      break;
+    }
     case 'ESP32': case 'UNO': {
       const B = S.BOARDS[p.type], P = S.TYPES[p.type].pins, cfg = q.pins ?? {};
       ctx.fillStyle = p.type === 'ESP32' ? '#121C26' : '#0B2533'; ctx.fillRect(-3, -8.6, 6, 17.2); ctx.strokeStyle = C.part; ctx.strokeRect(-3, -8.6, 6, 17.2);
@@ -1364,6 +1420,6 @@ function arrowHead(ctx, x1, y1, x2, y2, f) {
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

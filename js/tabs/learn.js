@@ -68,6 +68,38 @@ const ARTICLES = [
     note2: 'In the simulator no program runs: pins stay as you set them. On the real board the code reads D2 and switches D13.',
   },
   {
+    id: 'servo', title: 'Servo motor (SG90 / MG996R)', example: 'servo', tag: 'Motor',
+    intro: 'A hobby servo turns its arm to an angle set by the length of a pulse that repeats every 20 ms. Inside: a small motor, gears, a potentiometer and a little control board that keeps the arm where the pulse says.',
+    parts: [['ESP32', 'D18 = PWM 50 Hz'], ['SERVO', 'SG90: SIG (orange), V+ (red), GND (brown)'], ['Power', 'servo V+ from VIN (USB 5 V)']],
+    steps: [
+      ['1. The pulse', 'Every 20 ms (50 Hz) one pulse: <b>0.5 ms = 0°</b>, <b>1.5 ms = 90°</b>, <b>2.5 ms = 180°</b>. Some servos use 1–2 ms for 0–180°: check yours.'],
+      ['2. As PWM duty', 'Duty = pulse ÷ 20 ms: 2.5 % = 0°, 7.5 % = 90°, 12.5 % = 180°. Angle = (pulse − 0.5 ms) ÷ 2 ms × 180°.'],
+      ['3. Power', 'Servos want 5–6 V and pull 250 mA (SG90) to 2.5 A (MG996R, stall) while moving. Never from the 3.3 V pin. One SG90 from VIN/USB is OK; bigger or several servos → separate 5–6 V supply, GND joined with the ESP32.'],
+      ['4. 3.3 V signal', 'The ESP32\'s 3.3 V pulse is enough for almost all servos even when they run on 5 V.'],
+    ],
+    tryit: ['Tap the ESP32, pick D18, set Duty to 2.5 % → the arm swings to 0°. 12.5 % → 180°.', 'Watch the arm move at the servo\'s real speed (about 0.1 s per 60° for an SG90).', 'Change the servo to MG996R: the panel warns about its stall current.'],
+    build: ['Parts: ESP32 DevKit, SG90 servo, USB cable (for big servos: 5–6 V 2 A supply).', 'Servo orange / yellow → D18.', 'Servo red → VIN (or + of the 5–6 V supply).', 'Servo brown / black → GND (and − of the supply: common ground!).', 'Arduino IDE → install the library "ESP32Servo" → upload.'],
+    code: "#include <ESP32Servo.h>   // Library Manager: \"ESP32Servo\"\n\nServo servo;\n\nvoid setup() {\n  servo.attach(18, 500, 2500);   // pin, 0.5 ms = 0\u00b0, 2.5 ms = 180\u00b0\n}\n\nvoid loop() {\n  servo.write(0);   delay(1000);\n  servo.write(90);  delay(1000);\n  servo.write(180); delay(1000);\n}",
+    note2: 'In the simulator you set the PWM duty by hand; on the real board servo.write(angle) makes the same pulse.',
+  },
+  {
+    id: 'stepper', title: 'Stepper motor with an A4988 driver', example: 'stepper', tag: 'Motor',
+    intro: 'A stepper turns a fixed angle for every pulse: 1.8° for a NEMA 17, so 200 pulses = 1 turn. The A4988 driver does the hard part (switching coil currents); the microcontroller only gives STEP and DIR.',
+    parts: [['ESP32', 'D18 = STEP (PWM 200 Hz), D5 = DIR (HIGH)'], ['A4988', 'VDD from 3V3, EN open = on, RST + SLP joined'], ['Motor', 'NEMA 17, 200 steps per turn'], ['VMOT', '12 V supply + 100 µF capacitor at the module']],
+    steps: [
+      ['1. Speed', '<b>RPM = step rate × 60 ÷ (200 × microsteps)</b>. 200 steps/s, full step → 60 RPM. The simulator shows 60 RPM. ✔'],
+      ['2. Direction', 'DIR HIGH = one way, LOW = the other. Change DIR only while STEP is not pulsing.'],
+      ['3. Microstepping', 'MS1–MS3 pins: 1/2, 1/4, 1/8, 1/16 steps. Smoother and quieter, but you need more pulses for the same speed.'],
+      ['4. Current limit (important!)', 'Set it on the module\'s trimpot before connecting the motor: Vref = I × 8 × Rsense. With Rsense 0.1 Ω (common): Vref = 0.8 × I. For 1 A → 0.8 V. Too high = hot driver and motor. Above about 1.2 A use a heatsink.'],
+      ['5. Power', 'VMOT 8–35 V (12 V typical) with a 100 µF electrolytic right at the module: voltage spikes from the motor can kill the A4988. Never unplug the motor while powered.'],
+      ['6. Wiring the coils', 'The two coils go to 1A/1B and 2A/2B. Find the pairs with a multimeter: two wires that beep (a few Ω) are one coil.'],
+    ],
+    tryit: ['Tap the ESP32, pick D18 and change the PWM frequency: 400 Hz → 120 RPM.', 'Set D5 to OUTPUT LOW: the rotor turns the other way (negative RPM).', 'Tap the stepper and choose 1/16 microstep: same pulses, 16× slower.', 'Set the VMOT battery to 6 V: the driver shuts down (below 8 V).'],
+    build: ['Parts: ESP32 DevKit, A4988 module (+ heatsink), NEMA 17 stepper, 12 V 2 A supply, 100 µF 25 V capacitor.', 'A4988 STEP → D18, DIR → D5, VDD → 3V3, GND → GND, EN not connected, RST joined to SLP.', 'VMOT → +12 V, the GND next to it → −12 V and ESP32 GND, 100 µF across VMOT and GND.', 'Motor coil A → 1A / 1B, coil B → 2A / 2B.', 'Set the current limit (Vref) with the trimpot, then upload the code.'],
+    code: "const int STEP = 18;\nconst int DIR  = 5;\n\nvoid setup() {\n  pinMode(STEP, OUTPUT);\n  pinMode(DIR, OUTPUT);\n}\n\nvoid turn(bool forward) {\n  digitalWrite(DIR, forward ? HIGH : LOW);\n  for (int i = 0; i < 200; i++) {      // 200 full steps = 1 turn\n    digitalWrite(STEP, HIGH); delayMicroseconds(2500);\n    digitalWrite(STEP, LOW);  delayMicroseconds(2500);   // 5 ms per step = 60 RPM\n  }\n}\n\nvoid loop() {\n  turn(true);  delay(500);\n  turn(false); delay(500);\n}",
+    note2: 'In the simulator the STEP pulses come from a PWM pin you set by hand; on the real board the code makes them, and can count exact steps.',
+  },
+  {
     id: 'led', title: 'LED resistor', example: 'led', tag: 'Basics',
     intro: 'An LED needs a fixed voltage (its forward voltage) and the resistor sets the current.',
     steps: [

@@ -54,6 +54,11 @@ export const TIMERS = {
   NE555: { dh: 1.7, vmin: 4.5, vmax: 16, iq: 0.006, iout: 0.2, note: 'bipolar, 4.5–16 V, output 200 mA, HIGH ≈ Vcc − 1.7 V' },
   TLC555: { dh: 0.1, vmin: 2, vmax: 15, iq: 0.0002, iout: 0.1, note: 'CMOS, 2–15 V, rail-to-rail, low power (also 7555, LMC555)' },
 };
+// motors
+export const SERVOS = {
+  SG90: { vmin: 4.0, vmax: 6.0, idle: 0.01, run: 0.25, stall: 0.65, speed: 600, note: 'micro servo 9 g, 1.8 kg·cm' },          // speed in °/s (0.1 s / 60°)
+  MG996R: { vmin: 4.8, vmax: 7.2, idle: 0.01, run: 0.5, stall: 2.5, speed: 350, note: 'metal gear, 10 kg·cm, needs its own 5–6 V supply' },
+};
 export const RELAYS = { 5: { rcoil: 70, l: 0.02 }, 12: { rcoil: 400, l: 0.12 }, 24: { rcoil: 1600, l: 0.5 } };
 export const ZENERS = [2.7, 3.3, 3.9, 4.7, 5.1, 5.6, 6.2, 6.8, 8.2, 9.1, 10, 12, 15, 18, 24];
 
@@ -185,14 +190,16 @@ export const TYPES = {
   REG: { label: 'Voltage regulator', prefix: 'U', pins: [[-3, 0], [3, 0], [0, 2]], box: [-3, -1.2, 3, 2], props: { model: '7805' } },
   ESP32: { label: 'ESP32 DevKit (30 pin)', prefix: 'MCU', pins: boardPins(BOARDS.ESP32, 15), box: [-4, -8.6, 4, 8.6], props: { pins: {} } },
   UNO: { label: 'Arduino UNO', prefix: 'MCU', pins: boardPins(BOARDS.UNO, 11), box: [-4, -8.6, 4, 8.6], props: { pins: {} } },
+  SERVO: { label: 'Servo motor', prefix: 'M', pins: [[-3, -1], [-3, 0], [-3, 1]], box: [-3, -2.2, 3.2, 2.2], props: { model: 'SG90' } },
+  STEPPER: { label: 'Stepper motor + A4988 driver', prefix: 'M', pins: [[-4, -2], [-4, -1], [-4, 0], [-4, 1], [-4, 2], [-4, 3]], box: [-4, -3.4, 5.6, 3.8], props: { micro: 1, ilim: 1.0, steps: 200 } },
   T555: { label: '555 timer', prefix: 'U', pins: [[0, 4], [-4, 2], [4, 0], [1, -4], [2, 4], [-4, 0], [-4, -2], [-1, -4]], box: [-4, -4, 4, 4], props: { model: 'NE555' } },
   RELAY: { label: 'Relay (coil + changeover)', prefix: 'K', pins: [[-3, -2], [-3, 2], [0, 2], [0, -2], [2, -2]], box: [-3.7, -2.4, 2.4, 2.4], props: { vcoil: 5, rcoil: 70, l: 0.02 } },
   GND: { label: 'Ground', prefix: 'GND', pins: [[0, 0]], box: [-0.8, 0, 0.8, 1.6], props: {} },
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
-export const DYNAMIC = new Set(['C', 'L', 'SIG', 'SCOPE', 'RELAY']);
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const DYNAMIC = new Set(['C', 'L', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm')));
 
 // signal generator value at time t
@@ -374,6 +381,21 @@ export function solveCircuit(c, sim = null, opts = {}) {
         if (m.iq) I(IN, REF, m.iq, p, 'iq');
         if (m.adj) I(IN, REF, m.iadj, p, 'iadj'); else R(OUT, REF, 100e3, p, 'int');
         regs.push({ p, m, i: IN, o: OUT, r: REF, state: prev?.rs ?? 'reg' });
+        break;
+      }
+      case 'SERVO': {
+        // pins: SIG, VCC, GND. Signal input ≈ 20 kΩ. Supply current: idle, or running while the arm moves.
+        const m = SERVOS[pr.model] ?? SERVOS.SG90, prev = st.get(p.id);
+        R(pins[0], pins[2], 20000, p, 'sig');
+        R(pins[1], pins[2], 5 / (prev?.moving ? m.run : m.idle), p, 'load');
+        break;
+      }
+      case 'STEPPER': {
+        // A4988: pins STEP, DIR, EN (LOW = on, pulled down inside), VDD (logic 3–5.5 V), GND, VMOT (8–35 V)
+        const prev = st.get(p.id), on = prev ? prev.en : true;
+        R(pins[0], pins[4], 100000, p, 'step'); R(pins[1], pins[4], 100000, p, 'dir'); R(pins[2], pins[4], 100000, p, 'en');
+        R(pins[3], pins[4], 1000, p, 'vdd');
+        R(pins[5], pins[4], on ? 12 / Math.max(0.05, pr.ilim * 0.65) : 1e6, p, 'vmot');
         break;
       }
       case 'ESP32': case 'UNO': {
@@ -644,6 +666,33 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, vin: vin - gr, vout: vout - gr, vadj: vout - vref, vio: vin - vout, iin: j + iq, iout: j, state: g.state, v: vout - gr, i: j, p: (vin - vout) * j + (vin - vref) * iq, dots: [] });
       continue;
     }
+    if (p.type === 'SERVO') {
+      const m = SERVOS[p.props.model] ?? SERVOS.SG90, prev = st.get(p.id) ?? { ang: 90, tgt: 90, lvl: 0, tr: null, w: null };
+      const vg = res.v[pins[2]], vs = res.v[pins[0]] - vg, vcc = res.v[pins[1]] - vg, load = mine.find(e => e.role === 'load');
+      let { ang, tgt, lvl, tr, w } = prev;
+      const hi = vs > 1.5 ? 1 : 0, t = sim ? sim.t : 0;
+      if (sim) {
+        if (hi && !lvl) tr = t;
+        if (!hi && lvl && tr != null) { const pw = t - tr; if (pw > 0.3e-3 && pw < 3e-3) { w = pw; tgt = Math.max(0, Math.min(180, (pw - 0.5e-3) / 2e-3 * 180)); } }
+        if (vcc >= m.vmin * 0.9) { const stp = m.speed * sim.dt; ang = Math.abs(tgt - ang) <= stp ? tgt : ang + Math.sign(tgt - ang) * stp; }
+      }
+      parts.set(p.id, { va, vb, vsig: vs, vcc, icc: load.i, ang, tgt, w, moving: Math.abs(tgt - ang) > 0.5, v: vcc, i: load.i, p: vcc * load.i, lvl: hi, tr, dots: [] });
+      continue;
+    }
+    if (p.type === 'STEPPER') {
+      const pr2 = p.props, prev = st.get(p.id) ?? { ang: 0, lvl: 0, n: 0, en: true, last: null, rate: 0 };
+      const vg = res.v[pins[4]], vdd = res.v[pins[3]] - vg, vmot = res.v[pins[5]] - vg, thr = 0.7 * Math.max(vdd, 1);
+      const stepHi = res.v[pins[0]] - vg > thr ? 1 : 0, dirHi = res.v[pins[1]] - vg > thr, en = !(res.v[pins[2]] - vg > thr) && vdd > 3 && vmot > 8;
+      let { ang, lvl, n, last, rate } = prev; const t = sim ? sim.t : 0;
+      if (sim && en && stepHi && !lvl) {
+        const d = (dirHi ? 1 : -1) * 360 / pr2.steps / pr2.micro; ang = ((ang + d) % 360 + 360) % 360; n += dirHi ? 1 : -1;
+        if (last != null) rate = 1 / Math.max(1e-6, t - last); last = t;
+      }
+      if (sim && last != null && t - last > 0.5) rate = 0;
+      const im = mine.find(e => e.role === 'vmot');
+      parts.set(p.id, { va, vb, ang, lvl: stepHi, n, last, rate, en, dir: dirHi, vdd, vmot, imot: im.i, rpm: rate * 60 / pr2.steps / pr2.micro * (dirHi ? 1 : -1), v: vmot, i: im.i, p: vmot * im.i, dots: [] });
+      continue;
+    }
     if (isBoard(p.type)) {
       const B = BOARDS[p.type], gi = B.pins.findIndex(q => q.k === 'gnd'), vg = res.v[pins[gi]], out = {};
       let pw = 0;
@@ -694,6 +743,8 @@ export function solveCircuit(c, sim = null, opts = {}) {
     else if (p.type === 'REG') next.set(p.id, { rs: r.state });
     else if (p.type === 'RELAY') next.set(p.id, { i: r.icoil, on: r.on });
     else if (p.type === 'T555') next.set(p.id, { q: r.q });
+    else if (p.type === 'SERVO') next.set(p.id, { ang: r.ang, tgt: r.tgt, lvl: r.lvl, tr: r.tr, w: r.w, moving: r.moving });
+    else if (p.type === 'STEPPER') next.set(p.id, { ang: r.ang, lvl: r.lvl, n: r.n, en: r.en, last: r.last, rate: r.rate });
   }
   return { ok: true, parts, wires, vAt, notes, delivered, nodes: nextNode, next, t: sim?.t ?? 0 };
 }
@@ -992,6 +1043,30 @@ export function example(name) {
     W(4, -5, 8, -5); W(12, -5, 16, -5); W(16, -5, 16, 6);
     W(-4, -2, -6, -2); W(-6, -2, -6, 10); W(-10, 10, 16, 10);
     W(-8, 0, -4, 0); W(-10, -2, -10, -5); W(-10, -5, -4, -5); W(-10, 2, -10, 10);
+  } else if (name === 'servo') {
+    // ESP32 D18 PWM 50 Hz → servo signal. Duty 2.5 % (0.5 ms) = 0°, 7.5 % (1.5 ms) = 90°, 12.5 % (2.5 ms) = 180°. Servo power from VIN (USB 5 V)
+    c.tdiv = 0.005;
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';
+    m.props.pins = { D18: { mode: 'pwm', f: 50, duty: 7.5 } };
+    const sv = addPart(c, 'SERVO', 14, 0); sv.props.model = 'SG90'; sv.name = 'SERVO';
+    addPart(c, 'GND', 8, 10);
+    // D18 (4,-1) → SIG (11,-1); VIN (-4,7) → VCC (11,0); GND2 (4,6) → GND (11,1)
+    W(4, -1, 11, -1); W(4, 6, 8, 6); W(8, 6, 8, 1); W(8, 1, 11, 1); W(8, 6, 8, 10);
+    W(-4, 7, -6, 7); W(-6, 7, -6, 9); W(-6, 9, 9, 9); W(9, 9, 9, 0); W(9, 0, 11, 0);
+  } else if (name === 'stepper') {
+    // ESP32 D18 = STEP (PWM 200 Hz = 200 steps/s = 1 turn/s = 60 RPM), D5 = DIR. EN left open = on (pulled down inside). Motor power 12 V on VMOT
+    c.tdiv = 0.002;
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';
+    m.props.pins = { D18: { mode: 'pwm', f: 200, duty: 50 }, D5: { mode: 'high' } };
+    const st = addPart(c, 'STEPPER', 14, 1); st.name = 'STEPPER';
+    const b = addPart(c, 'BAT', 24, 8, 1); b.name = 'VMOT'; b.props.v = 12;
+    addPart(c, 'GND', -6, 12);
+    // stepper pins (10,-1) STEP, (10,0) DIR, (10,1) EN, (10,2) VDD, (10,3) GND, (10,4) VMOT
+    W(4, -1, 10, -1); W(4, 0, 10, 0);
+    W(10, 3, 8, 3); W(8, 3, 8, 12);
+    W(10, 2, 7, 2); W(7, 2, 7, 7); W(7, 7, 4, 7);
+    W(10, 4, 9, 4); W(9, 4, 9, 10); W(9, 10, 22, 10); W(22, 10, 22, 6); W(22, 6, 24, 6);
+    W(-4, 6, -6, 6); W(-6, 6, -6, 12); W(-6, 12, 24, 12); W(24, 10, 24, 12);
   } else if (name === 'bridge') {
     const b = addPart(c, 'BAT', 0, 8, 1); b.props.v = 10;
     addPart(c, 'R', 6, 4, 1).props.r = 1000;   // R1 top-left
