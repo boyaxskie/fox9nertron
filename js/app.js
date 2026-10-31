@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '1.8.7';
+export const VERSION = '1.8.8';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -51,7 +51,8 @@ function help() {
 <p><b>Kirchhoff</b>: number every junction (0 = ground). Each part goes From one node To another. Example: a 9 V battery with + on node 1 and − on ground is <i>V src, From 1, To 0, 9</i>.</p>
 <p><b>Colours</b>: green = safe, yellow = check it, red = it will fail or it's dangerous.</p>
 <p><b>Install</b>: iPhone Safari → Share → Add to Home Screen. Android Chrome → menu → Install app. Works offline after that. Your inputs are remembered on this device.</p>
-<p><b>Safety</b>: anything on 220 V mains can kill. Calculators give ideal numbers; real parts have tolerances (resistors 1–5 %, electrolytic capacitors −20 % … +20 %, AL values ±25 %). Leave margin and measure.</p>` }),
+<p><b>Safety</b>: anything on 220 V mains can kill. Calculators give ideal numbers; real parts have tolerances (resistors 1–5 %, electrolytic capacitors −20 % … +20 %, AL values ±25 %). Leave margin and measure.</p>
+<p class="muted">© 2026 Yaxboom (Fox9ner). All rights reserved. No copying, modifying or redistributing without written permission.</p>` }),
     el('form', { method: 'dialog', class: 'dlg-buttons' }, el('button', { class: 'btn primary', text: 'Close' })));
   document.body.append(d);
   d.addEventListener('close', () => d.remove());

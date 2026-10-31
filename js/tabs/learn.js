@@ -64,6 +64,20 @@ const ARTICLES = [
     tryit: ['Change PWM duty to 20 % → ≈ 6 V, 60 % → ≈ 18 V.', 'Change LOAD to 220 Ω: Vout climbs to ≈ 19 V. The coil current now hits zero every cycle (discontinuous mode) and duty × Vin no longer holds. That is exactly why real bucks need feedback.', 'Change D1 to 1N4007 (slow, 0.7 V): efficiency drops.', 'Delete COUT and watch the ripple on the scope.'],
   },
   {
+    id: 'buckreg', title: 'Regulated buck (like your 0–30 V → 0–20 V module)', example: 'buckreg', tag: 'Power',
+    intro: 'The same power stage as the plain buck, plus the part every real module has: feedback. U1 keeps comparing the output with the voltage you set on RV1 and switches Q1 only as much as needed, so the output stays put when the load or the input changes.',
+    parts: [['VIN + POWER', '24 V supply (0.5 Ω inside) and power switch'], ['Q1 + R1 + ZD1', 'IRF9540N P-MOSFET high-side switch. R1 holds it off, ZD1 keeps the gate within 12 V of the source'], ['Q2 + R2 + R3', '2N2222 pulls Q1\'s gate down = Q1 ON'], ['D1, L1, COUT', '1N5819, 100 µH, 220 µF: the buck itself'], ['RF1 / RF2', '30 k / 10 k feedback divider: FB ≈ Vout ÷ 4.3'], ['R5 + ZD2 + RV1', '5.1 V reference and the SET pot (your module\'s trimpot)'], ['CSS', '1 µF soft start: the setpoint rises slowly at power-on'], ['U1 + RAMP + R4', 'LM358 comparator with a small 50 kHz ramp added to FB'], ['LOAD / LOAD2', '22 Ω, plus 10 Ω you can switch on']],
+    steps: [
+      ['1. Flip POWER', 'CSS charges, the setpoint rises, and Vout follows up to ≈ 12 V in about 10 ms with no overshoot. That is what "soft start" does in a real chip.'],
+      ['2. The loop', 'FB below the setpoint → U1 output HIGH → Q2 on → Q1\'s gate pulled down → Q1 ON, the coil current rises. FB above → Q1 OFF. The ramp on FB makes it switch in steady pulses instead of chattering.'],
+      ['3. Setting the voltage', 'Vout ≈ 4.3 × the wiper voltage of RV1. 45 % ≈ 12 V, 10 % ≈ 19.5 V, 80 % ≈ 5 V, 100 % = 0 V. In your module the trimpot is in the divider (RF1) instead, with a fixed 1.23 V (LM2596) or 1.25 V (XL4015) reference. Same idea.'],
+      ['4. Load and input changes', 'Flip LOAD2 ON (1.2 A more) or change VIN to 30 V: Vout stays within ≈ 0.3 V. The plain buck example jumped from 12 V to 19 V just from a lighter load.'],
+      ['5. Why a P-MOSFET', 'The switch sits on the + side. A P-MOSFET turns on when its gate is pulled BELOW the source (Vin), so a simple transistor to ground can drive it. ZD1 is needed because Vin goes up to 30 V and MOSFET gates die above ≈ 20 V. Modules use an N-MOSFET inside the chip with a bootstrap capacitor (that is the extra cap on XL4015 boards).'],
+      ['6. Limits your module also has', 'Vout can never go above Vin minus the drops (≈ 1–2 V here, 2–3 V in XL4015 modules). Set 20 V with VIN 18 V: Q1 just stays on and Vout ≈ 17 V. There is no current limit in this example; XL4015 limits at ≈ 5 A, LM2596 at ≈ 3 A.'],
+    ],
+    tryit: ['Flip POWER and watch Vout rise (scope CH2) with the switching node on CH1.', 'Change RV1 SET to 10 %: Vout ≈ 19.5 V. To 80 %: ≈ 5 V.', 'Flip LOAD2 ON: Vout dips a little and recovers.', 'Change VIN to 15 V and RV1 to 5 %: Vout tops out below 15 V (dropout).', 'Delete CSS, flip POWER off/on: the output overshoots at start-up.'],
+  },
+  {
     id: 'inverter', title: 'Inverter 12 V DC → 220 V AC', example: 'inverter', tag: 'Power',
     intro: 'A push-pull inverter: two MOSFETs take turns connecting each half of a center-tapped transformer to ground, 50 times a second. The transformer steps the 12 V square wave up to ≈ 220 V. This is how simple "modified sine" inverters work.',
     parts: [['BATT', '12 V battery'], ['OSC', '50 Hz oscillator (a CD4047, SG3525 or 555 in real life)'], ['Q1, Q2', 'IRFZ44N, 10 V gate'], ['Q3 + R3 + R4', 'inverts OSC so Q2 is ON when Q1 is OFF'], ['TR1', 'center-tap 10 + 10 : 190 turns (12-0-12 V : 230 V)'], ['LOAD', '220 V 60 W bulb']],

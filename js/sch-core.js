@@ -1173,6 +1173,52 @@ export function example(name) {
     W(32, 6, 32, 12); W(32, 12, 29, 12); W(29, 16, 29, 18); W(26, 18, 27, 18); W(27, 22, 27, 24);
     W(38, 6, 41, 6); W(41, 6, 41, 15); W(41, 15, 43, 15);
     W(16, 4, 16, -2); W(16, -2, 43, -2); W(43, -2, 43, 13);
+  } else if (name === 'buckreg') {
+    // regulated buck like an XL4015 / LM2596 module: 0–30 V in, 0–20 V out set by RV1. U1 compares the output (divided by ≈ 4.3, plus a small
+    // ramp) with the RV1 reference: below → Q2 pulls Q1's gate down → Q1 (P-MOSFET) on. ZD1 keeps Q1's gate within 12 V.
+    c.tdiv = 0.001;
+    const b = addPart(c, 'BAT', -8, 6, 1); b.name = 'VIN'; Object.assign(b.props, { v: 24, rint: 0.5 });
+    const pw = addPart(c, 'SW', -6, 0); pw.name = 'POWER'; pw.props.on = false;
+    addPart(c, 'GND', -8, 14);
+    const ci = addPart(c, 'C', 3, 4, 1); ci.name = 'CIN'; Object.assign(ci.props, { c: 100e-6, vmax: 50 });
+    const q1 = addPart(c, 'PMOS', 12, 2); q1.name = 'Q1'; q1.props.model = 'IRF9540N';
+    const rpu = addPart(c, 'R', 8, 2, 1); rpu.name = 'R1'; rpu.props.r = 2200;
+    const z1 = addPart(c, 'ZD', 6, 2, 3); z1.name = 'ZD1'; z1.props.vz = 12;
+    const rc = addPart(c, 'R', 10, 6, 1); rc.name = 'R2'; rc.props.r = 470;
+    const q2 = addPart(c, 'NPN', 9, 10); q2.name = 'Q2'; q2.props.model = '2N2222';
+    const d1 = addPart(c, 'D', 13, 8, 3); d1.name = 'D1'; d1.props.model = '1N5819';
+    const l = addPart(c, 'L', 17, 4); l.name = 'L1'; Object.assign(l.props, { l: 100e-6, r: 0.05 });
+    const co = addPart(c, 'C', 21, 8, 1); co.name = 'COUT'; Object.assign(co.props, { c: 220e-6, vmax: 35 });
+    addPart(c, 'VM', 24, 8, 1).name = 'VOUT';
+    const rl = addPart(c, 'R', 27, 8, 1); rl.name = 'LOAD'; rl.props.r = 22;
+    const sw = addPart(c, 'SW', 31, 4); sw.name = 'LOAD2 ON'; sw.props.on = false;
+    const rl2 = addPart(c, 'R', 35, 8, 1); rl2.name = 'LOAD2'; rl2.props.r = 10;
+    const u = addPart(c, 'OPAMP', 12, 22, 2); u.name = 'U1'; u.props.model = 'LM358';
+    const rb = addPart(c, 'R', 9, 17, 1); rb.name = 'R3'; rb.props.r = 4700;
+    const rf1 = addPart(c, 'R', 22, 15, 1); rf1.name = 'RF1'; rf1.props.r = 30000;
+    const rf2 = addPart(c, 'R', 22, 25, 1); rf2.name = 'RF2'; rf2.props.r = 10000;
+    const ri = addPart(c, 'R', 24, 23); ri.name = 'R4'; ri.props.r = 100000;
+    const rp = addPart(c, 'SIG', 26, 27, 1); rp.name = 'RAMP'; Object.assign(rp.props, { wave: 'saw', f: 50000, amp: 2.5, off: 0, duty: 50 });
+    const rz = addPart(c, 'R', 35, 16); rz.name = 'R5'; rz.props.r = 2200;
+    const z2 = addPart(c, 'ZD', 31, 14, 1); z2.name = 'ZD2'; z2.props.vz = 5.1;
+    const pot = addPart(c, 'POT', 27, 16, 2); pot.name = 'RV1 SET'; Object.assign(pot.props, { r: 10000, pos: 45 });
+    const css = addPart(c, 'C', 30, 20, 1); css.name = 'CSS'; Object.assign(css.props, { c: 1e-6, vmax: 16, polar: false });
+    z1.lbl = [-5, -1]; rpu.lbl = [-1, -4]; q1.lbl = [3, -5]; co.lbl = [-5.5, 1.5]; rl.lbl = [0, 5.5]; rf1.lbl = [1, 1]; pot.lbl = [-2, 3.5]; z2.lbl = [1, -1.5]; rz.lbl = [0, 2]; ri.lbl = [0, -1.5]; rf2.lbl = [-5, 0]; d1.lbl = [0, 3.5];
+    addPart(c, 'SCOPE', 30, -4);
+    for (const [x, y] of [[22, 27], [26, 29], [30, -2], [30, 22]]) addPart(c, 'GND', x, y);
+    W(-8, 4, -8, 0); W(-8, 8, -8, 14); W(-4, 0, 3, 0); W(3, 0, 6, 0); W(6, 0, 8, 0); W(8, 0, 13, 0); W(13, 0, 38, 0);
+    W(3, 0, 3, 2); W(3, 6, 3, 12);
+    W(-8, 12, 3, 12); W(3, 12, 35, 12);
+    W(6, 4, 8, 4); W(8, 4, 10, 4); W(10, 4, 10, 2);
+    W(13, 4, 13, 6); W(13, 10, 13, 12); W(13, 4, 15, 4);
+    W(19, 4, 21, 4); W(21, 4, 21, 6); W(21, 10, 21, 12); W(21, 4, 22, 4); W(22, 4, 24, 4); W(24, 4, 24, 6); W(24, 10, 24, 12);
+    W(24, 4, 27, 4); W(27, 4, 27, 6); W(27, 10, 27, 12); W(27, 4, 29, 4); W(33, 4, 35, 4); W(35, 4, 35, 6); W(35, 10, 35, 12);
+    W(9, 22, 9, 19); W(9, 15, 9, 14); W(9, 14, 7, 14); W(7, 14, 7, 10);
+    W(12, 20, 12, 12); W(-4, 0, -4, 28); W(-4, 28, 12, 28); W(12, 28, 12, 24);
+    W(22, 4, 22, 13); W(22, 17, 22, 23); W(22, 23, 15, 23); W(26, 23, 26, 25);
+    W(38, 0, 38, 16); W(37, 16, 38, 16); W(31, 16, 33, 16); W(29, 16, 31, 16); W(25, 16, 25, 12);
+    W(27, 18, 27, 21); W(27, 21, 15, 21); W(27, 18, 30, 18);
+    W(24, 4, 24, -3); W(24, -3, 27, -3); W(15, 4, 15, -5); W(15, -5, 27, -5);
   } else if (name === 'esp32io') {
     // ESP32 pins set by hand: D23 OUTPUT HIGH → 330 Ω → LED · D15 INPUT_PULLUP + button to GND · D34 analogRead of a 10 kΩ pot on 3.3 V
     const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';
