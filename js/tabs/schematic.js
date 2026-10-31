@@ -40,7 +40,8 @@ export function schematicTab(root) {
     if (!running) { res = { ok: false, stopped: true, error: STOPPED }; return; }
     res = timeMode() ? S.solveCircuit(c, { t: sim.t, dt: dtOf(), state: sim.state }) : S.solveCircuit(c);
   }
-  function resetSim() { sim.t = 0; sim.state = new Map(); sim.buf = []; }
+  // time 0 starts from the DC operating point (signals at their offset): amplifier coupling capacitors are already charged
+  function resetSim() { sim.t = 0; sim.buf = []; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
   function stepSim(n) {
     const dt = dtOf(), scope = c.parts.find(p => p.type === 'SCOPE');
     for (let k = 0; k < n; k++) {
@@ -61,7 +62,7 @@ export function schematicTab(root) {
   const modeBtns = {
     select: btn('↖ Select', () => setMode('select')),
     wire: btn('〰 Wire', () => setMode('wire')),
-    delete: btn('🗑 Delete', () => setMode('delete')),
+    delete: btn('🗑 Delete', () => { if (mode === 'select' && deleteSel()) return; setMode('delete'); }),
   };
   const voltsBtn = btn('', () => { showVolts = !showVolts; store.set('sch.volts', showVolts ? '1' : '0'); syncTop(); draw(); });
   const dotsBtn = btn('', () => { showDots = !showDots; store.set('sch.dots', showDots ? '1' : '0'); syncTop(); draw(); });
@@ -620,17 +621,20 @@ export function schematicTab(root) {
     p.rot = (p.rot + 1) & 3; followPins(d); commit();
   }
 
+  // delete whatever is selected (toolbar 🗑, Delete key). Returns false when nothing is selected.
+  function deleteSel() {
+    if (sel?.kind === 'part') { const p = selPart(); if (!p) return false; c.parts = c.parts.filter(q => q !== p); sel = null; commit(); say(`${p.name} deleted. ↶ brings it back.`); return true; }
+    if (sel?.kind === 'wire' && c.wires[sel.i]) { c.wires.splice(sel.i, 1); sel = null; commit(); say('Wire deleted. ↶ brings it back.'); return true; }
+    return false;
+  }
   // keyboard (PC)
   addEventListener('keydown', (e) => {
-    if (root.hidden || !root.isConnected || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName ?? '')) return;
+    if (root.hidden || !root.isConnected || view2 === 'pcb' || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName ?? '')) return;
     const k = e.key.toLowerCase();
     if (k === 'r') rotateSel();
     else if (k === 'w') setMode('wire');
     else if (k === 'escape') { setMode('select'); sel = null; renderPanel(); }
-    else if (k === 'delete' || k === 'backspace') {
-      if (sel?.kind === 'part') { const p = selPart(); c.parts = c.parts.filter(q => q !== p); sel = null; commit(); }
-      else if (sel?.kind === 'wire') { c.wires.splice(sel.i, 1); sel = null; commit(); }
-    } else if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSel(); } else if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
   });
 
@@ -938,7 +942,7 @@ export function schematicTab(root) {
         L.push(`β (gain) ≈ ${m.beta}: Ic can be up to β × Ib = ${m.beta} × ${si(c0(r.ib), 'A')} = ${si(m.beta * r.ib, 'A')}`, `As a switch use Ib ≈ Ic ÷ 10 → base resistor ≈ (Vpin − ${m.vbe}) ÷ (Ic ÷ 10)`, `Heat = ${npn ? 'Vce' : 'Vec'} × Ic + ${npn ? 'Vbe' : 'Veb'} × Ib = ${si(c0(r.p), 'W')}`);
         if (r.state === 'off') warn.push(['ok', `OFF: no base current (needs ${npn ? 'B above E' : 'B below E'} by ${m.vbe} V).`]);
         if (r.state === 'sat') warn.push(['ok', `Fully ON: only ${si(c0(r.vce), 'V')} across it. Good switch.`]);
-        if (r.state === 'act') warn.push(['warn', `Partly on (amplifier mode): it drops ${si(c0(r.vce), 'V')} and heats. For a switch give it more base current (smaller base resistor).`]);
+        if (r.state === 'act') { warn.push(['ok', `ACTIVE (amplifier mode): Vce ${si(c0(r.vce), 'V')}. Right for an amplifier; as a switch it would need more base current (smaller base resistor).`]); L.push(`Small signal: gm = Ic ÷ 26 mV = ${si(r.ic / 0.025852, 'S')}, input resistance at the base rπ = β ÷ gm = ${si(m.beta * 0.025852 / Math.max(r.ic, 1e-12), 'Ω')}`); }
         if (r.state === 'brk') warn.push(['bad', `BREAKDOWN: ${si(c0(r.vce), 'V')} is over its ${m.vmax} V rating. A coil switch-off spike? Add a flyback diode across the coil.`]);
         if (r.ic > m.imax) warn.push(['bad', `Collector current over ${si(m.imax, 'A')}: too much for a ${q.model}.`]);
         if (r.p > m.pmax) warn.push(['bad', `${si(c0(r.p), 'W')} heat: over ${m.pmax} W, it needs a heatsink or a bigger transistor.`]);
@@ -1031,9 +1035,9 @@ export function schematicTab(root) {
     document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
     return d;
   }
-  function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; resetSim(); c = j; sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
+  function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -1075,11 +1079,13 @@ export function schematicTab(root) {
     oc.toBlob(b => shareFile(`${c.title ?? 'circuit'}.png`, b, 'image/png'), 'image/png');
   }
 
+  // Learn tab: "Open in Schematic"
+  addEventListener('f9t-example', (e) => { if (view2 === 'pcb') setView('sch'); loadCircuit(S.example(e.detail), 'Loaded from Learn: ' + e.detail + '.'); });
   // ---------- start ----------
   syncTop(); setMode('select');
   new ResizeObserver(() => resize()).observe(wrap);
   addEventListener('resize', () => resize());
-  requestAnimationFrame(() => { resize(); commit(false); if (store.get('sch.view', 'sch') === 'pcb') setView('pcb'); });
+  requestAnimationFrame(() => { resetSim(); resize(); commit(false); if (store.get('sch.view', 'sch') === 'pcb') setView('pcb'); });
 }
 
 // ---------- symbols (local grid units, pin a at left) ----------

@@ -217,7 +217,8 @@ export const fetK = (m) => 3 * m.imax / (m.vfull - m.vth) ** 2;
 
 // ---------- solver ----------
 // sim = null → DC (capacitors open, inductors shorted). sim = { t, dt, state } → one time step (backward Euler).
-export function solveCircuit(c, sim = null) {
+// opts.sigOff: signal generators sit at their DC offset (used to start a time simulation from the DC operating point)
+export function solveCircuit(c, sim = null, opts = {}) {
   const st = sim?.state ?? new Map();
   const grounds = c.parts.filter(p => p.type === 'GND');
   const nodeOf = new Map();       // point key -> node index (0 = ground)
@@ -279,7 +280,7 @@ export function solveCircuit(c, sim = null) {
         R(n, b, Math.max(pr.r, 1e-4), p, 'dcr');
         break;
       }
-      case 'SIG': V(a, b, sigValue(pr, sim ? sim.t : 0), p, 'main'); break;
+      case 'SIG': V(a, b, opts.sigOff ? pr.off : sigValue(pr, sim ? sim.t : 0), p, 'main'); break;
       case 'SCOPE': R(pins[0], pins[2], 10e6, p, 'ch1'); R(pins[1], pins[2], 10e6, p, 'ch2'); break;
       case 'OPTO': {
         const prev = st.get(p.id);
@@ -290,7 +291,10 @@ export function solveCircuit(c, sim = null) {
       }
       case 'NPN': case 'PNP': {
         const npn = p.type === 'NPN', m = BJTS[pr.model] ?? BJTS[npn ? '2N2222' : '2N2907'], prev = st.get(p.id), [B, Cc, E] = pins;
-        const d = { p, a: npn ? B : E, b: npn ? E : B, vf: m.vbe, rs: m.rb, on: prev?.on ?? false, n: inner(), role: 'be' };
+        // base-emitter junction: real diode curve (Newton steps), so small-signal gain comes out right in amplifiers
+        const nj = m.vbe > 1 ? 2 : 1;
+        const d = { p, a: npn ? B : E, b: npn ? E : B, vf: m.vbe - 0.15 * nj, rs: m.rb, on: prev?.on ?? false, n: inner(), role: 'be',
+          exp: { vbe0: m.vbe, ib0: 1e-3 / m.beta, nvt: nj * 0.025852, rb: m.rb }, ib: prev?.ib ?? 1e-3 / m.beta };
         diodes.push(d);
         trans.push({ p, d, c: npn ? Cc : E, e: npn ? E : Cc, gain: m.beta, vsat: m.vsat, rsat: m.rsat, vbr: m.vmax * 1.3, state: prev?.ts ?? 'off', n: inner() });
         break;
@@ -341,11 +345,15 @@ export function solveCircuit(c, sim = null) {
 
   let res = null;
   const findEl = (list, owner, role, kind) => list.find(x => x.owner === owner && x.role === role && (!kind || x.kind === kind));
-  for (let it = 0; it < 150; it++) {
+  for (let it = 0; it < 250; it++) {
     const all = [...els];
     for (const d of diodes) {
       d.was = d.on;
-      if (d.on) { all.push({ kind: 'V', a: d.a, b: d.n, val: d.vf, owner: d.p, role: d.role }); all.push({ kind: 'R', a: d.n, b: d.b, val: d.rs, owner: d.p, role: d.role + 'rs' }); }
+      if (d.on && d.exp) {
+        // tangent of Vbe = vbe0 + n·Vt·ln(Ib / Ib0) at the last base current
+        const X = d.exp, ib = Math.max(d.ib, 1e-12), rd = Math.min(1e8, X.nvt / ib), vj = X.vbe0 + X.nvt * Math.log(ib / X.ib0);
+        all.push({ kind: 'V', a: d.a, b: d.n, val: vj - rd * ib, owner: d.p, role: d.role }); all.push({ kind: 'R', a: d.n, b: d.b, val: rd + X.rb, owner: d.p, role: d.role + 'rs' });
+      } else if (d.on) { all.push({ kind: 'V', a: d.a, b: d.n, val: d.vf, owner: d.p, role: d.role }); all.push({ kind: 'R', a: d.n, b: d.b, val: d.rs, owner: d.p, role: d.role + 'rs' }); }
       else all.push({ kind: 'R', a: d.a, b: d.b, val: 1e10, owner: d.p, role: d.role });
     }
     for (const o of trans) {
@@ -391,7 +399,15 @@ export function solveCircuit(c, sim = null) {
     let changed = false;
     for (const d of diodes) {
       const vd = V_[d.a] - V_[d.b];
-      if (d.on) { const e = findEl(res.els, d.p, d.role); if (e.i < -1e-12) { d.on = false; changed = true; } }
+      if (d.on) {
+        const e = findEl(res.els, d.p, d.role);
+        if (e.i < -1e-12) { d.on = false; changed = true; }
+        else if (d.exp && d.was) {
+          // Newton update of the base current (limit the step so it can't run away)
+          const ni = Math.min(Math.max(e.i, d.ib * 1e-3, 1e-12), d.ib * 1e3 + 1e-9);
+          if (Math.abs(ni - d.ib) > 1e-4 * d.ib + 1e-13) { d.ib = ni; changed = true; }
+        }
+      }
       else if (vd > d.vf + 1e-9) { d.on = true; changed = true; }
     }
     for (const o of trans) {
@@ -449,7 +465,7 @@ export function solveCircuit(c, sim = null) {
       if (on !== k.on) { k.on = on; changed = true; }
     }
     if (!changed) break;
-    if (it === 149) notes.push('Some parts did not settle (diodes / transistors / op-amps flip-flopping); results are approximate.');
+    if (it === 249) notes.push('Some parts did not settle (diodes / transistors / op-amps flip-flopping); results are approximate.');
   }
   // per-part results
   const parts = new Map();
@@ -550,7 +566,7 @@ export function solveCircuit(c, sim = null) {
     if (p.type === 'C') next.set(p.id, { v: r.v });
     else if (p.type === 'L') next.set(p.id, { i: r.i });
     else if (p.type === 'LED' || p.type === 'D') next.set(p.id, { on: r.on });
-    else if (p.type === 'OPTO' || p.type === 'NPN' || p.type === 'PNP') { const o = trans.find(x => x.p === p); next.set(p.id, { on: o.d.on, ts: o.state }); }
+    else if (p.type === 'OPTO' || p.type === 'NPN' || p.type === 'PNP') { const o = trans.find(x => x.p === p); next.set(p.id, { on: o.d.on, ts: o.state, ib: o.d.ib }); }
     else if (p.type === 'NMOS' || p.type === 'PMOS') { const f = fets.find(x => x.p === p); next.set(p.id, { ts: f.state, vc: f.vc, bon: diodes.find(x => x.p === p).on }); }
     else if (p.type === 'ZD') next.set(p.id, { zs: r.state });
     else if (p.type === 'OPAMP') next.set(p.id, { os: r.state });
@@ -785,6 +801,28 @@ export function example(name) {
     W(-4, 7, 7, 7); W(6, 1, 6, 5); W(6, 5, 7, 5); W(4, -1, 4, -3); W(4, -3, 18, -3); W(10, 4, 10, -3);
     W(13, 6, 15, 6); W(15, 6, 15, 7); W(15, 7, 16, 7);
     W(6, 7, 6, 11); W(6, 11, 16, 11); W(16, 11, 16, 9);
+  } else if (name === 'preamp') {
+    // classic 1-transistor audio preamp (common emitter): 10 mV mic signal in, about 1 V out (gain ≈ 100)
+    const g = addPart(c, 'SIG', 0, 14, 1); g.name = 'MIC'; Object.assign(g.props, { wave: 'sine', f: 1000, amp: 0.01, off: 0 });
+    const cin = addPart(c, 'C', 5, 10, 2); cin.name = 'CIN'; Object.assign(cin.props, { c: 10e-6, vmax: 16 });
+    addPart(c, 'R', 10, 5, 1).props.r = 47000;
+    addPart(c, 'R', 10, 15, 1).props.r = 10000;
+    addPart(c, 'NPN', 14, 10).props.model = 'BC547';
+    const rc = addPart(c, 'R', 15, 5, 1); rc.name = 'RC'; rc.props.r = 4700;
+    const re = addPart(c, 'R', 15, 15, 1); re.name = 'RE'; re.props.r = 1000;
+    const ce = addPart(c, 'C', 19, 15, 1); ce.name = 'CE'; Object.assign(ce.props, { c: 100e-6, vmax: 16 });
+    const co = addPart(c, 'C', 20, 7); co.name = 'COUT'; Object.assign(co.props, { c: 10e-6, vmax: 16 });
+    const rl = addPart(c, 'R', 24, 11, 1); rl.name = 'LOAD'; rl.props.r = 10000;
+    const b = addPart(c, 'BAT', 36, 10, 1); b.props.v = 9;
+    addPart(c, 'SCOPE', 14, 25);
+    addPart(c, 'GND', 0, 20); addPart(c, 'GND', 14, 27);
+    W(0, 12, 0, 10); W(0, 10, 3, 10); W(7, 10, 12, 10); W(10, 7, 10, 10); W(10, 13, 10, 10);
+    W(10, 3, 10, 1); W(10, 1, 36, 1); W(15, 1, 15, 3); W(36, 1, 36, 8);
+    W(15, 7, 15, 8); W(15, 12, 15, 13); W(15, 12, 19, 12); W(19, 12, 19, 13); W(15, 7, 18, 7);
+    W(22, 7, 24, 7); W(24, 7, 24, 9);
+    W(0, 16, 0, 20); W(0, 20, 36, 20); W(10, 17, 10, 20); W(15, 17, 15, 20); W(19, 17, 19, 20); W(24, 13, 24, 20); W(36, 12, 36, 20);
+    W(24, 8, 27, 8); W(27, 8, 27, 24); W(27, 24, 11, 24);
+    W(0, 10, -2, 10); W(-2, 10, -2, 26); W(-2, 26, 11, 26);
   } else if (name === 'bridge') {
     const b = addPart(c, 'BAT', 0, 8, 1); b.props.v = 10;
     addPart(c, 'R', 6, 4, 1).props.r = 1000;   // R1 top-left

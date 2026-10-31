@@ -5,7 +5,7 @@ import { rotPt } from '../sch-core.js';
 import * as P from '../pcb-core.js';
 import { autoroute, cleanPath } from '../pcb-route.js';
 import { camAll, vWidth, copperSvg } from '../pcb-cam.js';
-import { gerberCopper, gerberOutline, excellon } from '../pcb-gerber.js';
+import { gerberSet, excellon } from '../pcb-gerber.js';
 
 const COL = { bg: '#0F1317', board: '#16352A', edge: '#6FAF8A', cu: '#D9894A', cuHi: '#FFC08A', hole: '#0F1317', silk: '#E8EDF2', rat: '#FFE16B', jump: '#4FC3F7', bad: '#FF6B6B', sel: '#4FC3F7', iso: '#7FDBFF', drill: '#FF6B6B', cut: '#C084FC', dim: '#7E8A97' };
 
@@ -15,7 +15,7 @@ export function pcbView(api) {
   let mode = 'move', sel = null, route = null, hover = null;
   const view = { ox: 20, oy: 20, s: 8 };
   const btn = (t, f, cls = '') => el('button', { class: 'sb ' + cls, type: 'button', text: t, onclick: f });
-  const modeBtns = { move: btn('✋ Move', () => setMode('move')), route: btn('✏ Route', () => setMode('route')), delete: btn('🗑 Delete', () => setMode('delete')) };
+  const modeBtns = { move: btn('✋ Move', () => setMode('move')), route: btn('✏ Route', () => setMode('route')), delete: btn('🗑 Delete', () => { if (mode === 'move' && deleteSel()) return; setMode('delete'); }) };
   const camBtn = btn('🛠 G-code', () => { showCam = true; makeCam(); renderPanel(); panel.querySelector('.pcb-cam')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   const top = el('div', { class: 'sch-tools' },
     btn('⚡ Schematic', () => api.toSchematic(), 'run'), modeBtns.move, modeBtns.route, modeBtns.delete,
@@ -278,8 +278,16 @@ export function pcbView(api) {
     }
   }
   function syncNudge() { nudgeBar.hidden = !(mode === 'move' && (sel?.kind === 'part' || sel?.kind === 'trace')); }
+  // delete the selection: trace, jumper, or a part (removed from the circuit too; ↶ brings it back)
+  function deleteSel() {
+    if (sel?.kind === 'trace' && L.traces[sel.i]) { L.traces.splice(sel.i, 1); sel = null; change('Trace deleted. ↶ brings it back.'); return true; }
+    if (sel?.kind === 'jumper' && L.jumpers[sel.i]) { L.jumpers.splice(sel.i, 1); sel = null; change('Jumper deleted. ↶ brings it back.'); return true; }
+    if (sel?.kind === 'part') { const c = api.getC(), p = c.parts.find(q => q.id === sel.id); if (!p) return false; c.parts = c.parts.filter(q => q !== p); sel = null; change(`${p.name} deleted from the circuit (schematic too). ↶ brings it back.`); return true; }
+    return false;
+  }
   addEventListener('keydown', (e) => {
     if (box.hidden || !sel || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName ?? '')) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); return; }
     const m = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
     if (!m) return; e.preventDefault(); nudge(m[0] * (e.shiftKey ? 4 : 1), m[1] * (e.shiftKey ? 4 : 1));
   });
@@ -403,7 +411,7 @@ export function pcbView(api) {
           ...(f.pitch ? [sel2('Lead spacing (hole to hole)', String(f.pitch), P.SPACINGS[f.key].map(v => [String(v), `${v} mm (${Math.round(v / 2.54)} holes)` + (Math.abs(v - (P.FOOTPRINTS[f.key].make({ order: [0, 1, 2] }).pads.reduce((a, q) => Math.abs(q.x) * 2, 0))) < 0.01 ? ' · normal' : '')]), v => { bp.pitch = +v; change(`${p.name} legs ${v} mm apart. ⚡ Autoroute again to use the space underneath.`); })] : []),
           ...(f.orderStr ? [sel2('Pin order (left → right, flat side / tab facing you)', f.orderStr, P.ORDERS[p.type].map(o => [o, [...o].join(' ')]), v => { bp.order = v; change(`${p.name} pin order ${v}.`); })] : [])),
         el('div', { class: 'pcb-pins' }, ...nets.map((n, i) => el('span', { class: 'pin', text: `${P.pinLabel(p, i)} → ${netName(n)}` }))),
-        el('div', { class: 'row wrap' }, btn('↻ Rotate', () => rotateSel())),
+        el('div', { class: 'row wrap' }, btn('↻ Rotate', () => rotateSel()), btn('🗑 Delete part', () => deleteSel())),
         note(f.orderStr ? 'Check the pin order in the datasheet: the same transistor name can come in different pin orders.' : ''));
     } else if (sel?.kind === 'trace') {
       const t = L.traces[sel.i];
@@ -475,12 +483,13 @@ export function pcbView(api) {
       const nm = (c.title ?? 'board').replace(/[^\w.-]+/g, '_');
       const holes = an.pads.filter(p => p.drill > 0).length;
       panel.append(el('details', { class: 'pcb-sec', open: true }, el('summary', { text: '📤 Gerber + drill (for the Fox9ner web app)' }),
-        note(`Same files Proteus makes: bottom copper, board outline and drill (${holes} holes). Seen from the top, not mirrored, mm, origin = lower-left corner. Load them in the Fox9ner web app like your Proteus files.`),
+        note(`Same format as Proteus 9 "CADCAM" Gerber (mm, 4.5, signed coordinates, round pads, drill as a Gerber): bottom copper, drill (${holes} holes) and board outline. Seen from the top, not mirrored, origin = lower-left corner. Load them in the Fox9ner web app like your Proteus files.`),
         an.rats.length || an.shorts.length ? el('div', { class: 'flag ' + (an.shorts.length ? 'bad' : 'warn'), text: an.shorts.length ? 'The board has a SHORT: fix it before cutting.' : `${an.rats.length} connection(s) not routed yet: the files would miss them.` }) : null,
         el('div', { class: 'row wrap' },
-          btn('⬇ Copper (.GBL)', () => api.shareFile(`${nm}-Bottom_Copper.GBL`, gerberCopper(api.getC()), 'text/plain')),
-          btn('⬇ Drill (.DRL)', () => api.shareFile(`${nm}-Drill.DRL`, excellon(api.getC()), 'text/plain')),
-          btn('⬇ Outline (.GKO)', () => api.shareFile(`${nm}-Board_Outline.GKO`, gerberOutline(api.getC()), 'text/plain')))));
+          btn('⬇ Bottom Copper', () => api.shareFile(`${nm} - CADCAM Bottom Copper.GBR`, gerberSet(api.getC()).copper, 'text/plain')),
+          btn('⬇ Drill', () => api.shareFile(`${nm} - CADCAM Drill TOP-BOT Plated.GBR`, gerberSet(api.getC()).drill, 'text/plain')),
+          btn('⬇ Board Outline', () => api.shareFile(`${nm} - CADCAM Board Outline.GBR`, gerberSet(api.getC()).outline, 'text/plain')),
+          btn('⬇ Excellon .DRL (other tools)', () => api.shareFile(`${nm}-Drill.DRL`, excellon(api.getC()), 'text/plain')))));
     }
     panel.append(camSec);
   }

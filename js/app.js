@@ -8,10 +8,12 @@ import { inductorTab } from './tabs/inductor.js';
 import { timingTab } from './tabs/timing.js';
 import { partsTab } from './tabs/parts.js';
 import { schematicTab } from './tabs/schematic.js';
+import { calcTab } from './tabs/calc.js';
+import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '1.5.5';
+export const VERSION = '1.6.3';
 const TABS = [
-  ['schematic', '⚡ Schematic', schematicTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
+  ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
   ['timing', 'Timing / PWM', timingTab], ['parts', 'Parts', partsTab],
 ];
