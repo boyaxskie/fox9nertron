@@ -270,3 +270,52 @@ export function copperSvg(c, an = analyze(c)) {
 <g fill="#000">${out.join('')}</g>${holes.join('')}
 </svg>`;
 }
+
+// Copper as a PDF at exact 1:1 scale (vector), seen from the parts side like the SVG. Every printer and phone opens a PDF.
+// A4 page (bigger if the board is bigger), a 50 mm check ruler and "print at 100 %" note.
+export function copperPdf(c, an = analyze(c), title = 'board') {
+  const L = c.pcb, k = 72 / 25.4, mx = 15, my = 32;
+  const pw = Math.max(210, L.w + 2 * mx), ph = Math.max(297, L.h + my + 40);
+  const P = (v) => (Math.round(v * 1000) / 1000).toString();
+  const ops = [];
+  // board, in mm with y down: origin at (mx, my) from the top-left
+  ops.push('q', `${P(k)} 0 0 ${P(-k)} ${P(mx * k)} ${P((ph - my) * k)} cm`, '1 J 1 j');
+  ops.push('0 G 0.1 w', `0 0 ${P(L.w)} ${P(L.h)} re S`, '0 g');
+  for (const s of copperShapes(c, an)) {
+    if (s.kind === 'rect') ops.push(`${P(s.x - s.w / 2)} ${P(s.y - s.h / 2)} ${P(s.w)} ${P(s.h)} re f`);
+    else ops.push(`${P(2 * s.r)} w ${P(s.x1)} ${P(s.y1)} m ${P(s.x2)} ${P(s.y2)} l S`);
+  }
+  ops.push('1 g');
+  const K = 0.5523;
+  for (const p of an.pads) {
+    if (!(p.drill > 0)) continue;
+    const r = Math.min(0.35, p.drill / 3), x = p.x, y = p.y;
+    ops.push(`${P(x + r)} ${P(y)} m ${P(x + r)} ${P(y + K * r)} ${P(x + K * r)} ${P(y + r)} ${P(x)} ${P(y + r)} c ${P(x - K * r)} ${P(y + r)} ${P(x - r)} ${P(y + K * r)} ${P(x - r)} ${P(y)} c ${P(x - r)} ${P(y - K * r)} ${P(x - K * r)} ${P(y - r)} ${P(x)} ${P(y - r)} c ${P(x + K * r)} ${P(y - r)} ${P(x + r)} ${P(y - K * r)} ${P(x + r)} ${P(y)} c f`);
+  }
+  // 50 mm ruler under the board
+  const ry = L.h + 12;
+  ops.push('0 G 0.3 w', `0 ${P(ry)} m 50 ${P(ry)} l S`);
+  for (let t = 0; t <= 50; t += 5) ops.push(`${t} ${P(ry)} m ${t} ${P(ry - (t % 10 ? 1.5 : 3))} l S`);
+  ops.push('Q');
+  const txt = (x, y, size, s) => ops.push('BT', `/F1 ${size} Tf`, `${P(x * k)} ${P((ph - y) * k)} Td`, `(${s.replace(/[\\()]/g, (m) => '\\' + m)}) Tj`, 'ET');
+  ops.push('0 g');
+  txt(mx, 14, 12, `Fox9nertron copper - ${title} - board ${+L.w.toFixed(2)} x ${+L.h.toFixed(2)} mm - seen from the parts side`);
+  txt(mx, 20, 10, 'PRINT AT 100 % / ACTUAL SIZE (no "fit to page"). Check: the ruler below the board must measure exactly 50 mm.');
+  txt(mx, my + L.h + 18, 9, '0');
+  txt(mx + 47, my + L.h + 18, 9, '50 mm');
+  const stream = ops.join('\n');
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${P(pw * k)} ${P(ph * k)}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>`,
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offs = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return out;
+}

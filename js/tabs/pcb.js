@@ -4,7 +4,7 @@ import { parse } from '../num.js';
 import { rotPt } from '../sch-core.js';
 import * as P from '../pcb-core.js';
 import { autoroute, cleanPath } from '../pcb-route.js';
-import { camAll, vWidth, copperSvg } from '../pcb-cam.js';
+import { camAll, vWidth, copperSvg, copperPdf } from '../pcb-cam.js';
 import { gerberSet, excellon } from '../pcb-gerber.js';
 
 const COL = { bg: '#0F1317', board: '#16352A', edge: '#6FAF8A', cu: '#D9894A', cuHi: '#FFC08A', hole: '#0F1317', silk: '#E8EDF2', rat: '#FFE16B', jump: '#4FC3F7', bad: '#FF6B6B', sel: '#4FC3F7', iso: '#7FDBFF', drill: '#FF6B6B', cut: '#C084FC', dim: '#7E8A97' };
@@ -469,7 +469,8 @@ export function pcbView(api) {
           btn('⬇ 1 isolation.nc', () => api.shareFile(`${name}-1-isolation.nc`, st.iso.gcode, 'text/plain')),
           btn('⬇ 2 drill.nc', () => api.shareFile(`${name}-2-drill.nc`, st.drill.gcode, 'text/plain')),
           btn('⬇ 3 cutout.nc', () => api.shareFile(`${name}-3-cutout.nc`, st.cut.gcode, 'text/plain')),
-          btn('⬇ copper.svg (toner)', () => api.shareFile(`${name}-copper.svg`, copperSvg(api.getC()), 'image/svg+xml'))),
+          btn('⬇ copper.pdf (print 1:1)', () => api.shareFile(`${name}-copper.pdf`, copperPdf(api.getC(), undefined, name), 'application/pdf')),
+          btn('⬇ copper.svg', () => api.shareFile(`${name}-copper.svg`, copperSvg(api.getC()), 'image/svg+xml'))),
         el('pre', { class: 'steps', text: [
           'On the 3018:',
           '1. Tape / clamp the copper blank flat. Home or jog to its lower-left corner → set X0 Y0.',
@@ -489,7 +490,9 @@ export function pcbView(api) {
           btn('⬇ Bottom Copper', () => api.shareFile(`${nm} - CADCAM Bottom Copper.GBR`, gerberSet(api.getC()).copper, 'text/plain')),
           btn('⬇ Drill', () => api.shareFile(`${nm} - CADCAM Drill TOP-BOT Plated.GBR`, gerberSet(api.getC()).drill, 'text/plain')),
           btn('⬇ Board Outline', () => api.shareFile(`${nm} - CADCAM Board Outline.GBR`, gerberSet(api.getC()).outline, 'text/plain')),
-          btn('⬇ Excellon .DRL (other tools)', () => api.shareFile(`${nm}-Drill.DRL`, excellon(api.getC()), 'text/plain')))));
+          btn('⬇ Excellon .DRL (other tools)', () => api.shareFile(`${nm}-Drill.DRL`, excellon(api.getC()), 'text/plain'))),
+        note('Check the fit before cutting: print this PDF at 100 % (Actual size), lay your ESP32 / UNO / headers on it. Every pin should land on a pad. The 50 mm ruler on the sheet proves the print scale.'),
+        el('div', { class: 'row wrap' }, btn('🖨 Copper PDF 1:1 (print check)', () => api.shareFile(`${nm}-copper-1to1.pdf`, copperPdf(api.getC(), undefined, nm), 'application/pdf')))));
     }
     panel.append(camSec);
   }
