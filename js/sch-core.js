@@ -1035,6 +1035,35 @@ export function example(name) {
     W(0, 12, 0, 18); W(0, 18, 36, 18); W(36, 16, 36, 18);
     W(21, 10, 21, 8); W(21, 8, 33, 8); W(33, 8, 33, 13);
     W(10, 10, 10, 0); W(10, 0, 34, 0); W(34, 0, 34, 15); W(34, 15, 33, 15);
+  } else if (name === 'fridge') {
+    // fridge / aircon guard: after power comes back the compressor waits ≈ 4 min (1.1 × 1 MΩ × 220 µF), so the gas pressure equalizes first.
+    // D1 empties C1 at once when power drops, so even a 2-second brownout restarts the full wait.
+    c.tdiv = 30; c.speed = 10;
+    const b = addPart(c, 'BAT', 0, 10, 1); b.name = 'SUPPLY'; b.props.v = 12;
+    const sw = addPart(c, 'SW', 3, 2); sw.name = 'MAINS'; sw.props.on = false;
+    addPart(c, 'T555', 16, 10).props.model = 'NE555';
+    const c1 = addPart(c, 'C', 9, 6, 1); c1.name = 'C1'; Object.assign(c1.props, { c: 220e-6, vmax: 25 });
+    const r1 = addPart(c, 'R', 9, 14, 1); r1.name = 'R1'; r1.props.r = 1e6;
+    const d1 = addPart(c, 'D', 6, 14, 3); d1.name = 'D1'; d1.props.model = '1N4148';
+    const c2 = addPart(c, 'C', 18, 16, 1); c2.name = 'C2'; Object.assign(c2.props, { c: 10e-9, vmax: 50, polar: false });
+    const r2 = addPart(c, 'R', 24, 10); r2.name = 'R2'; r2.props.r = 1000;
+    addPart(c, 'NPN', 28, 10).props.model = '2N2222';
+    const k = addPart(c, 'RELAY', 32, 4); Object.assign(k.props, { vcoil: 12, rcoil: 400, l: 0.12 });
+    const d2 = addPart(c, 'D', 24, 4, 3); d2.name = 'D2'; d2.props.model = '1N4007';
+    const lp = addPart(c, 'LAMP', 32, 10, 1); lp.name = 'FRIDGE'; Object.assign(lp.props, { vr: 12, wr: 5 });
+    addPart(c, 'SCOPE', 44, 14);
+    addPart(c, 'GND', 0, 18);
+    W(0, 8, 0, 2); W(0, 2, 1, 2); W(5, 2, 17, 2); W(15, 6, 15, 2); W(17, 6, 17, 2);
+    W(17, 2, 24, 2); W(24, 2, 29, 2); W(29, 2, 29, 0); W(29, 0, 34, 0); W(34, 0, 34, 2);
+    W(9, 4, 9, 2); W(9, 8, 9, 10); W(9, 10, 12, 10); W(12, 10, 12, 12); W(9, 12, 12, 12); W(9, 16, 9, 18);
+    W(6, 12, 6, 10); W(6, 10, 9, 10); W(6, 16, 6, 18);
+    W(16, 14, 16, 18);
+    W(20, 10, 22, 10);
+    W(24, 6, 29, 6); W(29, 6, 29, 8); W(29, 12, 29, 18);
+    W(32, 6, 32, 8); W(32, 12, 32, 18);
+    W(0, 12, 0, 18); W(0, 18, 44, 18); W(44, 16, 44, 18);
+    W(10, 10, 10, -4); W(10, -4, 41, -4); W(41, -4, 41, 13);
+    W(32, 8, 39, 8); W(39, 8, 39, 15); W(39, 15, 41, 15);
   } else if (name === 'esp32io') {
     // ESP32 pins set by hand: D23 OUTPUT HIGH → 330 Ω → LED · D15 INPUT_PULLUP + button to GND · D34 analogRead of a 10 kΩ pot on 3.3 V
     const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';

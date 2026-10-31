@@ -29,7 +29,7 @@ export function schematicTab(root) {
   let running = store.get('sch.run', '1') === '1';
   const STOPPED = 'Simulation stopped: no voltages or currents. Tap ▶ Run to start it again.';
   // time simulation (capacitors, coils, signal generator, scope)
-  const TDIVS = [1e-6, 2e-6, 5e-6, 1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1, 0.2, 0.5, 1];
+  const TDIVS = [1e-6, 2e-6, 5e-6, 1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1, 0.2, 0.5, 1, 2, 5, 10, 30, 60];
   const VDIVS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
   const SAMPLES = 400;      // samples across one scope screen (10 divisions)
   const sim = { t: 0, state: new Map(), buf: [], paused: false, tdiv: +store.get('sch.tdiv', '0.005'), speed: store.get('sch.speed2', 'screen'), next: null,
@@ -82,10 +82,11 @@ export function schematicTab(root) {
   const voltsBtn = btn('', () => { showVolts = !showVolts; store.set('sch.volts', showVolts ? '1' : '0'); syncTop(); draw(); });
   const dotsBtn = btn('', () => { showDots = !showDots; store.set('sch.dots', showDots ? '1' : '0'); syncTop(); draw(); });
   const runBtn = btn('', () => { running = !running; store.set('sch.run', running ? '1' : '0'); syncTop(); commit(false); say(running ? 'Simulation running.' : 'Simulation stopped. Edit freely; tap ▶ Run to see the results.'); }, 'run');
+  const floatBtn = btn('🪟 Float', () => setFloat(!floating));
   const top = el('div', { class: 'sch-tools' },
     runBtn, modeBtns.select, modeBtns.wire, modeBtns.delete,
     btn('↻', () => rotateSel(), 'icon'), btn('↶', () => undo(), 'icon'), btn('↷', () => redo(), 'icon'),
-    btn('Fit', () => { fit(); draw(); }), voltsBtn, dotsBtn,
+    btn('Fit', () => { fit(); draw(); }), voltsBtn, dotsBtn, floatBtn,
     btn('Projects', () => projects()), btn('Examples', () => examples()), btn('🟫 PCB', () => setView('pcb'), 'pcbbtn'));
   const tray = el('div', { class: 'sch-tray' });
   for (const t of S.PALETTE) {
@@ -109,6 +110,36 @@ export function schematicTab(root) {
   const wrap = el('div', { class: 'sch-wrap' }, canvas);
   const status = el('div', { class: 'sch-status' });
   const panel = el('div', { class: 'sch-panel' });
+  // floating settings: the part panel can float over the page (drag its bar) so you see the circuit while changing values
+  let floating = store.get('sch.float', '0') === '1';
+  const pTitle = el('b', { text: '⠿ Settings' });
+  const pMin = btn('–', () => { panel.hidden = !panel.hidden; pMin.textContent = panel.hidden ? '+' : '–'; keepIn(); }, 'icon');
+  const pHead = el('div', { class: 'sch-phead', hidden: true }, pTitle, el('span', { class: 'sch-phbtn' }, pMin, btn('✕ Dock', () => setFloat(false))));
+  const panelBox = el('div', { class: 'sch-pbox' }, pHead, panel);
+  function keepIn() {
+    if (!floating) return;
+    const w = panelBox.offsetWidth, h = panelBox.offsetHeight;
+    let x = parseFloat(panelBox.style.left) || 0, y = parseFloat(panelBox.style.top) || 0;
+    x = Math.max(4, Math.min(innerWidth - w - 4, x)); y = Math.max(4, Math.min(innerHeight - Math.min(h, 60) - 4, y));
+    panelBox.style.left = x + 'px'; panelBox.style.top = y + 'px';
+  }
+  function setFloat(v) {
+    floating = v; store.set('sch.float', v ? '1' : '0');
+    panelBox.classList.toggle('floating', v); pHead.hidden = !v; floatBtn.classList.toggle('on', v);
+    if (!v) { panel.hidden = false; pMin.textContent = '–'; panelBox.style.left = panelBox.style.top = ''; return; }
+    const pos = (store.get('sch.floatpos', '') || '').split(',').map(Number);
+    if (pos.length === 2 && pos.every(Number.isFinite)) { panelBox.style.left = pos[0] + 'px'; panelBox.style.top = pos[1] + 'px'; }
+    else { panelBox.style.left = (innerWidth - Math.min(340, innerWidth - 16) - 8) + 'px'; panelBox.style.top = Math.round(innerHeight * 0.5) + 'px'; }
+    requestAnimationFrame(keepIn);
+  }
+  {
+    let d0 = null;
+    pHead.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; d0 = { x: e.clientX, y: e.clientY, l: parseFloat(panelBox.style.left) || 0, t: parseFloat(panelBox.style.top) || 0 }; pHead.setPointerCapture(e.pointerId); e.preventDefault(); });
+    pHead.addEventListener('pointermove', (e) => { if (!d0) return; panelBox.style.left = (d0.l + e.clientX - d0.x) + 'px'; panelBox.style.top = (d0.t + e.clientY - d0.y) + 'px'; keepIn(); });
+    const up = () => { if (!d0) return; d0 = null; store.set('sch.floatpos', parseFloat(panelBox.style.left) + ',' + parseFloat(panelBox.style.top)); };
+    pHead.addEventListener('pointerup', up); pHead.addEventListener('pointercancel', up);
+    addEventListener('resize', keepIn);
+  }
   // oscilloscope + time controls (shown while a time simulation runs)
   const scv = el('canvas', { class: 'scope-cv' });
   const fmtT = (t) => si(t, 's', 3) + '/div', fmtV = (v) => si(v, 'V', 3) + '/div';
@@ -116,7 +147,7 @@ export function schematicTab(root) {
   const v1Sel = el('select', { class: 'sel sm', 'aria-label': 'CH1 volts per division' }, el('option', { value: 'auto', text: 'CH1 auto' }), VDIVS.map(v => el('option', { value: v, text: 'CH1 ' + fmtV(v) })));
   const v2Sel = el('select', { class: 'sel sm', 'aria-label': 'CH2 volts per division' }, el('option', { value: 'auto', text: 'CH2 auto' }), VDIVS.map(v => el('option', { value: v, text: 'CH2 ' + fmtV(v) })));
   // speed: 'screen' = one scope screen every 2 s (good for fast signals), numbers = × real time
-  const spSel = el('select', { class: 'sel sm', 'aria-label': 'Speed' }, [['screen', '📺 scope pace'], [1, 'real time 1×'], [2, '2×'], [0.5, '½× slow'], [0.1, '0.1× slow'], [0.01, '0.01× slow'], [0.001, '0.001× slow']].map(([v, t]) => el('option', { value: v, text: t })));
+  const spSel = el('select', { class: 'sel sm', 'aria-label': 'Speed' }, [['screen', '📺 scope pace'], [1, 'real time 1×'], [2, '2×'], [10, '10× fast'], [60, '60× fast'], [0.5, '½× slow'], [0.1, '0.1× slow'], [0.01, '0.01× slow'], [0.001, '0.001× slow']].map(([v, t]) => el('option', { value: v, text: t })));
   tSel.value = String(sim.tdiv); if (tSel.value === '') { sim.tdiv = 0.005; tSel.value = '0.005'; }
   v1Sel.value = sim.v1; v2Sel.value = sim.v2; spSel.value = String(sim.speed);
   tSel.onchange = () => { sim.tdiv = +tSel.value; store.set('sch.tdiv', tSel.value); sim.buf = []; sim.next = null; };
@@ -136,20 +167,21 @@ export function schematicTab(root) {
   whatSel.onchange = () => { nudgeWhat = whatSel.value; };
   const nudgeBar = el('div', { class: 'pcb-nudge', hidden: true }, el('span', { class: 'muted', text: 'Nudge' }),
     btn('◀', () => nudgeSch(-1, 0), 'icon'), btn('▲', () => nudgeSch(0, -1), 'icon'), btn('▼', () => nudgeSch(0, 1), 'icon'), btn('▶', () => nudgeSch(1, 0), 'icon'), whatSel);
-  root.append(el('div', { class: 'sch-sticky' }, top, tray), wrap, nudgeBar, status, scopeBox, panel);
+  root.append(el('div', { class: 'sch-sticky' }, top, tray), wrap, nudgeBar, status, scopeBox, panelBox);
+  setFloat(floating);
   // ---------- PCB view (same circuit, board layout + G-code) ----------
   let view2 = 'sch';
   const pcb = pcbView({ getC: () => c, commit: (push = true) => commit(push), undo: () => undo(), redo: () => redo(), say: (t) => say(t), shareFile: (n, t, m) => shareFile(n, t, m), toSchematic: () => setView('sch') });
   root.append(pcb.el);
   function setView(v) {
     view2 = v; store.set('sch.view', v);
-    for (const e of [top, tray, wrap, status, panel]) e.hidden = v === 'pcb';
+    for (const e of [top, tray, wrap, status, panelBox]) e.hidden = v === 'pcb';
     if (v === 'pcb') nudgeBar.hidden = true; else syncNudgeSch();
     if (v === 'pcb') { scopeBox.hidden = true; pcb.show(); } else { pcb.hide(); resize(); commit(false); }
     scrollTo({ top: 0 });
   }
-  function autoSpeed() { const slow = c.parts.some(p => ['SERVO', 'STEPPER', 'T555', 'RELAY'].includes(p.type)) && !c.parts.some(p => p.type === 'SIG'); sim.speed = slow ? '1' : 'screen'; spSel.value = sim.speed; store.set('sch.speed2', sim.speed); }
-  function autoTimeQuiet() { if (c.tdiv) { sim.tdiv = TDIVS.find(t => t >= c.tdiv) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; return; } const g = c.parts.find(p => p.type === 'SIG'); if (g) { const want = 2.5 / g.props.f / 10; sim.tdiv = TDIVS.find(t => t >= want) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; } else if (c.parts.some(p => p.type === 'L')) { sim.tdiv = 0.005; tSel.value = '0.005'; sim.buf = []; } }
+  function autoSpeed() { if (c.speed) { sim.speed = String(c.speed); spSel.value = sim.speed; store.set('sch.speed2', sim.speed); return; } const slow = c.parts.some(p => ['SERVO', 'STEPPER', 'T555', 'RELAY'].includes(p.type)) && !c.parts.some(p => p.type === 'SIG'); sim.speed = slow ? '1' : 'screen'; spSel.value = sim.speed; store.set('sch.speed2', sim.speed); }
+  function autoTimeQuiet() { if (c.tdiv) { sim.tdiv = TDIVS.find(t => t >= c.tdiv) ?? 60; tSel.value = String(sim.tdiv); sim.buf = []; return; } const g = c.parts.find(p => p.type === 'SIG'); if (g) { const want = 2.5 / g.props.f / 10; sim.tdiv = TDIVS.find(t => t >= want) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; } else if (c.parts.some(p => p.type === 'L')) { sim.tdiv = 0.005; tSel.value = '0.005'; sim.buf = []; } }
   function autoTime() {
     const g = c.parts.find(p => p.type === 'SIG');
     if (!g) { say('Auto time needs a signal generator. Pick a time/div by hand.'); return; }
@@ -1210,7 +1242,7 @@ export function schematicTab(root) {
   }
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); autoSpeed(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {

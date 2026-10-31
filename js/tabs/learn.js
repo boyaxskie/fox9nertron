@@ -35,6 +35,21 @@ const ARTICLES = [
     tryit: ['Flip POWER on and watch the scope: blue = capacitor (TRIG/THR) falling, yellow = output stepping up after ≈ 1.1 s.', 'Change C1 to 47 µF: about 5 s.', 'Change the 555 to TLC555: the output HIGH goes to almost 12 V.', 'Flip POWER off and on again quickly: the delay is shorter because C1 did not empty. That is why the reset diode helps.'],
   },
   {
+    id: 'fridge', title: 'Fridge / aircon guard (restart delay)', example: 'fridge', tag: 'Timer',
+    intro: 'When power comes back after a brownout, the compressor must wait 3–5 minutes before starting. Right after it stops, the gas is still at high pressure on one side; restarting into that pressure stalls the motor, it draws locked-rotor current (5–8× normal) and the overload clicks or the winding cooks. This guard holds the relay off for ≈ 4 minutes every time power returns.',
+    parts: [['U1', 'NE555 timer, 12 V'], ['C1', '220 µF / 25 V, low-leakage electrolytic, +12 V → TRIG + THR'], ['R1', '1 MΩ, TRIG + THR → ground'], ['D1', '1N4148 across R1 (cathode to TRIG/THR): fast reset'], ['C2', '10 nF on CTRL (pin 5)'], ['R2 + Q1', '1 kΩ + 2N2222 relay driver'], ['K1 + D2', '12 V relay coil + 1N4007 flyback diode'], ['FRIDGE', 'the load on the relay contacts (220 V in real life)'], ['MAINS', 'switch to fake power cuts']],
+    steps: [
+      ['1. Same trick as the power-on delay', 'Power on: C1 is empty, so TRIG/THR jump to 12 V → output LOW, relay off. C1 charges through R1, TRIG/THR slide down; below ⅓ Vcc (4 V) the output flips HIGH and the relay pulls in.<br>t ≈ 1.1 × R1 × C1 = 1.1 × 1 MΩ × 220 µF ≈ <b>242 s</b>. The simulator gets ≈ 220 s (the 555 inputs and D1 leak a little): <b>about 3.5–4 minutes</b>.'],
+      ['2. Why D1 is the important part', 'After the delay C1 holds 12 V. When power drops, its bottom end is pushed to −12 V and C1 would empty only through R1 (minutes). Power back after 2 s → TRIG is already low → <b>the compressor restarts at once</b>, exactly what we wanted to stop.<br>D1 clamps that negative swing and empties C1 in milliseconds. Simulator: with D1, 2 s off → full ≈ 208 s wait again. Without D1 → restart after 0.1 s.'],
+      ['3. Relay driver', 'NE555 HIGH ≈ 10.3 V → 1 kΩ → ≈ 9.6 mA base current. The 400 Ω coil needs 30 mA, so the 2N2222 is fully on (saturated). D2 catches the coil spike when it switches off.'],
+      ['4. Choosing the relay', 'The contacts carry the compressor. A home fridge runs 1–1.5 A but starts at 6–10 A: use a <b>30 A / 250 VAC</b> relay (or a contactor for aircon). A 10 A cube relay welds its contacts after some months.'],
+      ['5. Power supply', 'Any small 12 V supply from the mains (transformer + bridge + 1000 µF, or a 12 V SMPS module). Put a fuse on the 220 V side. Keep the 220 V tracks ≥ 3 mm away from the 12 V side on the PCB.'],
+      ['6. Other times', '3 min: 1 MΩ + 150 µF. 5 min: 1 MΩ + 270 µF (or 1.2 MΩ + 220 µF). Don\'t go far above 1 MΩ: electrolytic leakage makes the time drift.'],
+      ['7. What it does not do', 'This only delays restarts. It does not cut off low or high voltage. A full AVR / "fridge guard" adds a voltage sensor (zener + comparator) that also keeps the relay off outside ≈ 180–250 V.'],
+    ],
+    tryit: ['Flip MAINS on: blue = C1 (TRIG/THR) sliding down, yellow = FRIDGE voltage. At 10× speed the wait is ≈ 22 s; pick 60× to make it faster, 1× to see real time.', 'When FRIDGE is on, flip MAINS off and on again quickly: the full wait starts again.', 'Delete D1 and try the quick off/on: FRIDGE comes back almost at once. That is the compressor killer.', 'Change C1 to 22 µF for a quick 22 s test.'],
+  },
+  {
     id: 'esp32io', title: 'ESP32 / Arduino pins: what is safe', example: 'esp32io', tag: 'Microcontroller',
     intro: 'The board part has no program: you set each pin the way your code would (OUTPUT HIGH, INPUT_PULLUP, analogRead…) and the simulator shows what the circuit around it does. Tap a pin on the drawing to set it.',
     parts: [['ESP32', 'DevKit 30-pin, USB powered, 3.3 V logic'], ['R1 + LED1', 'D23 OUTPUT HIGH → 330 Ω → red LED'], ['BTN', 'D15 INPUT_PULLUP, button to GND'], ['RV1', '10 kΩ pot on 3.3 V, wiper → D34 analogRead']],
