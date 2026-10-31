@@ -1,7 +1,7 @@
 // PCB core: footprints, netlist from the schematic, board layout, connectivity, DRC.
 // Units: mm. Board coords: x right, y DOWN (like the screen), origin = board top-left.
 // Single-sided board: copper on the BOTTOM, parts on top. The view is from the top (parts side).
-import { TYPES, pinsOf, wirePieces, key, rotPt } from './sch-core.js';
+import { TYPES, pinsOf, wirePieces, key, rotPt, BOARDS, isBoard } from './sch-core.js';
 
 // ---------- footprints ----------
 const PITCH = 2.54;
@@ -51,12 +51,36 @@ export const FOOTPRINTS = {
     for (let n = 1; n <= 8; n++) { const x = n <= 4 ? -3.81 : 3.81, y = n <= 4 ? -3.81 + (n - 1) * PITCH : 3.81 - (n - 5) * PITCH; pads.push({ ...th(x, y, n - 1, 1.7, 0.8, n === 1 ? 'rect' : 'oval', 2.2, 1.6), num: n }); }
     return { pads, body: [box(-2.6, -5, 2.6, 5)] };
   } },
+  // ESP32 DevKit 30-pin: two rows of 15 (2.54 mm pitch). Row spacing differs between makers: measure yours.
+  DK30W: { label: 'ESP32 DevKit 30-pin, rows 25.4 mm (1")', n: 30, make: () => devkit(25.4) },
+  DK30N: { label: 'ESP32 DevKit 30-pin, rows 22.86 mm (0.9")', n: 30, make: () => devkit(22.86) },
+  // Arduino UNO R3 shield headers (the board plugs on top)
+  UNOSH: { label: 'Arduino UNO shield headers', n: 25, make: () => unoShield() },
   // SRD-05VDC-SL-C style relay (check against your relay's datasheet)
   SRD: { label: 'Relay SRD (Songle) 5-pin', n: 5, make: () => ({ pads: [th(-6, -2, 0, 2.2, 1.2), th(-6, 10, 1, 2.2, 1.2), th(-8, 4, 2, 2.4, 1.3), th(6.2, -2, 3, 2.4, 1.3), th(6.2, 10, 4, 2.4, 1.3)], body: [box(-9.8, -4.3, 9.2, 11.2)] }) },
 };
 // lead spacings (mm) you can choose for 2-leg parts (bent legs)
 const AXS = [7.62, 10.16, 12.7, 15.24, 17.78, 20.32, 22.86, 25.4], RADS = [2.54, 5.08, 7.62, 10.16];
 export const SPACINGS = { AX300: AXS, AX400: AXS, AX500: AXS, RAD25: RADS, RAD50: RADS, LED5: RADS };
+function devkit(w) {
+  const pads = [];
+  for (let i = 0; i < 15; i++) { const y = (i - 7) * PITCH; pads.push(th(-w / 2, y, i, 1.8, 1.0, i === 0 ? 'rect' : 'round'), th(w / 2, y, 15 + i, 1.8, 1.0)); }
+  return { pads, body: [box(-w / 2 - 2.2, -26, w / 2 + 2.2, 26), box(-4, 20, 4, 26.5), [[-w / 2 - 2.2, -12], [w / 2 + 2.2, -12]]] };
+}
+function unoShield() {
+  // positions in inches from the UNO's lower-left corner (Arduino shield layout), board centre at (1.35", 1.05")
+  const B = BOARDS.UNO.pins.map(q => q.n), ix = (n) => B.indexOf(n);
+  const at = (xi, yi) => [(xi - 1.35) * 25.4, -(yi - 1.05) * 25.4];
+  const pads = [];
+  const put = (xi, yi, name, sq) => { const [x, y] = at(xi, yi); pads.push(th(x, y, name == null ? -1 : ix(name), 1.8, 1.0, sq ? 'rect' : 'round')); };
+  // digital D0–D7 (right), D8–D13 + GND, AREF, SDA, SCL (left, 0.16" gap between D7 and D8)
+  for (let d = 0; d <= 7; d++) put(2.6 - d * 0.1, 2.0, 'D' + d, d === 0);
+  ['D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'GND', null, 'A4', 'A5'].forEach((n, k) => put(1.74 - k * 0.1, 2.0, n));
+  // power header: NC, IOREF, RESET, 3.3V, 5V, GND, GND, VIN · analog A0–A5
+  [null, '5V', null, '3V3', '5V', 'GND', 'GND2', 'VIN'].forEach((n, k) => put(1.04 + k * 0.1, 0.1, n));
+  ['A0', 'A1', 'A2', 'A3', 'A4', 'A5'].forEach((n, k) => put(2.0 + k * 0.1, 0.1, n));
+  return { pads, body: [box(-34.29, -26.67, 34.29, 26.67), box(-38.5, 13, -27, 25), box(-36, -20, -27, -11)] };
+}
 const PCB_SKIP = new Set(['GND', 'VM', 'SCOPE', 'AM']);
 export const onBoard = (p) => !PCB_SKIP.has(p.type);
 export function fpChoices(p) {
@@ -64,6 +88,8 @@ export function fpChoices(p) {
   if (p.type === 'OPAMP') return ['DIP8'];
   if (p.type === 'OPTO') return ['DIP4'];
   if (p.type === 'T555') return ['DIP8N'];
+  if (p.type === 'ESP32') return ['DK30W', 'DK30N'];
+  if (p.type === 'UNO') return ['UNOSH'];
   if (p.type === 'RELAY') return ['SRD'];
   if (p.type === 'DPDT') return ['HDR2x3'];
   if (p.type === 'PB') return ['TACT6', 'HDR2', 'TERM2'];
@@ -107,6 +133,7 @@ export function footprintOf(p, bp = {}) {
 }
 // pad name shown on the board
 export function pinLabel(p, i) {
+  if (isBoard(p.type)) return BOARDS[p.type].pins[i]?.n ?? String(i + 1);
   const L = { BAT: ['+', '−'], LED: ['A', 'K'], D: ['A', 'K'], ZD: ['A', 'K'], C: ['+', '−'], NPN: ['B', 'C', 'E'], PNP: ['B', 'C', 'E'], NMOS: ['G', 'D', 'S'], PMOS: ['G', 'D', 'S'],
     OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
   return L?.[i] ?? String(i + 1);
@@ -143,7 +170,7 @@ export function netlist(c) {
     const bat = n.members.find(m => m.part.type === 'BAT' && m.pin === 0);
     const m = bat ?? n.members[0];
     n.name = m ? `${m.part.name}.${pinLabel(m.part, m.pin)}` : `N${n.id}`;
-    n.power = n.members.some(m => ['BAT', 'LAMP', 'REG', 'L'].includes(m.part.type) || (m.part.type === 'RELAY' && m.pin >= 2));
+    n.power = n.members.some(m => ['BAT', 'LAMP', 'REG', 'L'].includes(m.part.type) || (m.part.type === 'RELAY' && m.pin >= 2) || (isBoard(m.part.type) && /pwr|gnd/.test(BOARDS[m.part.type].pins[m.pin].k)));
   }
   nets[0].power = true;
   return { nets, pinNet };

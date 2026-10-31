@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '1.6.4';
+export const VERSION = '1.7.0';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -46,6 +46,7 @@ function help() {
 <p><b>📈 Time simulation</b>: add a Capacitor, Inductor, Signal generator or Scope and ▶ Run moves through time. The oscilloscope under the drawing shows CH1 (yellow) and CH2 (blue) against the scope's bottom pin (COM, usually ground), with p-p, average and frequency. Set time/div (or Auto time), speed (slow motion), ⏸ pause and ⟲ t = 0 to start again with empty capacitors. Examples marked 📈 show RC charging, PWM, the coil flyback spike, rectifier ripple and the PC817 optocoupler.</p>
 <p><b>🔌 Active parts</b>: NPN / PNP transistors (2N2222, BC547, TIP120…), N / P MOSFETs (IRLZ44N, AO3400, IRF540N…), zener diodes, op-amps (LM358, MCP6002…), regulators (7805, AMS1117, LM317) and relays. Tap one to see if it is OFF, fully ON or only partly on (hot), its heat, and spikes over its rating. Try the examples: relay driver, MOSFET solenoid, 7805, LM317, zener and the op-amp comparator.</p>
 <p><b>★ Your own parts</b>: part not in the list? Tap the part, open its Type list, pick <b>+ New part from datasheet…</b> and type the main values (typical column). It is saved and shows as ★ in the list from then on; ✎ Edit or delete it the same way. Projects carry their ★ parts, so a shared file opens right on another phone.</p>
+<p><b>🔌 ESP32 / Arduino UNO</b>: board parts with real pin names. No program runs: tap a pin and set it like your code would (OUTPUT HIGH/LOW, PWM, INPUT, INPUT_PULLUP, analogRead). The panel shows the voltage, current, digitalRead / analogRead value and warns about too much current, 5 V on a 3.3 V pin and ESP32 boot pins. The PCB has the DevKit / UNO shield footprints.</p>
 <p><b>🟫 PCB</b> (button at the end of the Schematic toolbar): turns the same circuit into a single-sided board for a CNC 3018. Parts get footprints (tap one to change it or the transistor pin order), drag them into place, then <b>⚡ Autoroute</b> (it adds a blue jumper wire when a trace can't cross) or <b>✏ Route</b> by hand. Yellow dashed = not connected yet, red circle = too close / short. <b>🛠 G-code</b> makes 3 GRBL files: 1 isolation (V-bit), 2 drilling (pauses for bit changes), 3 cutout with tabs — mirrored for bottom copper. X0 Y0 = lower-left corner of the blank, Z0 = copper surface. Also a 1:1 copper SVG for toner transfer. <b>📤 Gerber + drill</b> saves bottom copper (.GBL), drill (.DRL) and outline (.GKO) like Proteus does, to load into the Fox9ner web app.</p>
 <p><b>Kirchhoff</b>: number every junction (0 = ground). Each part goes From one node To another. Example: a 9 V battery with + on node 1 and − on ground is <i>V src, From 1, To 0, 9</i>.</p>
 <p><b>Colours</b>: green = safe, yellow = check it, red = it will fail or it's dangerous.</p>

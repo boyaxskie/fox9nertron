@@ -136,7 +136,7 @@ export function schematicTab(root) {
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -319,6 +319,10 @@ export function schematicTab(root) {
       ctx.fillRect(a - 0.25, b - 0.25, cc - a + 0.5, d - b + 0.5); ctx.strokeRect(a - 0.25, b - 0.25, cc - a + 0.5, d - b + 0.5); ctx.setLineDash([]);
     }
     symbol(ctx, p, r, view.g);
+    if (S.isBoard(p.type) && isSel) {
+      const k = S.BOARDS[p.type].pins.findIndex(x => x.n === boardPin(p)), pt = S.TYPES[p.type].pins[k];
+      if (pt) { ctx.strokeStyle = C.sel; ctx.lineWidth = 2.5 / view.g; ctx.beginPath(); ctx.arc(pt[0], pt[1], 0.55, 0, 7); ctx.stroke(); }
+    }
     ctx.restore();
   }
 
@@ -372,6 +376,7 @@ export function schematicTab(root) {
       case 'NPN': case 'PNP': case 'NMOS': case 'PMOS': case 'OPAMP': return q.model;
       case 'RELAY': return S.getCustom('RELAY', q.relay) ? q.relay : `${q.vcoil} V coil`;
       case 'T555': return q.model;
+      case 'ESP32': case 'UNO': return '';
     }
     return '';
   }
@@ -518,6 +523,10 @@ export function schematicTab(root) {
   function mid() { const v = [...ptrs.values()]; return [(v[0][0] + v[1][0]) / 2, (v[0][1] + v[1][1]) / 2]; }
   function zoomAt(k, fx, fy) { const ng = Math.max(6, Math.min(80, view.g * k)), kk = ng / view.g; view.ox = fx - (fx - view.ox) * kk; view.oy = fy - (fy - view.oy) * kk; view.g = ng; }
 
+  // microcontroller boards: which pin the panel shows
+  const boardPinSel = new Map();
+  function boardPin(p) { const B = S.BOARDS[p.type]; const n = boardPinSel.get(p.id); return B.pins.some(x => x.n === n) ? n : (Object.keys(p.props.pins ?? {})[0] ?? B.pins.find(x => x.k === 'gpio').n); }
+  const MODE_SHORT = { in: 'input', pu: 'pull-up', pd: 'pull-down', adc: 'ADC', high: 'HIGH', low: 'LOW', pwm: 'PWM', pwr: 'power', en: 'reset', nc: '—' };
   // free wire corner / end (not on a part pin) close to the finger
   function wireEndAt(x, y) {
     const pinK = new Set(c.parts.flatMap(p => S.pinsOf(p).map(q => S.key(...q))));
@@ -609,6 +618,12 @@ export function schematicTab(root) {
     const p = partAt(x, y);
     if (p) {
       if (p.type === 'SW' || p.type === 'SPDT' || p.type === 'DPDT') { p.props.on = !p.props.on; sel = { kind: 'part', id: p.id }; commit(); say(`${p.name} ${p.props.on ? 'ON (closed)' : 'OFF (open)'}. Tap again to flip.`); return; }
+      if (S.isBoard(p.type)) {
+        // tap near a pin = select that pin
+        const pts = S.pinsOf(p); let bi = -1, bd = 0.8;
+        pts.forEach(([px, py], k) => { const d = Math.hypot(px - x, py - y); if (d < bd && S.BOARDS[p.type].pins[k].k !== 'gnd') { bd = d; bi = k; } });
+        if (bi >= 0) boardPinSel.set(p.id, S.BOARDS[p.type].pins[bi].n);
+      }
       sel = { kind: 'part', id: p.id }; renderPanel(); draw(); return;
     }
     const wi = wireAt(x, y);
@@ -816,6 +831,21 @@ export function schematicTab(root) {
         note('Pins: − input top-left, + input bottom-left, output right, supply V+ top, V− bottom (to ground on a single supply).')); break;
       case 'REG': f.append(modelChoice(p, 'Type', 'REG', q.model, builtins(S.REGS), v => { q.model = v; }),
         note(S.REGS[q.model]?.adj ? 'Pins: IN left, OUT right, ADJ bottom. R1 (240 Ω) from OUT to ADJ, R2 from ADJ to ground: Vout = 1.25 × (1 + R2 ÷ R1).' : 'Pins: IN left, OUT right, GND bottom. Real circuit: 0.33 µF on IN and 0.1 µF on OUT, close to the pins.')); break;
+      case 'ESP32': case 'UNO': {
+        const B = S.BOARDS[p.type]; q.pins ??= {};
+        const cur = boardPin(p), pin = B.pins.find(x => x.n === cur);
+        const label = (x) => { const m = x.k === 'gpio' ? (q.pins[x.n]?.mode ?? 'in') : x.k; return `${x.n}${x.label && x.label !== x.n ? ` (${x.label})` : ''} · ${MODE_SHORT[m]}`; };
+        f.append(choice('Pin (or tap a pin on the drawing)', cur, B.pins.filter(x => x.k !== 'gnd').map(x => [x.n, label(x)]), v => { boardPinSel.set(p.id, v); }));
+        if (pin.k === 'gpio') {
+          const mode = q.pins[cur]?.mode ?? 'in';
+          f.append(choice('Pin mode (what your code would do)', mode, S.pinModesFor(p.type, pin).map(m => [m, S.PIN_MODES[m]]), v => { if (v === 'in') delete q.pins[cur]; else q.pins[cur] = { ...(q.pins[cur] ?? {}), mode: v }; }));
+          if (mode === 'pwm') f.append(field('PWM frequency', plain(q.pins[cur].f ?? 1000), 'Hz', v => { q.pins[cur].f = Math.max(v, 0.1); }), field('Duty', plain(q.pins[cur].duty ?? 50), '%', v => { q.pins[cur].duty = Math.min(100, v); }));
+          const caps = [pin.label, pin.inOnly ? 'input only' : 'in / out', pin.pwm || p.type === 'ESP32' ? (pin.inOnly ? null : 'PWM') : null, pin.adc ? `${pin.adc} (analog in)` : null, pin.i2c ? `I²C ${pin.i2c}` : null].filter(Boolean).join(' · ');
+          f.append(note(caps + (pin.strap ? ' · ⚠ boot strapping pin' : '') + (pin.serial ? ' · ⚠ USB serial pin' : '')));
+        } else f.append(note(pin.k === 'pwr' ? `${pin.n}: ${pin.v} V out, ${pin.note}.` : pin.k === 'en' ? 'EN: reset. Pulled up to 3.3 V inside (10 kΩ). Pull it to GND = reset.' : `${pin.n}: ${pin.note ?? 'not connected inside'}.`));
+        f.append(note(`No program runs: each pin is set by hand, as if your code had already done it. The board is powered from USB (${B.vcc} V logic).`));
+        break;
+      }
       case 'T555': f.append(choice('Type', q.model, Object.entries(S.TIMERS).map(([k, m]) => [k, `${k}: ${m.note}`]), v => { q.model = v; }),
         note('Pins: 1 GND · 2 TRIG · 3 OUT · 4 RESET · 5 CTRL · 6 THR · 7 DIS · 8 VCC. TRIG below ⅓ Vcc → output HIGH. THR above ⅔ Vcc → output LOW (and DIS shorts to ground). RESET to + for normal use. 10 nF from CTRL to ground keeps it steady.')); break;
       case 'RELAY': {
@@ -991,6 +1021,39 @@ export function schematicTab(root) {
         if (m.adj && r.iout < 0.0095) warn.push(['warn', 'LM317 needs ≥ 10 mA load or the output creeps up. Use R1 = 120–240 Ω.']);
         break;
       }
+      case 'ESP32': case 'UNO': {
+        const B = S.BOARDS[p.type], cur = boardPin(p), pin = B.pins.find(x => x.n === cur), pr0 = r.pins[cur] ?? { v: 0, i: 0, mode: 'in' };
+        const ma = (v) => si(c0(v), 'A');
+        if (pin.k === 'gpio') {
+          const isIn = /in|pu|pd|adc/.test(pr0.mode);
+          vals.push([`${cur} voltage`, si(c0(pr0.v), 'V'), true], [pr0.i >= 0 ? 'Current out' : 'Current in', ma(Math.abs(pr0.i)), true]);
+          if (isIn) {
+            const lv = pr0.v >= B.vih ? 'HIGH (1)' : pr0.v <= B.vil ? 'LOW (0)' : 'UNDEFINED';
+            if (pr0.mode !== 'adc') vals.push(['digitalRead', lv, true]);
+            if (pr0.mode === 'adc') { const full = 2 ** B.adcBits - 1, val = Math.round(Math.max(0, Math.min(1, pr0.v / B.adcRef)) * full); vals.push(['analogRead', `${val} / ${full}`, true]); L.push(`analogRead = V ÷ ${B.adcRef} V × ${full} = ${plain(pr0.v)} ÷ ${B.adcRef} × ${full} = ${val}`); if (p.type === 'ESP32') L.push('Real ESP32 ADC is not very linear near 0 V and above ≈ 3.1 V (11 dB attenuation).'); }
+            if (lv === 'UNDEFINED' && pr0.mode !== 'adc') warn.push(['warn', `${plain(pr0.v)} V is between LOW (< ${B.vil} V) and HIGH (> ${B.vih} V): the reading can flicker.`]);
+            if (pr0.mode === 'in' && Math.abs(pr0.v) < 1e-3 && Math.abs(pr0.i) < 1e-9) warn.push(['warn', 'Input with nothing driving it is "floating": it reads random values. Use INPUT_PULLUP or an external resistor.']);
+          } else {
+            const pmax = B.imax / 1000, prec = B.irec / 1000;
+            L.push(`Output ${pr0.mode === 'pwm' ? 'PWM' : pr0.mode.toUpperCase()}: about ${B.rout} Ω inside, so the voltage sags with current: ${B.vcc} V − I × ${B.rout} Ω.`);
+            if (Math.abs(pr0.i) > pmax) warn.push(['bad', `${ma(Math.abs(pr0.i))} is over the ${B.imax} mA absolute max: the pin can be damaged. Use a transistor / MOSFET.`]);
+            else if (Math.abs(pr0.i) > prec) warn.push(['warn', `${ma(Math.abs(pr0.i))}: above the ${B.irec} mA recommended. OK for a moment, not for always.`]);
+            else warn.push(['ok', `${ma(Math.abs(pr0.i))}: fine for a pin (≤ ${B.irec} mA).`]);
+          }
+          if (pr0.v > B.vcc + 0.3) warn.push(['bad', `${si(pr0.v, 'V')} on a ${B.vcc} V pin: this kills it. Use a voltage divider or a level shifter.`]);
+          if (pr0.v < -0.3) warn.push(['bad', 'Negative voltage on a pin: it can be damaged.']);
+          if (pin.strap && pr0.mode !== 'in') warn.push(['warn', `${pin.label} is a boot strapping pin: what is connected can stop the ESP32 from booting / flashing.${pin.g === 12 ? ' GPIO12 HIGH at boot = wrong flash voltage.' : pin.g === 0 ? ' GPIO0 LOW at boot = download mode.' : ''}`]);
+          if (pin.serial) warn.push(['warn', 'Used by USB serial (upload / Serial.print): avoid for other things.']);
+          if (pin.adc === 'ADC2' && pr0.mode === 'adc') warn.push(['warn', 'ADC2 pins can\'t read analog while WiFi is on: use ADC1 (GPIO32–39).']);
+        } else if (pin.k === 'pwr') {
+          vals.push([`${cur} voltage`, si(pr0.v, 'V'), true], ['Current out', ma(pr0.i), true], ['Max', si(pin.imax, 'A')]);
+          if (pr0.i > pin.imax) warn.push(['bad', `Over ${si(pin.imax, 'A')} from ${cur}: use a separate supply for big loads.`]);
+        } else vals.push([`${cur}`, si(c0(pr0.v), 'V'), true]);
+        // all pins in use
+        const used = B.pins.filter(x => x.k !== 'gnd' && x.k !== 'nc' && (x.k === 'pwr' ? Math.abs(r.pins[x.n].i) > 1e-6 : x.k === 'gpio' && ((q.pins?.[x.n]?.mode ?? 'in') !== 'in' || Math.abs(r.pins[x.n].v) > 0.01)));
+        if (used.length) L.push('', 'Pins in use:', ...used.map(x => { const z = r.pins[x.n]; return `${x.n.padEnd(5)} ${(MODE_SHORT[z.mode] ?? z.mode).padEnd(9)} ${si(c0(z.v), 'V').padStart(9)}  ${si(c0(z.i), 'A').padStart(9)}`; }));
+        break;
+      }
       case 'T555': {
         const m = S.TIMERS[q.model] ?? S.TIMERS.NE555;
         vals.push(['Output', r.q ? `HIGH ${si(r.vout, 'V')}` : `LOW ${si(r.vout, 'V')}`, true], ['Supply Vcc', si(r.vcc, 'V'), true], ['TRIG (pin 2)', si(c0(r.vtrig), 'V')], ['THR (pin 6)', si(c0(r.vthr), 'V')], ['Output current', si(c0(r.iout), 'A')], ['Power', si(c0(r.p), 'W')]);
@@ -1049,7 +1112,7 @@ export function schematicTab(root) {
   }
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -1245,6 +1308,20 @@ function symbol(ctx, p, r, g) {
       T('IN', -1.45, 0.55, 0.42, C.dim); T('OUT', 1.35, 0.55, 0.42, C.dim); T(m.adj ? 'ADJ' : 'GND', 0, 0.7, 0.42, C.dim);
       break;
     }
+    case 'ESP32': case 'UNO': {
+      const B = S.BOARDS[p.type], P = S.TYPES[p.type].pins, cfg = q.pins ?? {};
+      ctx.fillStyle = p.type === 'ESP32' ? '#121C26' : '#0B2533'; ctx.fillRect(-3, -8.6, 6, 17.2); ctx.strokeStyle = C.part; ctx.strokeRect(-3, -8.6, 6, 17.2);
+      T(p.type === 'ESP32' ? 'ESP32' : 'UNO', 0, -8.0, 0.6, p.type === 'ESP32' ? '#E8EDF2' : '#4FC3F7');
+      const col = { high: '#3DDC84', low: '#FF6B6B', pwm: '#FFC857', adc: '#C084FC', pu: '#4FC3F7', pd: '#4FC3F7' };
+      B.pins.forEach((pin, k) => {
+        const [x, y] = P[k], sx2 = x > 0 ? 3 : -3;
+        ctx.strokeStyle = C.part; L(x, y, sx2, y);
+        const m = pin.k === 'gpio' ? (cfg[pin.n]?.mode ?? 'in') : pin.k;
+        T(pin.n, x > 0 ? 2.05 : -2.05, y, 0.42, pin.k === 'gnd' ? C.dim : pin.k === 'pwr' ? '#FF9F43' : col[m] ?? C.text);
+        if (col[m]) { ctx.fillStyle = col[m]; ctx.beginPath(); ctx.arc(x > 0 ? 3.5 : -3.5, y, 0.17, 0, 7); ctx.fill(); }
+      });
+      break;
+    }
     case 'T555': {
       const on = !!r?.q;
       ctx.fillStyle = '#161C22'; ctx.fillRect(-3, -3, 6, 6); ctx.strokeStyle = on ? '#3DDC84' : C.part; ctx.strokeRect(-3, -3, 6, 6); ctx.strokeStyle = C.part;
@@ -1279,6 +1356,6 @@ function arrowHead(ctx, x1, y1, x2, y2, f) {
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

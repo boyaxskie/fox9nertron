@@ -35,6 +35,21 @@ const ARTICLES = [
     tryit: ['Flip POWER on and watch the scope: blue = capacitor (TRIG/THR) falling, yellow = output stepping up after ≈ 1.1 s.', 'Change C1 to 47 µF: about 5 s.', 'Change the 555 to TLC555: the output HIGH goes to almost 12 V.', 'Flip POWER off and on again quickly: the delay is shorter because C1 did not empty. That is why the reset diode helps.'],
   },
   {
+    id: 'esp32io', title: 'ESP32 / Arduino pins: what is safe', example: 'esp32io', tag: 'Microcontroller',
+    intro: 'The board part has no program: you set each pin the way your code would (OUTPUT HIGH, INPUT_PULLUP, analogRead…) and the simulator shows what the circuit around it does. Tap a pin on the drawing to set it.',
+    parts: [['ESP32', 'DevKit 30-pin, USB powered, 3.3 V logic'], ['R1 + LED1', 'D23 OUTPUT HIGH → 330 Ω → red LED'], ['BTN', 'D15 INPUT_PULLUP, button to GND'], ['RV1', '10 kΩ pot on 3.3 V, wiper → D34 analogRead']],
+    steps: [
+      ['1. An output pin is a small battery with a resistor', 'OUTPUT HIGH ≈ 3.3 V (ESP32) or 5 V (UNO) through about 25–30 Ω inside. The more current you take, the more the voltage sags.<br>LED: (3.3 − 1.8) ÷ (330 + 30) ≈ <b>4 mA</b>. Keep each pin ≤ <b>20 mA</b> (40 mA is the absolute max). Bigger loads → transistor or MOSFET.'],
+      ['2. Never more than the supply on a pin', '5 V on an ESP32 pin kills it. From a 5 V sensor use a divider (10 kΩ / 20 kΩ → 3.33 V) or a level shifter. The panel warns in red.'],
+      ['3. Inputs need a defined level', 'An input with nothing on it "floats" and reads random HIGH/LOW. INPUT_PULLUP adds ≈ 45 kΩ (ESP32) / 35 kΩ (UNO) to the supply inside: the pin reads HIGH, and a button to GND pulls it LOW (pressed = LOW).'],
+      ['4. HIGH and LOW thresholds', 'ESP32: LOW below ≈ 0.8 V, HIGH above ≈ 2.5 V. UNO: LOW below 1.5 V, HIGH above 3 V. In between the reading is unreliable.'],
+      ['5. analogRead', 'ESP32: 12 bits, 0–4095 for 0–3.3 V (GPIO32–39 = ADC1; ADC2 pins don\'t work while WiFi is on). UNO: 10 bits, 0–1023 for 0–5 V on A0–A5.<br>Pot in the middle: 1.65 V → 2047.'],
+      ['6. ESP32 pins to be careful with', '<b>GPIO34, 35, 36 (VP), 39 (VN)</b>: input only, no pull-ups. <b>GPIO0, 2, 5, 12, 15</b>: boot strapping, the wrong level at power-up stops booting or flashing (GPIO12 HIGH is the classic one). <b>TX0 / RX0</b>: USB serial.'],
+      ['7. Power pins', 'ESP32 3V3 comes from its regulator (keep extra loads to a few hundred mA), VIN ≈ 4.7 V from USB. UNO 3V3 only 50 mA, 5V about 500 mA from USB. Motors, solenoids and relay banks need their own supply (common GND).'],
+    ],
+    tryit: ['Hold BTN: D15 reads LOW.', 'Turn RV1: D34 analogRead follows (0–4095).', 'Change R1 to 47 Ω: the D23 panel warns about the current.', 'Set D2 to PWM 50 %: the scope appears (time simulation).', 'Open 🟫 PCB: the DevKit footprint is ready for a carrier board.'],
+  },
+  {
     id: 'led', title: 'LED resistor', example: 'led', tag: 'Basics',
     intro: 'An LED needs a fixed voltage (its forward voltage) and the resistor sets the current.',
     steps: [

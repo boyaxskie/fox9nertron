@@ -116,6 +116,48 @@ export function usedCustom(c) {
   return lib;
 }
 
+// ---------- microcontroller boards (pins set by hand: no program runs) ----------
+// k: gpio | gnd | pwr (v = volts, r = source resistance) | en (reset, pulled up) | nc
+const ESP_L = [['EN', 'en'], ['VP', 36], ['VN', 39], ['D34', 34], ['D35', 35], ['D32', 32], ['D33', 33], ['D25', 25], ['D26', 26], ['D27', 27], ['D14', 14], ['D12', 12], ['D13', 13], ['GND', 'gnd'], ['VIN', 'vin']];
+const ESP_R = [['D23', 23], ['D22', 22], ['TX0', 1], ['RX0', 3], ['D21', 21], ['D19', 19], ['D18', 18], ['D5', 5], ['TX2', 17], ['RX2', 16], ['D4', 4], ['D2', 2], ['D15', 15], ['GND2', 'gnd'], ['3V3', '3v3']];
+const espPin = ([n, g]) => {
+  if (g === 'gnd') return { n, k: 'gnd' };
+  if (g === 'en') return { n, k: 'en' };
+  if (g === 'vin') return { n, k: 'pwr', v: 4.7, r: 0.5, imax: 0.5, note: 'USB 5 V through a diode' };
+  if (g === '3v3') return { n, k: 'pwr', v: 3.3, r: 0.3, imax: 0.5, note: 'AMS1117 regulator (ESP32 itself uses ≈ 80–250 mA)' };
+  const inOnly = g >= 34;
+  return { n, k: 'gpio', g, label: `GPIO${g}`, inOnly, pwm: !inOnly, adc: g >= 32 ? 'ADC1' : [0, 2, 4, 12, 13, 14, 15, 25, 26, 27].includes(g) ? 'ADC2' : null,
+    strap: [0, 2, 5, 12, 15].includes(g), serial: g === 1 || g === 3, pull: !inOnly };
+};
+const UNO_L = ['5V', '3V3', 'VIN', 'GND', 'GND2', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
+const unoPin = (n) => {
+  if (n === '5V') return { n, k: 'pwr', v: 5, r: 0.3, imax: 0.5, note: 'from USB (≈ 500 mA max)' };
+  if (n === '3V3') return { n, k: 'pwr', v: 3.3, r: 1, imax: 0.05, note: '3.3 V regulator, 50 mA max' };
+  if (n === 'VIN') return { n, k: 'nc', note: 'input 7–12 V (not used on USB power)' };
+  if (n.startsWith('GND')) return { n, k: 'gnd' };
+  const d = n.startsWith('D') ? +n.slice(1) : null;
+  return { n, k: 'gpio', label: n, pwm: d != null && [3, 5, 6, 9, 10, 11].includes(d), adc: n.startsWith('A') ? 'ADC' : null, serial: d === 0 || d === 1, pull: true, i2c: n === 'A4' ? 'SDA' : n === 'A5' ? 'SCL' : null };
+};
+export const BOARDS = {
+  ESP32: { name: 'ESP32 DevKit', vcc: 3.3, rout: 30, pullR: 45000, adcBits: 12, adcRef: 3.3, vih: 2.48, vil: 0.83, imax: 40, irec: 20,
+    pins: [...ESP_L.map(espPin), ...ESP_R.map(espPin)] },
+  UNO: { name: 'Arduino UNO', vcc: 5, rout: 25, pullR: 35000, adcBits: 10, adcRef: 5, vih: 3.0, vil: 1.5, imax: 40, irec: 20,
+    pins: [...UNO_L.map(unoPin), ...Array.from({ length: 14 }, (_, i) => unoPin('D' + i))] },
+};
+const boardPins = (b, nl) => b.pins.map((q, i) => (i < nl ? [-4, i - Math.floor((nl - 1) / 2)] : [4, i - nl - (b.pins.length - nl === 14 ? 7 : 7)]));
+export const isBoard = (t) => t === 'ESP32' || t === 'UNO';
+export const PIN_MODES = { in: 'INPUT (high impedance)', pu: 'INPUT_PULLUP', pd: 'INPUT_PULLDOWN', adc: 'analogRead (ADC)', high: 'OUTPUT HIGH', low: 'OUTPUT LOW', pwm: 'PWM (analogWrite / ledc)' };
+export function pinModesFor(board, q) {
+  if (q.k !== 'gpio') return [];
+  const m = ['in', 'pu'];
+  if (board === 'ESP32' && !q.inOnly) m.push('pd');
+  if (q.inOnly) return board === 'ESP32' ? ['in', ...(q.adc ? ['adc'] : [])] : m;
+  if (q.adc) m.push('adc');
+  m.push('high', 'low');
+  if (q.pwm || board === 'ESP32') m.push('pwm');
+  return m;
+}
+
 // pins: local coords; first pin is "a" (+ / anode / start), second "b"
 export const TYPES = {
   R: { label: 'Resistor', prefix: 'R', pins: [[-2, 0], [2, 0]], box: [-2, -0.7, 2, 0.7], props: { r: 1000, rating: 0.25 } },
@@ -141,15 +183,17 @@ export const TYPES = {
   PMOS: { label: 'P-channel MOSFET', prefix: 'Q', pins: [[-2, 0], [1, 2], [1, -2]], box: [-2, -2, 1.8, 2], props: { model: 'AO3401' } },
   OPAMP: { label: 'Op-amp', prefix: 'U', pins: [[-3, 1], [-3, -1], [3, 0], [0, -2], [0, 2]], box: [-3, -2, 3, 2], props: { model: 'LM358' } },
   REG: { label: 'Voltage regulator', prefix: 'U', pins: [[-3, 0], [3, 0], [0, 2]], box: [-3, -1.2, 3, 2], props: { model: '7805' } },
+  ESP32: { label: 'ESP32 DevKit (30 pin)', prefix: 'MCU', pins: boardPins(BOARDS.ESP32, 15), box: [-4, -8.6, 4, 8.6], props: { pins: {} } },
+  UNO: { label: 'Arduino UNO', prefix: 'MCU', pins: boardPins(BOARDS.UNO, 11), box: [-4, -8.6, 4, 8.6], props: { pins: {} } },
   T555: { label: '555 timer', prefix: 'U', pins: [[0, 4], [-4, 2], [4, 0], [1, -4], [2, 4], [-4, 0], [-4, -2], [-1, -4]], box: [-4, -4, 4, 4], props: { model: 'NE555' } },
   RELAY: { label: 'Relay (coil + changeover)', prefix: 'K', pins: [[-3, -2], [-3, 2], [0, 2], [0, -2], [2, -2]], box: [-3.7, -2.4, 2.4, 2.4], props: { vcoil: 5, rcoil: 70, l: 0.02 } },
   GND: { label: 'Ground', prefix: 'GND', pins: [[0, 0]], box: [-0.8, 0, 0.8, 1.6], props: {} },
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
 export const DYNAMIC = new Set(['C', 'L', 'SIG', 'SCOPE', 'RELAY']);
-export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type));
+export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm')));
 
 // signal generator value at time t
 export function sigValue(q, t) {
@@ -247,8 +291,9 @@ export function solveCircuit(c, sim = null, opts = {}) {
   // auto ground if none: the − side of the first battery
   let autoGround = null;
   if (!grounds.length) {
-    const b = c.parts.find(p => p.type === 'BAT');
+    const b = c.parts.find(p => p.type === 'BAT'), mc = !b && c.parts.find(p => isBoard(p.type));
     if (b) { const [x, y] = pinsOf(b)[1]; gkeys.add(key(x, y)); autoGround = b.name; }
+    else if (mc) { const gi = BOARDS[mc.type].pins.findIndex(q => q.k === 'gnd'); const [x, y] = pinsOf(mc)[gi]; gkeys.add(key(x, y)); autoGround = mc.name + ' GND'; }
   }
   pieces.forEach((w, k) => R(node(w.x1, w.y1), node(w.x2, w.y2), R_WIRE, null, 'wire' + k));
   const diodes = [], trans = [], fets = [], zeners = [], amps = [], regs = [], relays = [], timers = [];
@@ -329,6 +374,34 @@ export function solveCircuit(c, sim = null, opts = {}) {
         if (m.iq) I(IN, REF, m.iq, p, 'iq');
         if (m.adj) I(IN, REF, m.iadj, p, 'iadj'); else R(OUT, REF, 100e3, p, 'int');
         regs.push({ p, m, i: IN, o: OUT, r: REF, state: prev?.rs ?? 'reg' });
+        break;
+      }
+      case 'ESP32': case 'UNO': {
+        // powered from USB. Every pin is what you set: OUTPUT = source with ≈ 25–30 Ω, inputs = high impedance (+ optional pull resistor)
+        const B = BOARDS[p.type], cfg = pr.pins ?? {}, gi = B.pins.findIndex(q => q.k === 'gnd'), G = pins[gi], vccN = inner();
+        V(vccN, G, B.vcc, p, 'vcc');
+        B.pins.forEach((q, i) => {
+          const nd = pins[i];
+          if (q.k === 'gnd') { if (i !== gi) R(nd, G, R_WIRE, p, 'gndj'); return; }
+          if (q.k === 'nc') { R(G, nd, 1e9, p, 'pin:' + q.n); return; }
+          if (q.k === 'en') { R(vccN, nd, 10000, p, 'pin:' + q.n); return; }
+          if (q.k === 'pwr') {
+            if (q.v === B.vcc) R(vccN, nd, q.r, p, 'pin:' + q.n);
+            else { const n2 = inner(); V(n2, G, q.v, p, 'src:' + q.n); R(n2, nd, q.r, p, 'pin:' + q.n); }
+            return;
+          }
+          const m = cfg[q.n]?.mode ?? 'in';
+          if (m === 'high') R(vccN, nd, B.rout, p, 'pin:' + q.n);
+          else if (m === 'low') R(G, nd, B.rout, p, 'pin:' + q.n);
+          else if (m === 'pwm') {
+            const c0 = cfg[q.n], n2 = inner();
+            const val = sim ? sigValue({ wave: 'pwm', f: c0.f ?? 1000, amp: B.vcc, off: 0, duty: c0.duty ?? 50 }, sim.t) : B.vcc * (c0.duty ?? 50) / 100;
+            V(n2, G, val, p, 'src:' + q.n); R(n2, nd, B.rout, p, 'pin:' + q.n);
+          }
+          else if (m === 'pu') R(vccN, nd, B.pullR, p, 'pin:' + q.n);
+          else if (m === 'pd') R(G, nd, B.pullR, p, 'pin:' + q.n);
+          else R(G, nd, 1e9, p, 'pin:' + q.n);
+        });
         break;
       }
       case 'T555': {
@@ -571,6 +644,19 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, vin: vin - gr, vout: vout - gr, vadj: vout - vref, vio: vin - vout, iin: j + iq, iout: j, state: g.state, v: vout - gr, i: j, p: (vin - vout) * j + (vin - vref) * iq, dots: [] });
       continue;
     }
+    if (isBoard(p.type)) {
+      const B = BOARDS[p.type], gi = B.pins.findIndex(q => q.k === 'gnd'), vg = res.v[pins[gi]], out = {};
+      let pw = 0;
+      B.pins.forEach((q, i) => {
+        if (q.k === 'gnd') return;
+        const e = mine.find(x => x.role === 'pin:' + q.n), v = res.v[pins[i]] - vg, cur = e ? e.i : 0;
+        out[q.n] = { v, i: cur, mode: q.k === 'gpio' ? (p.props.pins?.[q.n]?.mode ?? 'in') : q.k };
+        if (q.k === 'pwr' || (q.k === 'gpio' && /high|pwm/.test(out[q.n].mode))) pw += Math.max(0, cur) * Math.max(0, v);
+      });
+      const vcc = mine.find(x => x.role === 'vcc');
+      parts.set(p.id, { va, vb, pins: out, v: 0, i: 0, p: pw, isrc: vcc ? -vcc.i : 0, dots: [] });
+      continue;
+    }
     if (p.type === 'T555') {
       const t = timers.find(x => x.p === p), ro = mine.find(e => e.role === 'rout'), dis = mine.find(e => e.role === 'dis'), o = mine.find(e => e.role === 'o');
       const vg = res.v[t.G], vcc = res.v[t.VCC] - vg;
@@ -593,7 +679,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
   const wires = pieces.map((w, k) => ({ ...w, i: res.els.find(e => e.role === 'wire' + k).i, va: res.v[node(w.x1, w.y1)], vb: res.v[node(w.x2, w.y2)] }));
   const vAt = (x, y) => { const k = key(x, y); if (gkeys.has(k)) return 0; const n = nodeOf.get(k); return n == null ? null : res.v[n]; };
   const sources = c.parts.filter(p => p.type === 'BAT' || p.type === 'ISRC' || p.type === 'SIG');
-  const delivered = sources.reduce((s, p) => s - parts.get(p.id).p, 0);
+  const delivered = sources.reduce((s, p) => s - parts.get(p.id).p, 0) + c.parts.filter(p => isBoard(p.type)).reduce((s, p) => s + parts.get(p.id).p, 0);
   // state to carry into the next time step
   const next = new Map();
   for (const p of c.parts) {
@@ -879,6 +965,20 @@ export function example(name) {
     W(0, 12, 0, 18); W(0, 18, 36, 18); W(36, 16, 36, 18);
     W(21, 10, 21, 8); W(21, 8, 33, 8); W(33, 8, 33, 13);
     W(10, 10, 10, 0); W(10, 0, 34, 0); W(34, 0, 34, 15); W(34, 15, 33, 15);
+  } else if (name === 'esp32io') {
+    // ESP32 pins set by hand: D23 OUTPUT HIGH → 330 Ω → LED · D15 INPUT_PULLUP + button to GND · D34 analogRead of a 10 kΩ pot on 3.3 V
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';
+    m.props.pins = { D23: { mode: 'high' }, D15: { mode: 'pu' }, D34: { mode: 'adc' } };
+    addPart(c, 'R', 7, -7).props.r = 330;
+    const l = addPart(c, 'LED', 12, -7); l.props.color = 'red';
+    const pb = addPart(c, 'PB', 10, 5); pb.name = 'BTN';
+    const pot = addPart(c, 'POT', -10, 0, 1); pot.props.pos = 50;
+    addPart(c, 'GND', 16, 10);
+    W(4, -7, 5, -7); W(9, -7, 10, -7); W(14, -7, 16, -7); W(16, -7, 16, 10);
+    W(4, 5, 8, 5); W(12, 5, 12, 10); W(4, 6, 6, 6); W(6, 6, 6, 10); W(6, 10, 16, 10);
+    W(-8, 0, -6, 0); W(-6, 0, -6, -4); W(-6, -4, -4, -4);
+    W(-10, 2, -10, 6); W(-10, 6, -4, 6);
+    W(-10, -2, -12, -2); W(-12, -2, -12, 9); W(-12, 9, 4, 9); W(4, 9, 4, 7);
   } else if (name === 'bridge') {
     const b = addPart(c, 'BAT', 0, 8, 1); b.props.v = 10;
     addPart(c, 'R', 6, 4, 1).props.r = 1000;   // R1 top-left
