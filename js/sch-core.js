@@ -159,7 +159,7 @@ export function pinModesFor(board, q) {
   if (q.inOnly) return board === 'ESP32' ? ['in', ...(q.adc ? ['adc'] : [])] : m;
   if (q.adc) m.push('adc');
   m.push('high', 'low');
-  if (q.pwm || board === 'ESP32') m.push('pwm');
+  m.push('pwm');      // UNO: real PWM only on ~ pins; other pins = pulses made by code / Servo library
   return m;
 }
 

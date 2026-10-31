@@ -846,9 +846,16 @@ export function schematicTab(root) {
         f.append(choice('Pin (or tap a pin on the drawing)', cur, B.pins.filter(x => x.k !== 'gnd').map(x => [x.n, label(x)]), v => { boardPinSel.set(p.id, v); }));
         if (pin.k === 'gpio') {
           const mode = q.pins[cur]?.mode ?? 'in';
-          f.append(choice('Pin mode (what your code would do)', mode, S.pinModesFor(p.type, pin).map(m => [m, S.PIN_MODES[m]]), v => { if (v === 'in') delete q.pins[cur]; else q.pins[cur] = { ...(q.pins[cur] ?? {}), mode: v }; }));
+          const hwPwm = p.type === 'ESP32' || pin.pwm;
+          const mLabel = (m) => m === 'pwm' && !hwPwm ? 'Pulses (Servo library / timer code, NOT analogWrite)' : m === 'pwm' && p.type === 'UNO' ? 'PWM ~ (analogWrite, 490 Hz; D5 / D6 980 Hz)' : S.PIN_MODES[m];
+          f.append(choice('Pin mode (what your code would do)', mode, S.pinModesFor(p.type, pin).map(m => [m, mLabel(m)]), v => {
+            if (v === 'in') { delete q.pins[cur]; return; }
+            const was = q.pins[cur]?.mode;
+            q.pins[cur] = { ...(q.pins[cur] ?? {}), mode: v };
+            if (v === 'pwm' && was !== 'pwm' && q.pins[cur].f == null) q.pins[cur].f = p.type === 'UNO' ? (hwPwm ? (/^D[56]$/.test(cur) ? 980 : 490) : 50) : 1000;
+          }));
           if (mode === 'pwm') f.append(field('PWM frequency', plain(q.pins[cur].f ?? 1000), 'Hz', v => { q.pins[cur].f = Math.max(v, 0.1); }), field('Duty', plain(q.pins[cur].duty ?? 50), '%', v => { q.pins[cur].duty = Math.min(100, v); }));
-          const caps = [pin.label, pin.inOnly ? 'input only' : 'in / out', pin.pwm || p.type === 'ESP32' ? (pin.inOnly ? null : 'PWM') : null, pin.adc ? `${pin.adc} (analog in)` : null, pin.i2c ? `I²C ${pin.i2c}` : null].filter(Boolean).join(' · ');
+          const caps = [pin.label, pin.inOnly ? 'input only' : 'in / out', pin.pwm || p.type === 'ESP32' ? (pin.inOnly ? null : (p.type === 'UNO' ? 'PWM ~' : 'PWM')) : (p.type === 'UNO' ? 'no analogWrite (pulses by code OK)' : null), pin.adc ? `${pin.adc} (analog in)` : null, pin.i2c ? `I²C ${pin.i2c}` : null].filter(Boolean).join(' · ');
           f.append(note(caps + (pin.strap ? ' · ⚠ boot strapping pin' : '') + (pin.serial ? ' · ⚠ USB serial pin' : '')));
         } else f.append(note(pin.k === 'pwr' ? `${pin.n}: ${pin.v} V out, ${pin.note}.` : pin.k === 'en' ? 'EN: reset. Pulled up to 3.3 V inside (10 kΩ). Pull it to GND = reset.' : `${pin.n}: ${pin.note ?? 'not connected inside'}.`));
         f.append(note(`No program runs: each pin is set by hand, as if your code had already done it. The board is powered from USB (${B.vcc} V logic).`));
