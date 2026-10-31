@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '1.8.8';
+export const VERSION = '1.8.9';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -52,7 +52,24 @@ function help() {
 <p><b>Colours</b>: green = safe, yellow = check it, red = it will fail or it's dangerous.</p>
 <p><b>Install</b>: iPhone Safari → Share → Add to Home Screen. Android Chrome → menu → Install app. Works offline after that. Your inputs are remembered on this device.</p>
 <p><b>Safety</b>: anything on 220 V mains can kill. Calculators give ideal numbers; real parts have tolerances (resistors 1–5 %, electrolytic capacitors −20 % … +20 %, AL values ±25 %). Leave margin and measure.</p>
-<p class="muted">© 2026 Yaxboom (Fox9ner). All rights reserved. No copying, modifying or redistributing without written permission.</p>` }),
+<p class="fine">© 2026 Yaxboom (Fox9ner). All rights reserved. No copying, modifying or redistributing without written permission.</p>` }),
+    el('form', { method: 'dialog', class: 'dlg-buttons' }, el('button', { class: 'btn primary', text: 'Close' })));
+  document.body.append(d);
+  d.addEventListener('close', () => d.remove());
+  d.showModal();
+}
+
+const COPY = '© 2026 Yaxboom (Fox9ner). All rights reserved.';
+function about() {
+  const d = el('dialog', { class: 'dlg' },
+    el('div', { class: 'help-head' }, el('img', { src: 'icons/icon-192.png', alt: '' }),
+      el('div', {}, el('div', { class: 'h1', text: 'Fox9nertron' }), el('div', { class: 'h2', text: `Version ${VERSION}` }), el('div', { class: 'h3', text: 'Measure it. Solve it. Build it.' }))),
+    el('div', { class: 'help-text', html: `
+<p>Electronics circuit solver, schematic simulator and single-sided PCB maker for the CNC 3018.</p>
+<p><b>Author</b>: Yaxboom (Fox9ner), Cagayan de Oro, Philippines</p>
+<p><b>Copyright</b>: ${COPY}</p>
+<p><b>License</b>: free to use at <code>boyaxskie.github.io/fox9nertron</code> for personal use. Copying, modifying, redistributing, hosting elsewhere or selling this app or its source code, in whole or in part, is not allowed without written permission from the author. The source code being visible does not grant any license.</p>
+<p class="fine">Provided "as is", without warranty. Results are approximate; mains voltage can kill.</p>` }),
     el('form', { method: 'dialog', class: 'dlg-buttons' }, el('button', { class: 'btn primary', text: 'Close' })));
   document.body.append(d);
   d.addEventListener('close', () => d.remove());
@@ -62,10 +79,11 @@ function help() {
 function start() {
   const header = el('header', { class: 'top' },
     el('div', { class: 'brand' }, el('img', { src: 'icons/icon-192.png', alt: '', class: 'logo' }), el('span', { class: 'name', text: 'Fox9nertron' }), el('span', { class: 'ver', text: 'v' + VERSION })),
-    el('button', { class: 'btn ghost help', type: 'button', text: '? Help', onclick: help }));
+    el('div', { class: 'top-btns' }, el('button', { class: 'btn ghost help info', type: 'button', text: 'ⓘ', title: 'About', 'aria-label': 'About', onclick: about }), el('button', { class: 'btn ghost help', type: 'button', text: '? Help', onclick: help })));
   for (const [id, label] of TABS) nav.append(el('a', { href: '#' + id, class: 'tab', 'data-id': id, text: label }));
   const bar = el('div', { class: 'appbar' }, header, nav);
-  document.getElementById('app').append(bar, main);
+  const foot = el('footer', { class: 'foot' }, el('span', { text: COPY + ' ' }), el('a', { href: '#', text: 'About', onclick: (e) => { e.preventDefault(); about(); } }));
+  document.getElementById('app').append(bar, main, foot);
   // second-layer toolbars stick right under the app bar, whatever its real height
   const setH = () => document.documentElement.style.setProperty('--appbar-h', bar.offsetHeight + 'px');
   setH(); if ('ResizeObserver' in globalThis) new ResizeObserver(setH).observe(bar); else addEventListener('resize', setH);
