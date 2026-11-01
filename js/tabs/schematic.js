@@ -5,7 +5,7 @@ import * as S from '../sch-core.js';
 import { wattName } from './basic.js';
 import { pcbView } from './pcb.js';
 import { createRuntime, EXAMPLES as SKETCHES } from '../sketch.js';
-import { netlist } from '../pcb-core.js';
+import { netlist, pinLabel } from '../pcb-core.js';
 // what each LCD part shows right now: id → { lines, bl, on, powered, note }
 const LCDV = new Map();
 // keypad: taps waiting for the sketch, and the key that flashes on the drawing
@@ -959,6 +959,11 @@ export function schematicTab(root) {
       resetSim(); autoSpeed(); commit(); say(sketches.get(p.id)?.err ? 'The code has an error: see below the editor.' : '▶ Code running in real time. Serial output shows below the editor.');
     } });
     const out = el('pre', { class: 'serial' });
+    const saveB = el('button', { class: 'btn', type: 'button', text: '⬇ Save .ino + wiring', onclick: () => {
+      const name = (p.name || 'sketch').replace(/[^\w-]+/g, '_');
+      shareFile(`${name}.ino`, wiringHeader(p) + (q.code ?? ta.value), 'text/plain');
+    } });
+    const copyB = el('button', { class: 'btn', type: 'button', text: '📋 Copy', onclick: async () => { try { await navigator.clipboard.writeText(wiringHeader(p) + (q.code ?? ta.value)); say('Code + wiring copied: paste it in the Arduino IDE.'); } catch { ta.select(); say('Select all and copy by hand (clipboard blocked).'); } } });
     syncSerial = () => {
       const rt = sketches.get(p.id);
       if (!q.run || !rt) { out.textContent = 'Serial monitor: run the code to see Serial.print output here.'; out.classList.remove('bad'); return; }
@@ -968,8 +973,35 @@ export function schematicTab(root) {
       if (out.textContent !== txt) { out.textContent = txt; out.scrollTop = out.scrollHeight; }
     };
     syncSerial();
-    return el('div', { class: 'code-box' }, el('div', { class: 'row wrap' }, el('b', { text: '💻 Code (Arduino sketch)' }), runB, ex), ta, out,
+    return el('div', { class: 'code-box' }, el('div', { class: 'row wrap' }, el('b', { text: '💻 Code (Arduino sketch)' }), runB, ex), ta, el('div', { class: 'row wrap' }, saveB, copyB), out,
       note('Runs setup() once, then loop() forever, in circuit time: delay(500) really waits 0.5 s. Supported: pinMode, digitalWrite / Read, analogRead / Write, ' + (esp ? 'ledcAttach / ledcWrite, ' : '') + 'delay, millis, Serial.print / println, Servo, map, constrain, if / for / while, your own functions. Not: interrupts, WiFi, libraries other than Servo.'));
+  }
+
+  // wiring list for the top of a saved sketch: every board pin and what it connects to on the drawing
+  function wiringHeader(b) {
+    const nl = nets(); if (!nl) return '';
+    const B = S.BOARDS[b.type], bn = nl.pinNet.get(b.id) ?? [], lines = [], gndLike = new Map();
+    const others = (net) => {
+      const out = [];
+      for (const p of c.parts) {
+        if (p === b || p.type === 'GND' || p.type === 'SCOPE' || p.type === 'VM' || p.type === 'AM') continue;
+        (nl.pinNet.get(p.id) ?? []).forEach((n, i) => { if (n === net) out.push(`${p.name} ${S.TYPES[p.type].pins.length > 1 ? pinLabel(p, i) : ''}`.trim()); });
+      }
+      return out;
+    };
+    B.pins.forEach((q, i) => {
+      const n = bn[i]; if (n == null || n < 0) return;
+      const o = others(n); if (!o.length) return;
+      const label = q.k === 'gpio' ? (b.type === 'ESP32' ? `GPIO${q.g}` : q.n) : q.n;
+      if (q.k === 'gnd') { const prev = gndLike.get(n) ?? new Set(); o.forEach(x => prev.add(x)); gndLike.set(n, prev); return; }
+      lines.push(`//   ${label.padEnd(7)} -> ${o.join(', ')}`);
+    });
+    for (const set of gndLike.values()) lines.push(`//   ${'GND'.padEnd(7)} -> ${[...set].join(', ')}`);
+    const extra = c.parts.filter(p => p !== b && !['GND', 'SCOPE', 'VM', 'AM'].includes(p.type)).map(p => { const lab = S.TYPES[p.type].label.replace(/\s*\(.*?\)/g, ''), v = valueText(p); return `${p.name} = ${lab}${v && !lab.includes(v) ? ' ' + v : ''}`; });
+    return `// ===== ${b.type === 'ESP32' ? 'ESP32 DevKit' : 'Arduino UNO'} wiring, made by Fox9nertron from your schematic =====\n` +
+      (lines.length ? lines.join('\n') : '//   (nothing wired to the board yet)') + '\n' +
+      (extra.length ? '// Parts: ' + extra.join(' · ').replace(/(.{1,110})(\s·\s|$)/g, '$1\n//        ').replace(/\n\/\/\s+$/, '') + '\n' : '') +
+      '// =====================================================================\n\n';
   }
 
   // ---------- my parts (custom parts typed in from a datasheet) ----------
