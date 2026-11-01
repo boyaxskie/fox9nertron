@@ -34,7 +34,7 @@ export function schematicTab(root) {
   const hist = [JSON.stringify(c)]; let hi = 0;
   let showVolts = store.get('sch.volts', '1') === '1';
   let showDots = store.get('sch.dots', '1') === '1';
-  let running = store.get('sch.run', '1') === '1';
+  let running = false; // always opens stopped: tap ▶ Run to simulate
   const STOPPED = 'Simulation stopped: no voltages or currents. Tap ▶ Run to start it again.';
   // time simulation (capacitors, coils, signal generator, scope)
   const TDIVS = [1e-6, 2e-6, 5e-6, 1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1, 0.2, 0.5, 1, 2, 5, 10, 30, 60];
@@ -119,7 +119,7 @@ export function schematicTab(root) {
     const q = KEYQ.get(kp.id); return q?.length ? q.shift() : null;
   }
   function runSketches() { for (const rt of sketches.values()) rt.step(sim.t); }
-  function resetSim() { restartSketches(); sim.t = 0; sim.buf = []; sim.next = null; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
+  function resetSim() { restartSketches(); sim.prev = null; sim.t = 0; sim.buf = []; sim.next = null; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
   // run the circuit for `span` seconds of circuit time. The step is fine enough for the fastest signal (≥ 40 per period),
   // independent of the scope. The scope only takes samples every time/div × 10 ÷ 400.
   const MAX_STEPS = 600;
@@ -143,10 +143,14 @@ export function schematicTab(root) {
       res = r;
       if (!r.ok) return lag;
       sim.state = r.next;
-      if (sim.t + 1e-12 >= sim.next) {
-        const sc = scope && r.parts.get(scope.id);
-        while (sim.t + 1e-12 >= sim.next) { sim.buf.push([sim.next, sc ? sc.ch1 : NaN, sc ? sc.ch2 : NaN]); sim.next += sd; }
+      // scope samples fall between two solver steps when the step is longer than a sample: draw the straight line between them
+      // (no stair-steps). The circuit result itself is unchanged.
+      const sc = scope && r.parts.get(scope.id), y1 = sc ? sc.ch1 : NaN, y2 = sc ? sc.ch2 : NaN, pv = sim.prev && sim.prev[0] < sim.t ? sim.prev : null;
+      while (sim.t + 1e-12 >= sim.next) {
+        const f = pv ? Math.max(0, Math.min(1, (sim.next - pv[0]) / (sim.t - pv[0]))) : 1;
+        sim.buf.push([sim.next, pv ? pv[1] + (y1 - pv[1]) * f : y1, pv ? pv[2] + (y2 - pv[2]) * f : y2]); sim.next += sd;
       }
+      sim.prev = [sim.t, y1, y2];
     }
     if (sim.buf.length > SAMPLES * 3) sim.buf.splice(0, sim.buf.length - SAMPLES * 3);
     return lag;
@@ -1677,7 +1681,7 @@ export function schematicTab(root) {
     return d;
   }
   globalThis.__schDbg = { c: () => c, res: () => res, sim, sketches };     // for automated tests
-  function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; probes = []; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); autoSpeed(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
+  function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; probes = []; if (S.isDynamic(c)) { autoTimeQuiet(); autoSpeed(); } if (!running) msg += ' Tap ▶ Run to simulate.'; hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
     const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
