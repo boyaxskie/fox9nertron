@@ -198,6 +198,8 @@ export const TYPES = {
   RELAY: { label: 'Relay (coil + changeover)', prefix: 'K', pins: [[-3, -2], [-3, 2], [0, 2], [0, -2], [2, -2]], box: [-3.7, -2.4, 2.4, 2.4], props: { vcoil: 5, rcoil: 70, l: 0.02 } },
   XFMR: { label: 'Transformer (center tap)', prefix: 'TR', pins: [[-3, -2], [-3, 0], [-3, 2], [3, -2], [3, 2]], box: [-3, -2.6, 3, 2.6], props: { n1: 10, n2: 10, ns: 190, lm: 0.3, r1: 0.02, r2: 0.02, rs: 2 } },
   // LCD 16×2 with I2C backpack. Schematic pin order (top→bottom) SCL, SDA, VCC, GND; index order GND, VCC, SDA, SCL like the real header
+  // OLED 0.96" SSD1306 128×64 I2C. Schematic pin order (top→bottom) SCL, SDA, VCC, GND; index order GND, VCC, SCL, SDA like the real header
+  OLED: { label: 'OLED 0.96" 128×64 (SSD1306 I2C)', prefix: 'OLED', pins: [[-5, 2], [-5, 1], [-5, -1], [-5, 0]], box: [-5, -2.3, 5, 3.3], props: { addr: 0x3C, color: 'white' } },
   LCD: { label: 'LCD 16×2 (I2C backpack)', prefix: 'LCD', pins: [[-7, 2], [-7, 1], [-7, 0], [-7, -1]], box: [-7, -2.3, 7, 2.8], props: { addr: 0x27 } },
   SEG7: { label: '7-segment display', prefix: 'DS', pins: [[-3, -4], [-3, -3], [-3, -2], [-3, -1], [-3, 0], [-3, 1], [-3, 2], [-3, 3], [-3, 4]], box: [-3, -4.7, 2.6, 4.7], props: { common: 'cathode', color: 'red' } },
   // sensors: a slider in the panel sets what they "feel"; sketches read them (DHT library, pulseIn) or the voltage does the job (LDR, PIR)
@@ -212,7 +214,7 @@ export const TYPES = {
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'LCD', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'LCD', 'OLED', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
 export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
@@ -426,6 +428,12 @@ export function solveCircuit(c, sim = null, opts = {}) {
         // VCC, OUT, GND: OUT is 3.3 V while it sees motion (even on a 5 V supply), 0 V otherwise
         R(pins[0], pins[2], 5 / 0.00006, p, 'main'); const n2 = inner();
         V(n2, pins[2], pr.motion ? 3.3 : 0, p, 'src'); R(n2, pins[1], 1000, p, 'out');
+        break;
+      }
+      case 'OLED': {
+        // pins GND, VCC, SCL, SDA. ≈ 20 mA (3.3 V regulator on the module), 10 kΩ I2C pull-ups to VCC
+        const [Gp, Vp, SCL, SDA] = pins;
+        R(Vp, Gp, 220, p, 'main'); R(SDA, Vp, 10000, p, 'sda'); R(SCL, Vp, 10000, p, 'scl');
         break;
       }
       case 'LCD': {
@@ -750,6 +758,11 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vout: res.v[pins[1 + (p.type === 'HCSR04' ? 1 : 0)]] - res.v[pins[gi]], dots: [] });
       continue;
     }
+    if (p.type === 'OLED') {
+      const m = mine.find(e => e.role === 'main'), v = res.v[pins[1]] - res.v[pins[0]];
+      parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vsda: res.v[pins[3]] - res.v[pins[0]], vscl: res.v[pins[2]] - res.v[pins[0]], dots: [[1, 0, m.i]] });
+      continue;
+    }
     if (p.type === 'LCD') {
       const m = mine.find(e => e.role === 'main'), v = res.v[pins[1]] - res.v[pins[0]];
       parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vsda: res.v[pins[2]] - res.v[pins[0]], vscl: res.v[pins[3]] - res.v[pins[0]], dots: [[1, 0, m.i]] });
@@ -957,6 +970,7 @@ function gauss(A0, z0) {
 
 // ---------- examples ----------
 const SKETCH_EX = {
+  oled: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\n#define SCREEN_WIDTH 128\n#define SCREEN_HEIGHT 64\nAdafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);   // SDA = GPIO21, SCL = GPIO22\n\nint graph[128];   // last 128 readings for the moving graph\n\nvoid setup() {\n  Serial.begin(115200);\n  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {\n    Serial.println("OLED not found");\n    for (;;);\n  }\n  for (int i = 0; i < 128; i++) graph[i] = 63;\n  display.clearDisplay();\n  display.setTextSize(2);\n  display.setTextColor(SSD1306_WHITE);\n  display.setCursor(4, 24);\n  display.println("Hello migo");\n  display.display();\n  delay(1500);\n}\n\nvoid loop() {\n  float v = analogRead(34) * 3.3 / 4095;\n\n  for (int i = 0; i < 127; i++) graph[i] = graph[i + 1];\n  graph[127] = 63 - int(v / 3.3 * 28);\n\n  display.clearDisplay();\n  display.setTextSize(1);\n  display.setCursor(0, 0);\n  display.print("Pot voltage");\n  display.setTextSize(2);\n  display.setCursor(0, 14);\n  display.print(v, 2);\n  display.print(" V");\n  display.drawRect(84, 16, 44, 10, SSD1306_WHITE);\n  display.fillRect(86, 18, int(v / 3.3 * 40), 6, SSD1306_WHITE);\n  display.drawFastHLine(0, 34, 128, SSD1306_WHITE);\n  for (int x = 1; x < 128; x++) display.drawLine(x - 1, graph[x - 1], x, graph[x], SSD1306_WHITE);\n  display.display();\n  delay(100);\n}\n',
   doorlock: '#include <Keypad.h>\n#include <LiquidCrystal_I2C.h>\n\nconst byte ROWS = 4, COLS = 4;\nchar keys[ROWS][COLS] = {\n  {\'1\', \'2\', \'3\', \'A\'},\n  {\'4\', \'5\', \'6\', \'B\'},\n  {\'7\', \'8\', \'9\', \'C\'},\n  {\'*\', \'0\', \'#\', \'D\'}\n};\nbyte rowPins[ROWS] = {19, 18, 5, 17};\nbyte colPins[COLS] = {16, 4, 2, 15};\nKeypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);\nLiquidCrystal_I2C lcd(0x27, 16, 2);\n\nconst int LOCK = 13;      // MOSFET gate\nconst int BUZZ = 23;\nString code = "1234";     // change your PIN here\nString typed = "";\n\nvoid beep(int ms) {\n  digitalWrite(BUZZ, HIGH);\n  delay(ms);\n  digitalWrite(BUZZ, LOW);\n}\n\nvoid askPin() {\n  lcd.clear();\n  lcd.print("Enter PIN, #=OK");\n  lcd.setCursor(0, 1);\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(LOCK, OUTPUT);\n  pinMode(BUZZ, OUTPUT);\n  lcd.init();\n  lcd.backlight();\n  askPin();\n}\n\nvoid loop() {\n  char key = keypad.getKey();\n  if (!key) return;\n  Serial.println(key);\n  beep(40);\n  if (key == \'#\') {\n    if (typed == code) {\n      lcd.clear();\n      lcd.print("OPEN - welcome!");\n      digitalWrite(LOCK, HIGH);   // solenoid pulls the bolt\n      beep(200);\n      delay(3000);\n      digitalWrite(LOCK, LOW);\n    } else {\n      lcd.clear();\n      lcd.print("WRONG PIN");\n      beep(800);\n      delay(1000);\n    }\n    typed = "";\n    askPin();\n  } else if (key == \'*\') {\n    typed = "";\n    askPin();\n  } else if (typed.length() < 8) {\n    typed += key;\n    lcd.print(\'*\');\n  }\n}\n',
   thermo: '#include <DHT.h>\n\nDHT dht(4, DHT22);        // DATA on GPIO4\nconst int FAN = 23;\n\nvoid setup() {\n  Serial.begin(115200);\n  dht.begin();\n  pinMode(FAN, OUTPUT);\n}\n\nvoid loop() {\n  float t = dht.readTemperature();\n  float h = dht.readHumidity();\n  if (isnan(t)) {\n    Serial.println("DHT not found!");\n    delay(1000);\n    return;\n  }\n  digitalWrite(FAN, t > 30 ? HIGH : LOW);   // fan above 30 C\n  Serial.printf("%.1f C  %.0f %%  fan %s\\n", t, h, t > 30 ? "ON" : "OFF");\n  delay(1000);\n}\n',
   parking: 'const int TRIG = 9, ECHO = 10, LED = 13;\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(TRIG, OUTPUT);\n  pinMode(ECHO, INPUT);\n  pinMode(LED, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(TRIG, LOW);\n  delayMicroseconds(2);\n  digitalWrite(TRIG, HIGH);              // 10 us pulse starts a measurement\n  delayMicroseconds(10);\n  digitalWrite(TRIG, LOW);\n  long us = pulseIn(ECHO, HIGH, 30000);   // echo time in microseconds\n  float cm = us / 58.0;\n  digitalWrite(LED, cm > 0 && cm < 20 ? HIGH : LOW);\n  Serial.print("Distance: ");\n  Serial.print(cm, 1);\n  Serial.println(" cm");\n  delay(200);\n}\n',
@@ -1332,6 +1346,15 @@ export function example(name) {
     m.props.code = '#include <Wire.h>\n#include <LiquidCrystal_I2C.h>\n\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // address 0x27, 16 x 2\n\nvoid setup() {\n  lcd.init();\n  lcd.backlight();\n  lcd.setCursor(0, 0);\n  lcd.print("Fox9nertron");\n}\n\nvoid loop() {\n  int raw = analogRead(34);           // pot on GPIO34\n  float v = raw * 3.3 / 4095;\n  lcd.setCursor(0, 1);\n  lcd.print("Pot: ");\n  lcd.print(v, 2);\n  lcd.print(" V   ");\n  delay(200);\n}\n';
     m.props.run = true;
     const d = addPart(c, 'LCD', 17, -5); d.name = 'LCD1';
+    const pot = addPart(c, 'POT', -10, -2); pot.name = 'RV1'; pot.props.pos = 60;
+    addPart(c, 'GND', 9, -3); addPart(c, 'GND', -6, 6); addPart(c, 'GND', -12, -2);
+    W(4, -6, 10, -6); W(4, -3, 7, -3); W(7, -3, 7, -5); W(7, -5, 10, -5);
+    W(10, -3, 9, -3); W(10, -4, 8, -4); W(8, -4, 8, 9); W(8, 9, -4, 9); W(-4, 9, -4, 7); W(-4, 6, -6, 6);
+    W(-10, -4, -4, -4); W(4, 7, 6, 7); W(6, 7, 6, 11); W(6, 11, -14, 11); W(-14, 11, -14, 0); W(-14, 0, -8, 0); W(-8, 0, -8, -2);
+  } else if (name === 'oled') {
+    // ESP32 + OLED 128×64 SSD1306 I2C (SDA = GPIO21, SCL = GPIO22): text, a bar and a moving graph of the pot voltage
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.oled; m.props.run = true;
+    const d = addPart(c, 'OLED', 15, -5); d.name = 'OLED1'; d.props.color = 'yb';
     const pot = addPart(c, 'POT', -10, -2); pot.name = 'RV1'; pot.props.pos = 60;
     addPart(c, 'GND', 9, -3); addPart(c, 'GND', -6, 6); addPart(c, 'GND', -12, -2);
     W(4, -6, 10, -6); W(4, -3, 7, -3); W(7, -3, 7, -5); W(7, -5, 10, -5);

@@ -185,6 +185,20 @@ const ARTICLES = [
     tryit: ['Turn RV1: the LCD follows.', 'Change the LCD address to 0x3F: boxes only (address mismatch).', 'Delete the SCL wire: boxes only.', 'Edit the code: lcd.setCursor(0, 0); lcd.print("Hello migo!"); and ▶ Run code again.'],
   },
   {
+    id: 'oled', title: 'OLED 0.96" 128×64 (SSD1306, I2C)', example: 'oled', tag: 'Microcontroller',
+    intro: 'The small 0.96" OLED is 128 × 64 dots you switch on one by one: text in any size, lines, boxes, circles, bitmaps and graphs. Only 4 wires (GND, VCC, SCL, SDA). The ESP32 shows the pot voltage as a number, a bar and a moving graph. The code is running: tap the ESP32 → 💻 Code.',
+    parts: [['ESP32', 'SDA = GPIO21, SCL = GPIO22'], ['OLED1', '0.96" SSD1306 module, address 0x3C, yellow / blue'], ['RV1', '10 kΩ pot on 3.3 V → GPIO34']],
+    steps: [
+      ['1. Wiring', 'OLED GND → GND, VCC → 3.3 V or 5 V (the module has its own regulator), SCL → GPIO22 (UNO A5), SDA → GPIO21 (UNO A4). Read the print on your module: some have GND and VCC swapped.'],
+      ['2. The libraries', 'Arduino IDE → Library Manager → "Adafruit SSD1306" (it asks to add "Adafruit GFX" too: say yes). display.begin(SSD1306_SWITCHCAPVCC, 0x3C) once in setup().'],
+      ['3. Draw, then display()', 'Everything you draw (print, drawLine, fillRect…) goes into a 1 KB buffer in the board\'s RAM. The screen only changes when you call display.display(). The usual loop: clearDisplay() → draw everything → display().'],
+      ['4. Coordinates', 'x = 0…127 left → right, y = 0…63 top → bottom. Text size 1 = 6 × 8 dots per letter (21 letters × 8 lines), size 2 = 12 × 16, size 3 = 18 × 24.'],
+      ['5. Yellow / blue modules', 'The top 16 rows are yellow, the rest blue: it is the same chip, just two colours of glass. Put the title in rows 0–15.'],
+      ['6. Handy commands', 'setTextSize(n) · setTextColor(SSD1306_WHITE) · setCursor(x, y) · print / println · drawPixel · drawLine · drawRect / fillRect · drawCircle / fillCircle · drawRoundRect · drawTriangle · drawBitmap · invertDisplay(true) · setRotation(0–3).'],
+    ],
+    tryit: ['Turn RV1: number, bar and graph follow.', 'Change the OLED address to 0x3D: the screen stays black (address mismatch).', 'Delete display.display(); at the end of loop(): the picture freezes.', 'Add display.drawCircle(110, 50, 10, SSD1306_WHITE); before display.display(); and watch it appear.', 'Change the colour in the OLED panel to white or blue.'],
+  },
+  {
     id: 'seg7', title: '7-segment display counter', example: 'seg7', tag: 'Microcontroller',
     intro: 'A 7-segment display is 8 LEDs (a–g + dot) sharing one common pin. The UNO lights the right segments for each digit from a table of bits. The code is running: tap the UNO → 💻 Code.',
     parts: [['UNO', 'D2 … D9 → segments a, b, c, d, e, f, g, dp'], ['DS1', 'common cathode 0.56" display (5161AS)'], ['R1', '330 Ω on the common pin']],
