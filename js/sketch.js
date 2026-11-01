@@ -6,7 +6,7 @@ import { BOARDS } from './sch-core.js';
 const TYPES = 'int|long|short|float|double|bool|boolean|byte|char|word|size_t|String|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t';
 const API_NAMES = ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'analogReadMilliVolts', 'ledcSetup', 'ledcAttachPin', 'ledcAttach', 'ledcWrite', 'ledcDetachPin', 'ledcDetach',
   'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'DHT', 'DHT11', 'DHT22', 'DHT21', 'pulseIn', 'pulseInLong', 'isnan', 'NAN', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
-  'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'INPUT_PULLDOWN', 'LED_BUILTIN', 'PI', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'DEC', 'HEX', 'BIN', '__ops', 'int', 'float', 'yieldNow'];
+  'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'INPUT_PULLDOWN', 'LED_BUILTIN', 'PI', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'DEC', 'HEX', 'BIN', '__ops', 'int', 'float', 'yieldNow', '__no'];
 
 // find the ')' matching the '(' at i (skips strings / chars)
 function closeParen(s, i) {
@@ -85,7 +85,7 @@ export function transpile(src) {
   s = guardLoops(s);
   s = wrapCalls(s, fns);
   if (!fns.has('loop')) throw new Error('No loop() found. A sketch needs void setup() { … } and void loop() { … }.');
-  return `"use strict";\nconst { ${API_NAMES.join(', ')} } = __api;\n${s}\nreturn function* __main() { ${fns.has('setup') ? 'yield* setup();' : ''} for (;;) { yield* loop(); yield 0; } };`;
+  return `"use strict";\nconst { ${API_NAMES.join(', ')} } = __api;\n${['print', 'println', 'alert', 'confirm', 'prompt', 'open', 'close', 'stop', 'focus', 'blur', 'find', 'scroll', 'fetch'].filter(n => !fns.has(n)).map(n => `const ${n} = __no('${n}');`).join(' ')} const window = undefined, document = undefined, location = undefined;\n${s}\nreturn function* __main() { ${fns.has('setup') ? 'yield* setup();' : ''} for (;;) { yield* loop(); yield 0; } };`;
 }
 
 // pin number / name used in the sketch → board pin name
@@ -177,6 +177,7 @@ export function createRuntime(p, src, host) {
     random: (a, b) => (b == null ? Math.floor(Math.random() * a) : Math.floor(a + Math.random() * (b - a))), randomSeed() { },
     abs: Math.abs, min: Math.min, max: Math.max, pow: Math.pow, sqrt: Math.sqrt, sq: (x) => x * x, sin: Math.sin, cos: Math.cos, tan: Math.tan, floor: Math.floor, ceil: Math.ceil, round: Math.round,
     Serial: { begin() { }, print(x, f) { say(fmt(x, f)); }, println(x = '', f) { say(fmt(x, f)); endLine(); }, printf(f, ...a) { let i = 0; const t = String(f).replace(/%[-+0 #]*\d*(?:\.(\d+))?[dilufsxXc%]/g, (m, d) => m === '%%' ? '%' : /[xX]/.test(m) ? Math.trunc(a[i++]).toString(16) : /f/.test(m) ? (+a[i++]).toFixed(d ? +d : 6) : /[dilu]/.test(m) ? String(Math.trunc(a[i++])) : String(a[i++])); const parts = t.split('\n'); parts.forEach((x, k) => { if (x) say(x); if (k < parts.length - 1) endLine(); }); }, available: () => 0, read: () => -1, flush() { } },
+    __no: (n) => () => { throw new Error(`${n}() is not an Arduino function` + (n === 'print' || n === 'println' ? `. Use Serial.${n}() or lcd.${n}().` : '.')); },
     Servo, LiquidCrystal_I2C, Wire, DHT, DHT11: 11, DHT22: 22, DHT21: 21, pulseIn, pulseInLong: pulseIn, isnan: Number.isNaN, NAN: NaN, yieldNow: 0,
   };
   let main;
