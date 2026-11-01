@@ -168,7 +168,8 @@ export function schematicTab(root) {
   let probes = [], clip = null, placeRot = 0, lastPtr = null;        // multimeter: [red point, black point] in grid units
   const voltsBtn = btn('', () => { showVolts = !showVolts; store.set('sch.volts', showVolts ? '1' : '0'); syncTop(); draw(); });
   const dotsBtn = btn('', () => { showDots = !showDots; store.set('sch.dots', showDots ? '1' : '0'); syncTop(); draw(); });
-  const runBtn = btn('', () => { running = !running; store.set('sch.run', running ? '1' : '0'); syncTop(); commit(false); say(running ? 'Simulation running.' : 'Simulation stopped. Edit freely; tap ▶ Run to see the results.'); }, 'run');
+  const toggleRun = () => { running = !running; store.set('sch.run', running ? '1' : '0'); syncTop(); commit(false); say(running ? 'Simulation running.' : 'Simulation stopped. Edit freely; tap ▶ Run to see the results.'); };
+  const runBtn = btn('', toggleRun, 'run');
   const floatBtn = btn('🪟 Float', () => setFloat(!floating));
   const top = el('div', { class: 'sch-tools' },
     runBtn, modeBtns.select, modeBtns.wire, modeBtns.delete, modeBtns.meter,
@@ -213,8 +214,9 @@ export function schematicTab(root) {
   // floating settings: the part panel can float over the page (drag its bar) so you see the circuit while changing values
   let floating = store.get('sch.float', '0') === '1';
   const pTitle = el('b', { text: '⠿ Settings' });
+  const pRun = btn('', toggleRun, 'run');
   const pMin = btn('–', () => { panel.hidden = !panel.hidden; pMin.textContent = panel.hidden ? '+' : '–'; panelBox.classList.toggle('mini', panel.hidden); keepIn(); }, 'icon');
-  const pHead = el('div', { class: 'sch-phead', hidden: true }, pTitle, el('span', { class: 'sch-phbtn' }, pMin, btn('✕ Dock', () => setFloat(false))));
+  const pHead = el('div', { class: 'sch-phead', hidden: true }, pTitle, el('span', { class: 'sch-phbtn' }, pRun, pMin, btn('✕ Dock', () => setFloat(false))));
   const panelBox = el('div', { class: 'sch-pbox' }, pHead, panel);
   function keepIn() {
     if (!floating) return;
@@ -320,7 +322,7 @@ export function schematicTab(root) {
     draw();
   }
   function say(t) { status.textContent = t; }
-  function syncTop() { runBtn.textContent = running ? '■ Stop' : '▶ Run'; runBtn.classList.toggle('on', running); syncTop2(); }
+  function syncTop() { for (const b of [runBtn, pRun]) { b.textContent = running ? '■ Stop' : '▶ Run'; b.classList.toggle('on', running); } syncTop2(); }
   function syncTop2() { voltsBtn.textContent = showVolts ? 'Volts ●' : 'Volts ○'; voltsBtn.classList.toggle('on', showVolts); dotsBtn.textContent = showDots ? 'Flow ●' : 'Flow ○'; dotsBtn.classList.toggle('on', showDots); }
 
   function commit(push = true) {
