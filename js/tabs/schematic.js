@@ -696,6 +696,7 @@ export function schematicTab(root) {
   let down = null, pinch = 0;
   canvas.style.touchAction = 'none';
   canvas.addEventListener('pointerdown', (e) => {
+    if (e.button === 2) return;            // right button: handled by 'contextmenu'
     canvas.setPointerCapture?.(e.pointerId);
     const [px, py] = pos(e); ptrs.set(e.pointerId, [px, py]);
     if (ptrs.size === 2) { const v = [...ptrs.values()]; pinch = Math.hypot(v[0][0] - v[1][0], v[0][1] - v[1][1]); down = { pinch: true, last: mid() }; return; }
@@ -761,6 +762,14 @@ export function schematicTab(root) {
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (down?.pb) { down.pb.props.on = false; commit(false); } down = null; });
   canvas.addEventListener('pointerleave', () => { if (!down && hover) { hover = null; draw(); } });
+  // right-click: stop placing / stop a wire / let go of the selection (like most CAD programs)
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (mode === 'place') { setMode('select'); hover = null; say('Done placing. Tap a part in the tray to place more.'); }
+    else if (mode === 'wire' && wireStart) { wireStart = null; draw(); say('Wire cancelled. Tap a pin to start a new one, or right-click again to leave Wire mode.'); }
+    else if (mode !== 'select') setMode('select');
+    else if (sel) { sel = null; renderPanel(); draw(); say('Nothing selected.'); }
+  });
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); const [px, py] = pos(e); zoomAt(Math.exp(-e.deltaY * 0.0015), px, py); draw(); }, { passive: false });
   function pos(e) { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
   function mid() { const v = [...ptrs.values()]; return [(v[0][0] + v[1][0]) / 2, (v[0][1] + v[1][1]) / 2]; }

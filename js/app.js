@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '2.1.2';
+export const VERSION = '2.1.3';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -50,7 +50,7 @@ function help() {
 <p><b>📟 LCD 16×2 I2C + 🔢 7-segment</b>: wire the LCD's SDA / SCL to the board (ESP32 21 / 22, UNO A4 / A5) and print to it from a sketch with LiquidCrystal_I2C: the text shows on the drawing. 7-segment segments light from the real current.</p>
 <p><b>🌡 Sensors</b>: DHT22 / DHT11 (temperature + humidity), HC-SR04 (distance), LDR (light), PIR (motion). Slide what they sense in their panel (tap a PIR to toggle motion). Sketches read them with the DHT library, pulseIn(), analogRead(), digitalRead().</p>
 <p><b>🔐 Keypad, buzzer, door lock</b>: tap keypad keys on the drawing (or in its panel); sketches read them with the Keypad library. The buzzer really beeps (🔊 switch in its panel). The solenoid lock shows LOCKED / OPEN from its coil current.</p>
-<p><b>⧉ Many of the same part</b>: tap a part in the tray, then keep tapping the grid: one each tap (↻ / R turns the next ones, Esc when done). Or select a part and ⧉ Duplicate (Ctrl+D): same value, new name. Ctrl+C / Ctrl+V pastes where the mouse is.</p>
+<p><b>⧉ Many of the same part</b>: tap a part in the tray, then keep tapping the grid: one each tap (↻ / R turns the next ones, right-click or Esc when done). Right-click also cancels a wire and lets go of the selection. Or select a part and ⧉ Duplicate (Ctrl+D): same value, new name. Ctrl+C / Ctrl+V pastes where the mouse is.</p>
 <p><b>📲 Share</b> (Schematic toolbar): packs the whole project (circuit, sketch, PCB) into one link + QR code. Nothing is uploaded; opening the link loads a copy and keeps your own circuit in Projects.</p>
 <p><b>🔍 Meter + 🔧 Fault</b> (troubleshoot): 🔍 Meter puts a red and a black probe on any two points and reads the volts between them. In any part's panel, 🔧 Fault breaks it on purpose (open, shorted, weak) so you can practise finding bad parts. A red O / S badge marks broken parts.</p>
 <p><b>🔌 ESP32 / Arduino UNO</b>: board parts with real pin names. Either tap a pin and set it by hand (OUTPUT HIGH/LOW, PWM, INPUT, INPUT_PULLUP, analogRead), or open <b>💻 Code</b> in the board's panel, type an Arduino sketch (or pick an example) and ▶ Run code: setup() / loop(), digitalWrite, analogRead, delay, Serial, Servo… run in real time against the circuit, with a serial monitor. The panel shows the voltage, current, digitalRead / analogRead value and warns about too much current, 5 V on a 3.3 V pin and ESP32 boot pins. The PCB has the DevKit / UNO shield footprints.</p>
