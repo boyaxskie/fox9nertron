@@ -705,7 +705,7 @@ export function schematicTab(root) {
   // microcontroller boards: which pin the panel shows
   const boardPinSel = new Map();
   function boardPin(p) { const B = S.BOARDS[p.type]; const n = boardPinSel.get(p.id); return B.pins.some(x => x.n === n) ? n : (Object.keys(p.props.pins ?? {})[0] ?? B.pins.find(x => x.k === 'gpio').n); }
-  const MODE_SHORT = { in: 'input', pu: 'pull-up', pd: 'pull-down', adc: 'ADC', high: 'HIGH', low: 'LOW', pwm: 'PWM', pwr: 'power', en: 'reset', nc: '—' };
+  const MODE_SHORT = { in: 'input', pu: 'pull-up', pd: 'pull-down', adc: 'ADC', high: 'HIGH', low: 'LOW', pwm: 'PWM', dac: 'DAC', pwr: 'power', en: 'reset', nc: '—' };
   // free wire corner / end (not on a part pin) close to the finger
   function wireEndAt(x, y) {
     const pinK = new Set(c.parts.flatMap(p => S.pinsOf(p).map(q => S.key(...q))));

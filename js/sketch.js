@@ -5,7 +5,7 @@ import { BOARDS } from './sch-core.js';
 
 const TYPES = 'int|long|short|float|double|bool|boolean|byte|char|word|size_t|String|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t';
 const API_NAMES = ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'analogReadMilliVolts', 'ledcSetup', 'ledcAttachPin', 'ledcAttach', 'ledcWrite', 'ledcDetachPin', 'ledcDetach',
-  'tone', 'noTone', 'millis', 'micros', 'Serial', 'Servo', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
+  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
   'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'INPUT_PULLDOWN', 'LED_BUILTIN', 'PI', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'DEC', 'HEX', 'BIN', '__ops', 'int', 'float', 'yieldNow'];
 
 // find the ')' matching the '(' at i (skips strings / chars)
@@ -78,7 +78,7 @@ export function transpile(src) {
   s = s.replace(/\bunsigned\s+(?=[A-Za-z_])/g, 'let ');
   s = s.replace(/\b(let|const)\s+(\w+)\s*\[\s*\w*\s*\]\s*=\s*\{([^}]*)\}/g, '$1 $2 = [$3]');
   s = s.replace(/\blet\s+(\w+)\s*\[\s*(\w+)\s*\]\s*;/g, 'let $1 = new Array($2).fill(0);');
-  s = s.replace(/(\d+(?:\.\d+)?)[uUlLfF]+\b/g, '$1');
+  s = s.split(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/).map((part, i) => (i % 2 ? part : part.replace(/\b(\d+(?:\.\d+)?)[uUlLfF]+\b/g, '$1'))).join('');   // 10UL, 2.5f (not inside strings)
   s = s.replace(/\bF\(\s*("(?:[^"\\]|\\.)*")\s*\)/g, '$1');
   s = guardLoops(s);
   s = wrapCalls(s, fns);
@@ -110,6 +110,7 @@ export function createRuntime(p, src, host) {
     if (typeof x === 'boolean') return x ? '1' : '0';
     return String(x);
   };
+  let adcBits = B.adcBits, pwmBits = 8, pwmF = null;
   const pwmOut = (n, duty, f) => setMode(n, duty <= 0 ? { mode: 'low' } : duty >= 100 ? { mode: 'high' } : { mode: 'pwm', f, duty });
   class Servo {
     attach(pin, mn = 500, mx = 2500) { this.n = PN(pin); this.mn = mn; this.mx = mx; servoPins.add(this.n); this.writeMicroseconds(this.us ?? 1500); return 1; }
@@ -127,20 +128,23 @@ export function createRuntime(p, src, host) {
     pinMode(pin, m) { const n = PN(pin); setMode(n, m === 'out' ? { mode: host.pins[n]?.mode === 'high' ? 'high' : 'low' } : m === 'in' ? null : { mode: m }); },
     digitalWrite(pin, v) { const n = PN(pin), m = host.pins[n]?.mode; if (m == null || m === 'in' || m === 'pu' || m === 'pd') { setMode(n, v ? { mode: 'pu' } : null); return; } setMode(n, { mode: v ? 'high' : 'low' }); },
     digitalRead(pin) { const n = PN(pin), v = host.v(n); return v == null ? 0 : v >= (B.vih + B.vil) / 2 ? 1 : 0; },
-    analogRead(pin) { const n = PN(pin), v = host.v(n) ?? 0; return Math.round(Math.max(0, Math.min(1, v / B.adcRef)) * (2 ** B.adcBits - 1)); },
+    analogRead(pin) { const n = PN(pin), v = host.v(n) ?? 0; return Math.round(Math.max(0, Math.min(1, v / B.adcRef)) * (2 ** adcBits - 1)); },
     analogReadMilliVolts(pin) { return Math.round(Math.max(0, Math.min(B.adcRef, host.v(PN(pin)) ?? 0)) * 1000); },
-    analogWrite(pin, val) { const n = PN(pin); pwmOut(n, Math.max(0, Math.min(255, val)) / 255 * 100, esp ? 1000 : (/^D[56]$/.test(n) ? 980 : 490)); },
+    analogWrite(pin, val) { const n = PN(pin), top = 2 ** pwmBits - 1; pwmOut(n, Math.max(0, Math.min(top, val)) / top * 100, pwmF ?? (esp ? 1000 : (/^D[56]$/.test(n) ? 980 : 490))); },
     ledcSetup(ch, f, bits) { ledc.set('ch' + ch, { f, bits, pins: [] }); return f; },
     ledcAttachPin(pin, ch) { const c = ledc.get('ch' + ch) ?? ledc.set('ch' + ch, { f: 5000, bits: 8, pins: [] }).get('ch' + ch); c.pins.push(PN(pin)); },
     ledcAttach(pin, f, bits) { ledc.set('pin' + PN(pin), { f, bits, pins: [PN(pin)] }); return true; },
     ledcWrite(x, duty) { const c = ledc.get('pin' + (pinName(board, x) ?? '')) ?? ledc.get('ch' + x); if (!c) throw new Error(`ledcWrite(${x}, …): attach the pin first (ledcAttach or ledcSetup + ledcAttachPin)`); for (const n of c.pins) pwmOut(n, duty / (2 ** c.bits - 1) * 100, c.f); },
     ledcDetachPin(pin) { setMode(PN(pin), null); }, ledcDetach(pin) { setMode(PN(pin), null); },
+    dacWrite(pin, v) { if (!esp) throw new Error('dacWrite: the UNO has no DAC (use analogWrite PWM)'); const n = PN(pin); if (n !== 'D25' && n !== 'D26') throw new Error(`dacWrite: only GPIO25 and GPIO26 have a DAC (got ${n})`); setMode(n, { mode: 'dac', val: Math.max(0, Math.min(255, Math.round(v))) }); },
+    dacDisable(pin) { setMode(PN(pin), null); },
+    analogReadResolution(b) { adcBits = Math.max(1, Math.min(16, b)); }, analogWriteResolution(b) { pwmBits = Math.max(1, Math.min(16, b)); }, analogSetAttenuation() { }, analogWriteFrequency(f) { pwmF = f; },
     tone(pin, f) { setMode(PN(pin), { mode: 'pwm', f, duty: 50 }); }, noTone(pin) { setMode(PN(pin), { mode: 'low' }); },
     millis: () => Math.floor(host.t() * 1000), micros: () => Math.floor(host.t() * 1e6),
     map: (x, a, b, c, d) => Math.trunc((x - a) * (d - c) / (b - a) + c), constrain: (x, a, b) => Math.min(b, Math.max(a, x)),
     random: (a, b) => (b == null ? Math.floor(Math.random() * a) : Math.floor(a + Math.random() * (b - a))), randomSeed() { },
     abs: Math.abs, min: Math.min, max: Math.max, pow: Math.pow, sqrt: Math.sqrt, sq: (x) => x * x, sin: Math.sin, cos: Math.cos, tan: Math.tan, floor: Math.floor, ceil: Math.ceil, round: Math.round,
-    Serial: { begin() { }, print(x, f) { say(fmt(x, f)); }, println(x = '', f) { say(fmt(x, f)); endLine(); }, printf(f, ...a) { let i = 0; say(String(f).replace(/%[-+0 #]*\d*(?:\.(\d+))?[dilufsxXc%]/g, (m, d) => m === '%%' ? '%' : /[xX]/.test(m) ? Math.trunc(a[i++]).toString(16) : /f/.test(m) ? (+a[i++]).toFixed(d ? +d : 6) : /[dilu]/.test(m) ? String(Math.trunc(a[i++])) : String(a[i++])).replace(/\n$/, () => { endLine(); return ''; })); }, available: () => 0, read: () => -1, flush() { } },
+    Serial: { begin() { }, print(x, f) { say(fmt(x, f)); }, println(x = '', f) { say(fmt(x, f)); endLine(); }, printf(f, ...a) { let i = 0; const t = String(f).replace(/%[-+0 #]*\d*(?:\.(\d+))?[dilufsxXc%]/g, (m, d) => m === '%%' ? '%' : /[xX]/.test(m) ? Math.trunc(a[i++]).toString(16) : /f/.test(m) ? (+a[i++]).toFixed(d ? +d : 6) : /[dilu]/.test(m) ? String(Math.trunc(a[i++])) : String(a[i++])); const parts = t.split('\n'); parts.forEach((x, k) => { if (x) say(x); if (k < parts.length - 1) endLine(); }); }, available: () => 0, read: () => -1, flush() { } },
     Servo, yieldNow: 0,
   };
   let main;
@@ -171,6 +175,8 @@ export const EXAMPLES = {
     uno: 'const int LED = 13;\nconst int BTN = 2;\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(LED, OUTPUT);\n  pinMode(BTN, INPUT_PULLUP);   // pressed = LOW\n}\n\nvoid loop() {\n  bool pressed = digitalRead(BTN) == LOW;\n  digitalWrite(LED, pressed ? HIGH : LOW);\n  int pot = analogRead(A0);       // 0 ... 1023\n  Serial.print("button: ");\n  Serial.print(pressed ? "PRESSED" : "up");\n  Serial.print("   A0: ");\n  Serial.println(pot);\n  delay(200);\n}\n' },
   dim: { name: 'Pot dims the LED (PWM)', esp: 'const int LED = 23;\nconst int POT = 34;\n\nvoid setup() {\n  ledcAttach(LED, 1000, 8);       // 1 kHz, 8 bit (0-255)\n}\n\nvoid loop() {\n  int pot = analogRead(POT);      // 0 ... 4095\n  ledcWrite(LED, pot / 16);       // 0 ... 255\n  delay(20);\n}\n',
     uno: 'const int LED = 9;   // a ~ PWM pin\n\nvoid setup() {\n}\n\nvoid loop() {\n  int pot = analogRead(A0);       // 0 ... 1023\n  analogWrite(LED, pot / 4);      // 0 ... 255\n  delay(20);\n}\n' },
+  dac: { name: 'DAC ramp (ESP32 GPIO25) / PWM ramp (UNO)', esp: '// ESP32 DAC: real analog voltage 0 ... 3.3 V on GPIO25 / GPIO26\n\nvoid setup() {\n  Serial.begin(115200);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 15) {\n    dacWrite(25, v);                  // 0 ... 255 → 0 ... 3.3 V\n    Serial.printf("DAC %d = %.2f V\\n", v, v * 3.3 / 255);\n    delay(200);\n  }\n}\n',
+    uno: '// The UNO has no DAC: analogWrite makes PWM (average voltage)\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 15) {\n    analogWrite(9, v);\n    Serial.print("PWM ");\n    Serial.println(v);\n    delay(200);\n  }\n}\n' },
   servo: { name: 'Servo sweep', esp: '#include <ESP32Servo.h>\n\nServo arm;\n\nvoid setup() {\n  arm.attach(18);\n}\n\nvoid loop() {\n  for (int a = 0; a <= 180; a += 10) {\n    arm.write(a);\n    delay(100);\n  }\n  for (int a = 180; a >= 0; a -= 10) {\n    arm.write(a);\n    delay(100);\n  }\n}\n',
     uno: '#include <Servo.h>\n\nServo arm;\n\nvoid setup() {\n  arm.attach(9);\n}\n\nvoid loop() {\n  for (int a = 0; a <= 180; a += 10) {\n    arm.write(a);\n    delay(100);\n  }\n  for (int a = 180; a >= 0; a -= 10) {\n    arm.write(a);\n    delay(100);\n  }\n}\n' },
 };

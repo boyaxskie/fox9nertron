@@ -153,7 +153,7 @@ export const BOARDS = {
 };
 const boardPins = (b, nl) => b.pins.map((q, i) => (i < nl ? [-4, i - Math.floor((nl - 1) / 2)] : [4, i - nl - (b.pins.length - nl === 14 ? 7 : 7)]));
 export const isBoard = (t) => t === 'ESP32' || t === 'UNO';
-export const PIN_MODES = { in: 'INPUT (high impedance)', pu: 'INPUT_PULLUP', pd: 'INPUT_PULLDOWN', adc: 'analogRead (ADC)', high: 'OUTPUT HIGH', low: 'OUTPUT LOW', pwm: 'PWM (analogWrite / ledc)' };
+export const PIN_MODES = { in: 'INPUT (high impedance)', pu: 'INPUT_PULLUP', pd: 'INPUT_PULLDOWN', adc: 'analogRead (ADC)', high: 'OUTPUT HIGH', low: 'OUTPUT LOW', pwm: 'PWM (analogWrite / ledc)', dac: 'DAC output (dacWrite, set by code)' };
 export function pinModesFor(board, q) {
   if (q.k !== 'gpio') return [];
   const m = ['in', 'pu'];
@@ -474,6 +474,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
           const m = cfg[q.n]?.mode ?? 'in';
           if (m === 'high') R(vccN, nd, B.rout, p, 'pin:' + q.n);
           else if (m === 'low') R(G, nd, B.rout, p, 'pin:' + q.n);
+          else if (m === 'dac') { const n2 = inner(); V(n2, G, B.vcc * Math.max(0, Math.min(255, cfg[q.n].val ?? 0)) / 255, p, 'src:' + q.n); R(n2, nd, 1000, p, 'pin:' + q.n); }   // ESP32 DAC: 8 bit, weak output (≈ 1 kΩ)
           else if (m === 'pwm') {
             const c0 = cfg[q.n], n2 = inner();
             const val = sim ? pwmAvg(c0.f ?? 1000, c0.duty ?? 50, B.vcc, sim.t - sim.dt, sim.t) : B.vcc * (c0.duty ?? 50) / 100;
