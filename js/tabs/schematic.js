@@ -4,6 +4,7 @@ import { si, plain, parse, pct, nearest, E12 } from '../num.js';
 import * as S from '../sch-core.js';
 import { wattName } from './basic.js';
 import { pcbView } from './pcb.js';
+import { createRuntime, EXAMPLES as SKETCHES } from '../sketch.js';
 
 const C = {
   bg: '#0F1317', dot: '#252D36', wire: '#8A97A6', part: '#E4E9EF', sel: '#4FC3F7', pin: '#FFC857', text: '#C9D3DD', dim: '#7E8A97',
@@ -41,7 +42,26 @@ export function schematicTab(root) {
     res = timeMode() ? S.solveCircuit(c, { t: sim.t, dt: dtOf(), state: sim.state }) : S.solveCircuit(c);
   }
   // time 0 starts from the DC operating point (signals at their offset): amplifier coupling capacitors are already charged
-  function resetSim() { sim.t = 0; sim.buf = []; sim.next = null; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
+  // ---------- Arduino sketch runner (boards with code switched on) ----------
+  const sketches = new Map();      // board id → runtime
+  function boardV(p, name) {
+    if (!res?.ok) return null;
+    const B = S.BOARDS[p.type], pts = S.pinsOf(p), i = B.pins.findIndex(q => q.n === name), gi = B.pins.findIndex(q => q.k === 'gnd');
+    if (i < 0) return null;
+    const v = res.vAt(...pts[i]), g = res.vAt(...pts[gi]) ?? 0;
+    return v == null ? null : v - g;
+  }
+  function restartSketches() {
+    sketches.clear();
+    for (const p of c.parts) {
+      if (!S.isBoard(p.type) || !p.props.run || !p.props.code) continue;
+      p.props.pins = {};                         // a fresh boot: every pin is an input until the code says otherwise
+      try { sketches.set(p.id, createRuntime(p, p.props.code, { t: () => sim.t, v: (n) => boardV(p, n), pins: p.props.pins })); }
+      catch (e) { sketches.set(p.id, { err: e.message, lines: [], step() { } }); }
+    }
+  }
+  function runSketches() { for (const rt of sketches.values()) rt.step(sim.t); }
+  function resetSim() { restartSketches(); sim.t = 0; sim.buf = []; sim.next = null; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
   // run the circuit for `span` seconds of circuit time. The step is fine enough for the fastest signal (≥ 40 per period),
   // independent of the scope. The scope only takes samples every time/div × 10 ÷ 400.
   const MAX_STEPS = 600;
@@ -60,6 +80,7 @@ export function schematicTab(root) {
     for (let k = 0; k < n; k++) {
       if (k > 0 && (k & 7) === 0 && performance.now() - t0 > 40) { lag = true; break; }   // keep the screen smooth on big circuits (SMPS)
       sim.t += dt;
+      if (sketches.size) runSketches();
       const r = S.solveCircuit(c, { t: sim.t, dt, state: sim.state });
       res = r;
       if (!r.ok) return lag;
@@ -184,7 +205,7 @@ export function schematicTab(root) {
     if (v === 'pcb') { scopeBox.hidden = true; pcb.show(); } else { pcb.hide(); resize(); commit(false); }
     scrollTo({ top: 0 });
   }
-  function autoSpeed() { if (c.speed) { sim.speed = String(c.speed); spSel.value = sim.speed; store.set('sch.speed2', sim.speed); return; } const slow = c.parts.some(p => ['SERVO', 'STEPPER', 'T555', 'RELAY'].includes(p.type)) && !c.parts.some(p => p.type === 'SIG'); sim.speed = slow ? '1' : 'screen'; spSel.value = sim.speed; store.set('sch.speed2', sim.speed); }
+  function autoSpeed() { if (c.parts.some(p => S.isBoard(p.type) && p.props.run)) { sim.speed = '1'; spSel.value = '1'; store.set('sch.speed2', '1'); return; } if (c.speed) { sim.speed = String(c.speed); spSel.value = sim.speed; store.set('sch.speed2', sim.speed); return; } const slow = c.parts.some(p => ['SERVO', 'STEPPER', 'T555', 'RELAY'].includes(p.type)) && !c.parts.some(p => p.type === 'SIG'); sim.speed = slow ? '1' : 'screen'; spSel.value = sim.speed; store.set('sch.speed2', sim.speed); }
   function autoTimeQuiet() { if (c.tdiv) { sim.tdiv = TDIVS.find(t => t >= c.tdiv) ?? 60; tSel.value = String(sim.tdiv); sim.buf = []; return; } const g = c.parts.find(p => p.type === 'SIG'); if (g) { const want = 2.5 / g.props.f / 10; sim.tdiv = TDIVS.find(t => t >= want) ?? 1; tSel.value = String(sim.tdiv); sim.buf = []; } else if (c.parts.some(p => p.type === 'L')) { sim.tdiv = 0.005; tSel.value = '0.005'; sim.buf = []; } }
   function autoTime() {
     const g = c.parts.find(p => p.type === 'SIG');
@@ -827,6 +848,37 @@ export function schematicTab(root) {
     inp.addEventListener('change', apply); inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
     return el('label', { class: 'field' }, el('span', { class: 'lab', text: label }), el('span', { class: 'box' }, inp, el('span', { class: 'unit', text: unit })));
   }
+  // ---------- 💻 code editor + serial monitor for ESP32 / UNO ----------
+  let syncSerial = null;
+  function codeBox(p) {
+    const q = p.props, esp = p.type === 'ESP32';
+    const ta = el('textarea', { class: 'code-ed', spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', rows: 14 });
+    ta.value = q.code ?? SKETCHES.blink[esp ? 'esp' : 'uno'];
+    ta.addEventListener('input', () => { q.code = ta.value; });
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); const a = ta.selectionStart; ta.setRangeText('  ', a, ta.selectionEnd, 'end'); q.code = ta.value; } });
+    ta.addEventListener('change', () => { q.code = ta.value; if (q.run) { resetSim(); say('Code changed: sketch restarted.'); } commit(); });
+    const ex = el('select', { class: 'sel sm', 'aria-label': 'Example sketch' }, el('option', { value: '', text: '📄 Example code…' }), Object.entries(SKETCHES).map(([k, v]) => el('option', { value: k, text: v.name })));
+    ex.onchange = () => { if (!ex.value) return; ta.value = q.code = SKETCHES[ex.value][esp ? 'esp' : 'uno']; ex.value = ''; if (q.run) resetSim(); commit(); };
+    const runB = el('button', { class: 'btn ' + (q.run ? '' : 'primary'), type: 'button', text: q.run ? '⏹ Stop code' : '▶ Run code', onclick: () => {
+      if (q.run) { q.run = false; q.pins = q.pinsManual ?? {}; delete q.pinsManual; sketches.delete(p.id); resetSim(); commit(); say('Code stopped: pins are back to your hand settings.'); return; }
+      q.code = ta.value; q.pinsManual = JSON.parse(JSON.stringify(q.pins ?? {})); q.run = true;
+      if (!running) { running = true; store.set('sch.run', '1'); syncTop(); }
+      resetSim(); autoSpeed(); commit(); say(sketches.get(p.id)?.err ? 'The code has an error: see below the editor.' : '▶ Code running in real time. Serial output shows below the editor.');
+    } });
+    const out = el('pre', { class: 'serial' });
+    syncSerial = () => {
+      const rt = sketches.get(p.id);
+      if (!q.run || !rt) { out.textContent = 'Serial monitor: run the code to see Serial.print output here.'; out.classList.remove('bad'); return; }
+      if (rt.err) { out.textContent = rt.err; out.classList.add('bad'); return; }
+      out.classList.remove('bad');
+      const txt = rt.lines.slice(-14).map(l => l.text).join('\n') || '(no Serial output yet)';
+      if (out.textContent !== txt) { out.textContent = txt; out.scrollTop = out.scrollHeight; }
+    };
+    syncSerial();
+    return el('div', { class: 'code-box' }, el('div', { class: 'row wrap' }, el('b', { text: '💻 Code (Arduino sketch)' }), runB, ex), ta, out,
+      note('Runs setup() once, then loop() forever, in circuit time: delay(500) really waits 0.5 s. Supported: pinMode, digitalWrite / Read, analogRead / Write, ' + (esp ? 'ledcAttach / ledcWrite, ' : '') + 'delay, millis, Serial.print / println, Servo, map, constrain, if / for / while, your own functions. Not: interrupts, WiFi, libraries other than Servo.'));
+  }
+
   // ---------- my parts (custom parts typed in from a datasheet) ----------
   function builtins(lib, filt = () => true) { return Object.entries(lib).filter(([, m]) => !m.custom && filt(m)).map(([k, m]) => [k, `${k}: ${m.note}`]); }
   function modelChoice(p, label, kind, value, opts, onPick) {
@@ -924,7 +976,7 @@ export function schematicTab(root) {
   function renderPanel() {
     syncNudgeSch();
     panel.innerHTML = '';
-    panelRefresh = null;
+    panelRefresh = null; syncSerial = null;
     if (!res) solve();
     if (sel?.kind === 'wire') {
       const w = c.wires[sel.i]; if (!w) { sel = null; return renderPanel(); }
@@ -1026,7 +1078,9 @@ export function schematicTab(root) {
           const caps = [pin.label, pin.inOnly ? 'input only' : 'in / out', pin.pwm || p.type === 'ESP32' ? (pin.inOnly ? null : (p.type === 'UNO' ? 'PWM ~' : 'PWM')) : (p.type === 'UNO' ? 'no analogWrite (pulses by code OK)' : null), pin.adc ? `${pin.adc} (analog in)` : null, pin.i2c ? `I²C ${pin.i2c}` : null].filter(Boolean).join(' · ');
           f.append(note(caps + (pin.strap ? ' · ⚠ boot strapping pin' : '') + (pin.serial ? ' · ⚠ USB serial pin' : '')));
         } else f.append(note(pin.k === 'pwr' ? `${pin.n}: ${pin.v} V out, ${pin.note}.` : pin.k === 'en' ? 'EN: reset. Pulled up to 3.3 V inside (10 kΩ). Pull it to GND = reset.' : `${pin.n}: ${pin.note ?? 'not connected inside'}.`));
-        f.append(note(`No program runs: each pin is set by hand, as if your code had already done it. The board is powered from USB (${B.vcc} V logic).`));
+        if (!q.run) f.append(note(`Pins set by hand, as if your code had already done it. Or write real code below (💻 Code). The board is powered from USB (${B.vcc} V logic).`));
+        else f.append(note('💻 Your code is running: it sets the pins now (changes made by hand above get overwritten).'));
+        f.append(codeBox(p));
         break;
       }
       case 'T555': f.append(choice('Type', q.model, Object.entries(S.TIMERS).map(([k, m]) => [k, `${k}: ${m.note}`]), v => { q.model = v; }),
@@ -1052,6 +1106,7 @@ export function schematicTab(root) {
     updateReadings();
     panelRefresh = updateReadings;
     function updateReadings() {
+      syncSerial?.();
       const r = res.ok ? res.parts.get(p.id) : null;
       rd.innerHTML = '';
       if (!res.ok) { rd.append(el('p', { class: 'flag ' + (res.stopped ? 'warn' : 'bad'), text: res.error })); return; }

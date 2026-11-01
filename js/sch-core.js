@@ -203,7 +203,7 @@ export const TYPES = {
 };
 export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
 export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
-export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm')));
+export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
 // signal generator value at time t
 export function sigValue(q, t) {
@@ -228,7 +228,7 @@ export function fastestFreq(c) {
   let f = 0;
   for (const p of c.parts) {
     if (p.type === 'SIG') f = Math.max(f, p.props.f);
-    if (isBoard(p.type)) for (const q of Object.values(p.props.pins ?? {})) if (q.mode === 'pwm') f = Math.max(f, q.f ?? 1000);
+    if (isBoard(p.type)) for (const q of Object.values(p.props.pins ?? {})) if (q.mode === 'pwm') f = Math.max(f, Math.min(500, q.f ?? 1000));   // pwmAvg keeps faster PWM exact on average
   }
   return f;
 }
