@@ -161,7 +161,7 @@ export function schematicTab(root) {
     delete: btn('🗑 Delete', () => { if (mode === 'select' && deleteSel()) return; setMode('delete'); }),
     meter: btn('🔍 Meter', () => setMode('meter')),
   };
-  let probes = [];        // multimeter: [red point, black point] in grid units
+  let probes = [], clip = null, placeRot = 0, lastPtr = null;        // multimeter: [red point, black point] in grid units
   const voltsBtn = btn('', () => { showVolts = !showVolts; store.set('sch.volts', showVolts ? '1' : '0'); syncTop(); draw(); });
   const dotsBtn = btn('', () => { showDots = !showDots; store.set('sch.dots', showDots ? '1' : '0'); syncTop(); draw(); });
   const runBtn = btn('', () => { running = !running; store.set('sch.run', running ? '1' : '0'); syncTop(); commit(false); say(running ? 'Simulation running.' : 'Simulation stopped. Edit freely; tap ▶ Run to see the results.'); }, 'run');
@@ -174,7 +174,7 @@ export function schematicTab(root) {
   const tray = el('div', { class: 'sch-tray' });
   for (const t of S.PALETTE) {
     const cv = el('canvas', { width: 96, height: 56, class: 'ico' });
-    const b = el('button', { class: 'tb', type: 'button', title: S.TYPES[t].label, onclick: () => { placeType = t; setMode('place'); } }, cv, el('span', { text: shortName(t) }));
+    const b = el('button', { class: 'tb', type: 'button', title: S.TYPES[t].label, onclick: () => { if (placeType !== t) placeRot = 0; placeType = t; setMode('place'); } }, cv, el('span', { text: shortName(t) }));
     b.dataset.type = t;
     tray.append(b);
     requestAnimationFrame(() => drawIcon(cv, t));
@@ -268,7 +268,7 @@ export function schematicTab(root) {
   const whatSel = el('select', { class: 'sel sm', 'aria-label': 'What to move' }, el('option', { value: 'part', text: 'move part' }), el('option', { value: 'label', text: 'move label' }));
   whatSel.onchange = () => { nudgeWhat = whatSel.value; };
   const nudgeBar = el('div', { class: 'pcb-nudge', hidden: true }, el('span', { class: 'muted', text: 'Nudge' }),
-    btn('◀', () => nudgeSch(-1, 0), 'icon'), btn('▲', () => nudgeSch(0, -1), 'icon'), btn('▼', () => nudgeSch(0, 1), 'icon'), btn('▶', () => nudgeSch(1, 0), 'icon'), whatSel);
+    btn('◀', () => nudgeSch(-1, 0), 'icon'), btn('▲', () => nudgeSch(0, -1), 'icon'), btn('▼', () => nudgeSch(0, 1), 'icon'), btn('▶', () => nudgeSch(1, 0), 'icon'), whatSel, btn('⧉ Duplicate', () => duplicateSel()));
   root.append(el('div', { class: 'sch-sticky' }, top, tray), wrap, nudgeBar, status, scopeBox, panelBox);
   setFloat(floating);
   // ---------- PCB view (same circuit, board layout + G-code) ----------
@@ -311,7 +311,7 @@ export function schematicTab(root) {
       wire: 'Tap a pin (yellow dot) or grid point to start, tap again to bend / finish. Ends automatically on a pin or wire.',
       delete: 'Tap a part or a wire to delete it.',
       meter: '🔍 Multimeter: tap a point for the RED probe, then a point for the BLACK probe. Reads red minus black. Tap again to move the red probe. Break parts with 🔧 Fault in their panel.',
-      place: `Tap the grid to place the ${S.TYPES[placeType]?.label}.`,
+      place: `Tap the grid to place a ${S.TYPES[placeType]?.label}. Keep tapping for more of the same; ↻ / R turns them; ↖ Select or Esc when done.`,
     }[m]);
     draw();
   }
@@ -444,7 +444,7 @@ export function schematicTab(root) {
     drawTip();
     drawProbes();
     if (mode === 'place' && hover) {
-      const ghost = { id: -1, type: placeType, x: Math.round(hover[0]), y: Math.round(hover[1]), rot: 0, props: S.TYPES[placeType].props, name: '' };
+      const ghost = { id: -1, type: placeType, x: Math.round(hover[0]), y: Math.round(hover[1]), rot: placeRot, props: S.TYPES[placeType].props, name: '' };
       ctx.globalAlpha = 0.45; drawPart(ghost); ctx.globalAlpha = 1;
     }
   }
@@ -718,6 +718,7 @@ export function schematicTab(root) {
   canvas.addEventListener('pointermove', (e) => {
     const [px, py] = pos(e);
     if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, [px, py]);
+    lastPtr = [wx(px), wy(py)];
     if (!down) { if (mode === 'wire' || mode === 'place') { hover = [wx(px), wy(py)]; draw(); } return; }
     if (down.pinch && ptrs.size >= 2) {
       const v = [...ptrs.values()], d = Math.hypot(v[0][0] - v[1][0], v[0][1] - v[1][1]), [mx, my] = mid();
@@ -866,9 +867,10 @@ export function schematicTab(root) {
   function tap(x, y) {
     if (mode === 'place') {
       const p = S.addPart(c, placeType, Math.round(x), Math.round(y));
-      sel = { kind: 'part', id: p.id }; hover = null;
-      setMode('select'); commit();
-      say(`${p.name} placed. Drag to move, ↻ to rotate, then wire it with 〰 Wire.`);
+      if (placeRot) { p.rot = placeRot; }
+      sel = { kind: 'part', id: p.id };
+      commit();     // stay in place mode: tap again for another one of the same part
+      say(`${p.name} placed. Tap again for another ${shortName(placeType)}, ↻ / R turns the next ones, ↖ Select (or Esc) when done.`);
       return;
     }
     if (mode === 'delete') {
@@ -934,7 +936,21 @@ export function schematicTab(root) {
   }
   let lastEmptyTap = null;
 
+  // ⧉ duplicate / copy / paste: same type, value, rotation and settings; a fresh name (R1 → R2 …)
+  function placeCopy(src, at) {
+    const q = S.addPart(c, src.type, at ? Math.round(at[0]) : src.x + 4, at ? Math.round(at[1]) : src.y, src.rot);
+    q.props = structuredClone(src.props); delete q.props.run; delete q.props.fault; delete q.props.pinsManual;
+    if (src.lbl) q.lbl = [...src.lbl];
+    for (let k = 0; k < 40 && c.parts.some(o => o !== q && Math.abs(o.x - q.x) < 2 && Math.abs(o.y - q.y) < 2); k++) q.x += 4;   // don't drop it on top of another part
+    sel = { kind: 'part', id: q.id }; if (mode !== 'select') setMode('select'); commit();
+    say(`${q.name} added (copy of ${src.name ?? q.type}). Drag it into place. Ctrl+D / ⧉ again for more.`);
+    return q;
+  }
+  function duplicateSel() { const p = selPart(); if (!p) return say('Select a part first, then ⧉ Duplicate.'); clip = structuredClone(p); placeCopy(p); }
+  function copySel() { const p = selPart(); if (!p) return say('Select a part to copy.'); clip = structuredClone(p); say(`${p.name} copied. Ctrl+V pastes it where the mouse is (or next to it).`); }
+  function pasteClip() { if (!clip) return say('Nothing copied yet: select a part and Ctrl+C (or ⧉).'); placeCopy(clip, lastPtr); }
   function rotateSel() {
+    if (mode === 'place') { placeRot = (placeRot + 1) & 3; draw(); return say(`Next ${shortName(placeType)}s are turned ${placeRot * 90}°.`); }
     const p = selPart(); if (!p) return say('Select a part first, then ↻.');
     const d = { p, ends: attachedEnds(p) };
     p.rot = (p.rot + 1) & 3; followPins(d); commit();
@@ -956,6 +972,9 @@ export function schematicTab(root) {
     else if (k.startsWith('arrow') && mode === 'select' && sel) { e.preventDefault(); const m = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] }[k]; nudgeSch(m[0], m[1]); }
     else if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSel(); } else if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); }
+    else if ((e.ctrlKey || e.metaKey) && k === 'd') { e.preventDefault(); duplicateSel(); }
+    else if ((e.ctrlKey || e.metaKey) && k === 'c' && selPart()) { e.preventDefault(); copySel(); }
+    else if ((e.ctrlKey || e.metaKey) && k === 'v') { e.preventDefault(); pasteClip(); }
   });
 
   // ---------- properties + readings panel ----------
@@ -1153,6 +1172,7 @@ export function schematicTab(root) {
     nameInp.addEventListener('change', () => { p.name = nameInp.value.trim().slice(0, 12) || p.name; commit(); });
     panel.append(el('div', { class: 'sp-head' }, nameInp, el('span', { class: 'muted', text: t.label }),
       el('button', { class: 'btn', type: 'button', text: '↻', title: 'Rotate (R)', onclick: rotateSel }),
+      el('button', { class: 'btn', type: 'button', text: '⧉', title: 'Duplicate (Ctrl+D): same part and value, next to it', onclick: duplicateSel }),
       el('button', { class: 'btn', type: 'button', text: '🗑', title: 'Delete', onclick: () => { c.parts = c.parts.filter(x => x !== p); sel = null; commit(); } }),
       p.lbl ? el('button', { class: 'btn', type: 'button', text: '⟲ Label', title: 'Put the label back', onclick: () => { delete p.lbl; commit(); } }) : null));
     const f = el('div', { class: 'fields' });
