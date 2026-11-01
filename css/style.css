@@ -13,6 +13,8 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 var(--sans); }
 body { min-height: 100%; }
+/* phones with a notch / status bar inside the app: start the page below it, so the sticky top bar doesn't slide over the first content */
+#app { padding-top: env(safe-area-inset-top, 0px); }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); background: var(--panel); z-index: 20; }
 code { font-family: var(--mono); font-size: .92em; background: var(--line); padding: 1px 5px; border-radius: 4px; }
 
@@ -36,7 +38,7 @@ code { font-family: var(--mono); font-size: .92em; background: var(--line); padd
 .tab.on { color: var(--accent); border-bottom-color: var(--accent); }
 .tab:focus-visible, .btn:focus-visible, .segb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-main { max-width: 1000px; margin: 0 auto; padding-block: 14px 60px;
+main { max-width: 1000px; margin: 0 auto; padding-block: 18px 60px;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .pane { display: flex; flex-direction: column; gap: 14px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
