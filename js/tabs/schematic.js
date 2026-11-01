@@ -47,7 +47,7 @@ export function schematicTab(root) {
   const VDIVS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
   const SAMPLES = 400;      // samples across one scope screen (10 divisions)
   const sim = { t: 0, state: new Map(), buf: [], paused: false, tdiv: +store.get('sch.tdiv', '0.005'), speed: store.get('sch.speed2', 'screen'), next: null,
-    v1: store.get('sch.v1', 'auto'), v2: store.get('sch.v2', 'auto') };
+    v1: store.get('sch.v1', 'auto'), v2: store.get('sch.v2', 'auto'), p1: +store.get('sch.p1', '0') || 0, p2: +store.get('sch.p2', '0') || 0 };
   const dtOf = () => sim.tdiv * 10 / SAMPLES;
   const timeMode = () => running && S.isDynamic(c);
   function solve() {
@@ -253,8 +253,12 @@ export function schematicTab(root) {
   let floating = store.get('sch.float', '0') === '1';
   const pTitle = el('b', { text: '⠿ Settings' });
   const pRun = btn('', toggleRun, 'run');
+  // 📈 put the oscilloscope inside the floating window (under its title bar), so it stays in view beside the circuit
+  let scopeFloat = store.get('sch.scopefloat', '0') === '1';
+  const pScope = btn('📈', () => { scopeFloat = !scopeFloat; store.set('sch.scopefloat', scopeFloat ? '1' : '0'); placeScope(); say(scopeFloat ? 'Oscilloscope moved into the floating window (shows while a time simulation runs).' : 'Oscilloscope back under the circuit.'); });
+  pScope.title = 'Oscilloscope in this window';
   const pMin = btn('–', () => { panel.hidden = !panel.hidden; pMin.textContent = panel.hidden ? '+' : '–'; panelBox.classList.toggle('mini', panel.hidden); keepIn(); }, 'icon');
-  const pHead = el('div', { class: 'sch-phead', hidden: true }, pTitle, el('span', { class: 'sch-phbtn' }, pRun, btn('⟲ t = 0', () => { resetSim(); solve(); draw(); say('Time reset: clock back to 0, capacitors empty, coils without current, sketches restarted.'); }), pMin, btn('✕ Dock', () => setFloat(false))));
+  const pHead = el('div', { class: 'sch-phead', hidden: true }, pTitle, el('span', { class: 'sch-phbtn' }, pRun, pScope, btn('⟲ t = 0', () => { resetSim(); solve(); draw(); say('Time reset: clock back to 0, capacitors empty, coils without current, sketches restarted.'); }), pMin, btn('✕ Dock', () => setFloat(false))));
   const panelBox = el('div', { class: 'sch-pbox' }, pHead, panel);
   function keepIn() {
     if (!floating) return;
@@ -265,7 +269,7 @@ export function schematicTab(root) {
   }
   function setFloat(v) {
     floating = v; store.set('sch.float', v ? '1' : '0');
-    panelBox.classList.toggle('floating', v); pHead.hidden = !v; floatBtn.classList.toggle('on', v);
+    panelBox.classList.toggle('floating', v); pHead.hidden = !v; floatBtn.classList.toggle('on', v); placeScope();
     if (!v) { panel.hidden = false; pMin.textContent = '–'; panelBox.style.left = panelBox.style.top = panelBox.style.width = panelBox.style.height = ''; return; }
     // size: drag the bottom-right corner to resize; remembered
     const sz = (store.get('sch.floatsize', '') || '').split(',').map(Number);
@@ -304,8 +308,15 @@ export function schematicTab(root) {
   const resetBtn = el('button', { class: 'sb', type: 'button', text: '⟲ t = 0', onclick: () => { resetSim(); solve(); draw(); say('Time reset: capacitors empty, coils without current.'); } });
   const autoBtn = el('button', { class: 'sb', type: 'button', text: 'Auto time', onclick: () => autoTime() });
   const tInfo = el('div', { class: 'scope-info' });
+  // vertical position of each trace, in divisions (+ = up). Same speed + same amplitude? Move one up to see both.
+  const posLbl = [el('span', { class: 'pos-v' }), el('span', { class: 'pos-v' })];
+  const syncPos = () => { posLbl[0].textContent = (sim.p1 > 0 ? '+' : '') + sim.p1; posLbl[1].textContent = (sim.p2 > 0 ? '+' : '') + sim.p2; };
+  const movePos = (k, d) => { const key = k ? 'p2' : 'p1'; sim[key] = d === 0 ? 0 : Math.max(-4, Math.min(4, Math.round((sim[key] + d) * 2) / 2)); store.set('sch.' + key, String(sim[key])); syncPos(); drawScope(); };
+  const posCtl = (k, col) => el('span', { class: 'pos-ctl', style: `border-color:${col}` }, el('b', { text: `CH${k + 1}`, style: `color:${col}` }),
+    btn('▲', () => movePos(k, 0.5), 'icon'), btn('▼', () => movePos(k, -0.5), 'icon'), posLbl[k], btn('0', () => movePos(k, 0), 'icon'));
+  syncPos();
   const scopeBox = el('div', { class: 'scope-box' }, el('div', { class: 'scope-head' }, el('b', { text: '📈 Oscilloscope' }), tInfo),
-    scv, el('div', { class: 'scope-ctl' }, pauseBtn, resetBtn, autoBtn, tSel, spSel, v1Sel, v2Sel));
+    scv, el('div', { class: 'scope-ctl' }, pauseBtn, resetBtn, autoBtn, tSel, spSel, v1Sel, v2Sel), el('div', { class: 'scope-ctl' }, posCtl(0, '#FFE16B'), posCtl(1, '#4FC3F7')));
   scopeBox.hidden = true;
   // nudge arrows: move the selected part (wires follow), wire, or label one step
   let nudgeWhat = 'part';
@@ -313,7 +324,22 @@ export function schematicTab(root) {
   whatSel.onchange = () => { nudgeWhat = whatSel.value; };
   const nudgeBar = el('div', { class: 'pcb-nudge', hidden: true }, el('span', { class: 'muted', text: 'Nudge' }),
     btn('◀', () => nudgeSch(-1, 0), 'icon'), btn('▲', () => nudgeSch(0, -1), 'icon'), btn('▼', () => nudgeSch(0, 1), 'icon'), btn('▶', () => nudgeSch(1, 0), 'icon'), whatSel, btn('⧉ Duplicate', () => duplicateSel()));
-  root.append(el('div', { class: 'sch-sticky' }, top, tray), wrap, nudgeBar, status, scopeBox, panelBox);
+  const scopeHome = el('div', { class: 'scope-home' });
+  root.append(el('div', { class: 'sch-sticky' }, top, tray), wrap, nudgeBar, status, scopeHome, panelBox);
+  scopeHome.append(scopeBox);
+  function placeScope() {
+    const inF = scopeFloat && floating;
+    if (inF && scopeBox.parentNode !== panelBox) panelBox.insertBefore(scopeBox, panel);
+    if (!inF && scopeBox.parentNode !== scopeHome) scopeHome.append(scopeBox);
+    scopeBox.classList.toggle('in-float', inF); pScope.classList.toggle('on', scopeFloat);
+    panelBox.classList.toggle('has-scope', inF);
+    if (inF && panelBox.offsetHeight && panelBox.offsetHeight < 520) {
+      const nh = Math.min(600, innerHeight - 16); panelBox.style.height = nh + 'px';
+      panelBox.style.top = Math.max(4, Math.min(parseFloat(panelBox.style.top) || 0, innerHeight - nh - 8)) + 'px';
+    }
+    requestAnimationFrame(() => { drawScope(); keepIn(); });
+  }
+  placeScope();
   setFloat(floating);
   // ---------- PCB view (same circuit, board layout + G-code) ----------
   let view2 = 'sch';
@@ -721,8 +747,10 @@ export function schematicTab(root) {
     const on1 = wired(0), on2 = wired(1);
     const clampY = (py) => Math.max(-5, Math.min(h + 5, py));
     const plot = (k, vdiv, col) => {
+      const off = k === 1 ? sim.p1 : sim.p2, y0 = h / 2 - off * (h / 8);
+      x.fillStyle = col; x.beginPath(); x.moveTo(0, y0 - 5); x.lineTo(7, y0); x.lineTo(0, y0 + 5); x.fill();     // ◀ 0 V marker of this channel
       x.strokeStyle = col; x.lineWidth = 2; x.beginPath();
-      seg.forEach((s, i) => { const px = i / (SAMPLES - 1) * w, py = clampY(h / 2 - s[k] / vdiv * (h / 8)); i ? x.lineTo(px, py) : x.moveTo(px, py); });
+      seg.forEach((s, i) => { const px = i / (SAMPLES - 1) * w, py = clampY(y0 - s[k] / vdiv * (h / 8)); i ? x.lineTo(px, py) : x.moveTo(px, py); });
       x.stroke();
     };
     if (on2) plot(2, d2, '#4FC3F7'); if (on1) plot(1, d1, '#FFE16B');
