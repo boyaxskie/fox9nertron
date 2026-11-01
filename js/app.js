@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '2.1.0';
+export const VERSION = '2.1.1';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -26,6 +26,7 @@ function show(id) {
   const t = TABS.find(x => x[0] === id) ?? TABS[0];
   for (const b of nav.children) { const on = b.dataset.id === t[0]; b.classList.toggle('on', on); b.setAttribute('aria-current', on ? 'page' : 'false'); if (on) b.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
   for (const [k, pane] of built) pane.hidden = k !== t[0];
+  main.classList.toggle('wide', t[0] === 'schematic');     // the schematic / PCB uses the whole screen width
   if (!built.has(t[0])) {
     const pane = el('div', { class: 'pane' });
     main.append(pane); built.set(t[0], pane);

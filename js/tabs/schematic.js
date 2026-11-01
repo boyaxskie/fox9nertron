@@ -190,13 +190,26 @@ export function schematicTab(root) {
     row.addEventListener('click', (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
   }
   const canvas = el('canvas', { class: 'sch-canvas' });
-  const wrap = el('div', { class: 'sch-wrap' }, canvas);
+  // view pad: move / zoom the drawing with buttons (no risk of dragging a part by accident). Hold to repeat.
+  const padBtn = (txt, title, fn) => {
+    const b = el('button', { class: 'vp-b', type: 'button', text: txt, title, 'aria-label': title });
+    let t = 0; const stop = () => { clearInterval(t); t = 0; };
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(); draw(); stop(); t = setInterval(() => { fn(); draw(); }, 110); });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, stop);
+    return b;
+  };
+  const step = () => Math.max(40, H * 0.18);
+  const viewPad = el('div', { class: 'view-pad' },
+    padBtn('▲', 'Move the view up', () => { view.oy += step(); }), padBtn('▼', 'Move the view down', () => { view.oy -= step(); }),
+    padBtn('◀', 'Move the view left', () => { view.ox += step(); }), padBtn('▶', 'Move the view right', () => { view.ox -= step(); }),
+    padBtn('＋', 'Zoom in', () => zoomAt(1.18, W / 2, H / 2)), padBtn('－', 'Zoom out', () => zoomAt(1 / 1.18, W / 2, H / 2)));
+  const wrap = el('div', { class: 'sch-wrap' }, canvas, viewPad);
   const status = el('div', { class: 'sch-status' });
   const panel = el('div', { class: 'sch-panel' });
   // floating settings: the part panel can float over the page (drag its bar) so you see the circuit while changing values
   let floating = store.get('sch.float', '0') === '1';
   const pTitle = el('b', { text: '⠿ Settings' });
-  const pMin = btn('–', () => { panel.hidden = !panel.hidden; pMin.textContent = panel.hidden ? '+' : '–'; keepIn(); }, 'icon');
+  const pMin = btn('–', () => { panel.hidden = !panel.hidden; pMin.textContent = panel.hidden ? '+' : '–'; panelBox.classList.toggle('mini', panel.hidden); keepIn(); }, 'icon');
   const pHead = el('div', { class: 'sch-phead', hidden: true }, pTitle, el('span', { class: 'sch-phbtn' }, pMin, btn('✕ Dock', () => setFloat(false))));
   const panelBox = el('div', { class: 'sch-pbox' }, pHead, panel);
   function keepIn() {
@@ -209,7 +222,11 @@ export function schematicTab(root) {
   function setFloat(v) {
     floating = v; store.set('sch.float', v ? '1' : '0');
     panelBox.classList.toggle('floating', v); pHead.hidden = !v; floatBtn.classList.toggle('on', v);
-    if (!v) { panel.hidden = false; pMin.textContent = '–'; panelBox.style.left = panelBox.style.top = ''; return; }
+    if (!v) { panel.hidden = false; pMin.textContent = '–'; panelBox.style.left = panelBox.style.top = panelBox.style.width = panelBox.style.height = ''; return; }
+    // size: drag the bottom-right corner to resize; remembered
+    const sz = (store.get('sch.floatsize', '') || '').split(',').map(Number);
+    if (sz.length === 2 && sz.every(Number.isFinite)) { panelBox.style.width = Math.min(sz[0], innerWidth - 8) + 'px'; panelBox.style.height = Math.min(sz[1], innerHeight - 8) + 'px'; }
+    else panelBox.style.height = Math.round(innerHeight * 0.45) + 'px';
     const pos = (store.get('sch.floatpos', '') || '').split(',').map(Number);
     if (pos.length === 2 && pos.every(Number.isFinite)) { panelBox.style.left = pos[0] + 'px'; panelBox.style.top = pos[1] + 'px'; }
     else { panelBox.style.left = (innerWidth - Math.min(340, innerWidth - 16) - 8) + 'px'; panelBox.style.top = Math.round(innerHeight * 0.5) + 'px'; }
@@ -222,6 +239,8 @@ export function schematicTab(root) {
     const up = () => { if (!d0) return; d0 = null; store.set('sch.floatpos', parseFloat(panelBox.style.left) + ',' + parseFloat(panelBox.style.top)); };
     pHead.addEventListener('pointerup', up); pHead.addEventListener('pointercancel', up);
     addEventListener('resize', keepIn);
+    let szT = 0;
+    if ('ResizeObserver' in globalThis) new ResizeObserver(() => { if (!floating || panel.hidden) return; clearTimeout(szT); szT = setTimeout(() => store.set('sch.floatsize', panelBox.offsetWidth + ',' + panelBox.offsetHeight), 300); }).observe(panelBox);
   }
   // oscilloscope + time controls (shown while a time simulation runs)
   const scv = el('canvas', { class: 'scope-cv' });
@@ -275,7 +294,7 @@ export function schematicTab(root) {
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { LCD: 'LCD I2C', SEG7: '7-segment', DHT: 'DHT22', HCSR04: 'HC-SR04', LDR: 'LDR', PIR: 'PIR', KEYPAD: 'Keypad', BUZZER: 'Buzzer', LOCK: 'Door lock', XFMR: 'Transformer', R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -904,7 +923,16 @@ export function schematicTab(root) {
     const wi = wireAt(x, y);
     if (wi >= 0) { sel = { kind: 'wire', i: wi }; renderPanel(); draw(); return; }
     sel = null; renderPanel(); draw();
+    // double tap / double click on empty space: zoom in ×1.8 there; when already zoomed in close, back to fit
+    const now = performance.now();
+    if (lastEmptyTap && now - lastEmptyTap.t < 350 && Math.hypot(x - lastEmptyTap.x, y - lastEmptyTap.y) < 1.5) {
+      lastEmptyTap = null;
+      if (view.g >= 44) { fit(); say('Zoomed out to fit. Double tap empty space to zoom in.'); }
+      else { zoomAt(1.8, sx(x), sy(y)); say('Zoomed in. Double tap again for more, or until it fits back.'); }
+      draw();
+    } else lastEmptyTap = { t: now, x, y };
   }
+  let lastEmptyTap = null;
 
   function rotateSel() {
     const p = selPart(); if (!p) return say('Select a part first, then ↻.');
