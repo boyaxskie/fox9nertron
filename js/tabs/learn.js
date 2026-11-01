@@ -214,6 +214,20 @@ const ARTICLES = [
     tryit: ['Turn right 2 clicks, push: Blink ON, the LED blinks.', 'Move to Speed, push, turn: the blink speed changes; push again to leave.', 'Change FALLING to CHANGE in the code: every click now counts twice (CLK falls and rises).', 'Swap the CLK and DT wires: the menu moves the other way.', 'Delete the attachInterrupt line: the menu stops moving.'],
   },
   {
+    id: 'sr595sig', title: '74HC595 by hand: signal generators on SER and SRCLK', example: 'sr595sig', tag: 'Digital',
+    intro: 'No microcontroller: one signal generator is the data (SER), another the clock (SRCLK). Watch the bits walk along the 8 LEDs, one step per clock. The scope shows CH1 = clock, CH2 = data.',
+    parts: [['CLK', 'square wave 0 / 5 V, 2 Hz → SRCLK (pin 11) and RCLK (pin 12)'], ['SER', 'square wave 0 / 5 V, 0.3 Hz → SER (pin 14)'], ['U1', '74HC595 on 5 V: SRCLR (10) to 5 V, OE (13) to GND'], ['QA … QH', '8 LEDs, each through 330 Ω']],
+    steps: [
+      ['1. The clock', 'CLK = 2 Hz: 2 rising edges per second, one every 1 ÷ 2 = <b>0.5 s</b>. Each rising edge = one shift.'],
+      ['2. The data', 'SER = 0.3 Hz: one period = 1 ÷ 0.3 = 3.33 s, half HIGH (1.67 s), half LOW. 1.67 s ÷ 0.5 s per clock ≈ <b>3–4 clocks</b> read a 1, then 3–4 clocks read a 0. That is why groups of 3–4 lit LEDs walk along.'],
+      ['3. What one clock does', 'On the rising edge of SRCLK the chip reads SER right then: that bit goes into QA, the old QA moves to QB, QB to QC … QH out to QH\' (pin 9, for a next chip). SER may change any time between clocks: only its level at the edge counts.'],
+      ['4. RCLK tied to SRCLK', 'Here the latch clock is the same wire as the shift clock. At each edge the outputs copy the shift register as it was <b>just before</b> that shift, so the LEDs run one step behind the inside. With a microcontroller you pulse RCLK once after all 8 shifts instead, so all LEDs change together.'],
+      ['5. Why 5 V on SRCLR and GND on OE', 'SRCLR (pin 10) LOW = clear everything: keep it HIGH. OE (pin 13) HIGH = all outputs off: keep it LOW. Both are "active LOW" pins, marked with a bar over the name in datasheets.'],
+      ['6. LED resistors', 'Output HIGH ≈ 5 V, red LED ≈ 2 V: (5 − 2) ÷ 330 Ω = 0.009 A = <b>9 mA</b> per LED. 8 LEDs = 72 mA total, the 74HC595 allows 70 mA for the whole chip: right at the limit, so 470 Ω–1 kΩ is safer on a real board.'],
+    ],
+    tryit: ['Change SER to 1 Hz: the groups get shorter (1 lit, 1 dark: 0.5 s HIGH = 1 clock).', 'Change CLK to 5 Hz: the bits run faster.', 'Change SER duty to 10 %: single lit LEDs walk along.', 'Unhook RCLK from the clock (delete the short wire) : the LEDs stop updating, even though the bits keep shifting inside (tap U1: "Shift register" keeps changing).'],
+  },
+  {
     id: 'relay10', title: '10 relays on 3 wires: 74HC595 shift registers in a chain', example: 'relay10', tag: 'Microcontroller',
     intro: 'Ten relay modules would need ten GPIO pins. A 74HC595 shift register turns 3 pins into 8 outputs, and chips can be chained (cascaded) for 16, 24, 32… outputs on the same 3 pins. Here an ESP32 drives two of them for 10 relay modules, and you switch the relays by typing in the Serial box: 3, on 3, off 3, all on, all off, or a binary pattern like 1000000001.',
     parts: [['ESP32', 'GPIO19 → SER, GPIO18 → SRCLK, GPIO5 → RCLK'], ['U1, U2', '74HCT595, U1 QH\' (pin 9) → U2 SER (pin 14)'], ['RLY1–RLY10', '5 V relay modules, LOW trigger (IN LOW = ON)'], ['PSU', '5 V supply for the chips and relays, GND shared with the ESP32']],

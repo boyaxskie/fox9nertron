@@ -1438,6 +1438,30 @@ export function example(name) {
     W(-9, 1, -7, 1); W(-7, 1, -7, 11); W(-7, 11, 6, 11); W(6, 11, 6, 7); W(6, 7, 4, 7);
     // LED on GPIO23 through 330 Ω
     W(4, -7, 5, -7); W(5, -7, 5, -10); W(9, -10, 10, -10); W(14, -10, 15, -10);
+  } else if (name === 'sr595sig') {
+    // 74HC595 by hand: one signal generator is the DATA (SER), another the CLOCK (SRCLK). RCLK tied to SRCLK. 8 LEDs show QA … QH.
+    const u = addPart(c, 'SR595', 0, 0); u.name = 'U1'; u.lbl = [4.5, 0];
+    const clk = addPart(c, 'SIG', -12, 2, 1); clk.name = 'CLK'; Object.assign(clk.props, { wave: 'pwm', f: 2, amp: 5, off: 0, duty: 50 });
+    const ser = addPart(c, 'SIG', -24, 2, 1); ser.name = 'SER'; Object.assign(ser.props, { wave: 'pwm', f: 0.3, amp: 5, off: 0, duty: 50 });
+    const b = addPart(c, 'BAT', 8, -9); b.name = 'B1'; b.props.v = 5;
+    addPart(c, 'SCOPE', -6, 12);
+    addPart(c, 'GND', -12, 6); addPart(c, 'GND', 0, 7); addPart(c, 'GND', 2, 9); addPart(c, 'GND', 11, -9); addPart(c, 'GND', 8, 16); addPart(c, 'GND', -6, 14);
+    // SER and CLK into the chip, RCLK joined to the clock
+    W(-24, 0, -24, -4); W(-24, -4, -4, -4); W(-12, 0, -12, -3); W(-12, -3, -4, -3); W(-6, -3, -6, -2); W(-6, -2, -4, -2);
+    W(-24, 4, -24, 6); W(-24, 6, -12, 6); W(-12, 4, -12, 6);
+    // 5 V to VCC and SRCLR, OE to ground
+    W(0, -6, 0, -9); W(0, -9, 6, -9); W(2, -6, 2, -8); W(2, -8, 0, -8); W(10, -9, 11, -9); W(2, 7, 2, 9);
+    // QA … QH → 330 Ω → LED → ground
+    for (let k = 0; k < 8; k++) {
+      const x = 8 + 4 * k, y = -4 + k;
+      W(4, y, x, y); W(x, y, x, 6);
+      const r = addPart(c, 'R', x, 8, 1); r.name = 'R' + (k + 1); r.props.r = 330;
+      const l = addPart(c, 'LED', x, 13, 1); l.name = 'Q' + 'ABCDEFGH'[k]; l.props.color = 'red';
+      W(x, 10, x, 11); W(x, 15, x, 16); if (k < 7) W(x, 16, x + 4, 16);
+    }
+    // scope: CH1 = clock, CH2 = data
+    W(-12, 0, -10, 0); W(-10, 0, -10, 11); W(-10, 11, -9, 11);
+    W(-24, 0, -26, 0); W(-26, 0, -26, 13); W(-26, 13, -9, 13);
   } else if (name === 'relay10') {
     // ESP32 → two 74HCT595 in a chain → 10 relay modules (active LOW). Serial commands switch them (type in the Serial box).
     const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.relay10; m.props.run = true;
