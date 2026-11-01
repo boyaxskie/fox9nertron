@@ -8,7 +8,7 @@ const A = (v) => v.toFixed(6);
 const uuid = () => (crypto?.randomUUID?.() ?? 'f9t-' + Date.now().toString(16));
 
 function head(func, same) {
-  return ['G04 FOX9NERTRON GERBER X2 FILE (Proteus CADCAM style)*', '%TF.GenerationSoftware,Fox9ner,Fox9nertron,2.1.5*%', `%TF.CreationDate,${new Date().toISOString().slice(0, 19)}+00:00*%`,
+  return ['G04 FOX9NERTRON GERBER X2 FILE (Proteus CADCAM style)*', '%TF.GenerationSoftware,Fox9ner,Fox9nertron,2.1.6*%', `%TF.CreationDate,${new Date().toISOString().slice(0, 19)}+00:00*%`,
     `%TF.FileFunction,${func}*%`, '%TF.FilePolarity,Positive*%', '%TF.Part,Single*%', `%TF.SameCoordinates,{${same}}*%`, '%FSLAX45Y45*%', '%MOMM*%', 'G01*'];
 }
 // pad size as a round aperture (square / oval pads become round, like Proteus' round pads)
