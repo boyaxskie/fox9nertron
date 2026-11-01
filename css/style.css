@@ -301,3 +301,8 @@ main.wide { max-width: none; }
 .sch-pbox.floating { resize: both; overflow: hidden; min-width: 240px; min-height: 120px; max-width: 96vw; max-height: 90vh; }
 .sch-pbox.floating.mini { height: auto !important; resize: none; min-height: 0; }
 .sch-pbox.floating .sch-panel { flex: 1 1 auto; }
+.relay-box { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line, #2a3340); border-radius: 10px; }
+.relay-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; max-width: 320px; }
+.relay-pick { position: relative; font-weight: 700; padding: 8px 0; }
+.relay-pick.on { background: #1565C0; color: #fff; border-color: #42A5F5; }
+.relay-pick.live::after { content: ''; position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: #FF1744; box-shadow: 0 0 6px #FF1744; }

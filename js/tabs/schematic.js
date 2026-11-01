@@ -254,7 +254,7 @@ export function schematicTab(root) {
   const pTitle = el('b', { text: '⠿ Settings' });
   const pRun = btn('', toggleRun, 'run');
   const pMin = btn('–', () => { panel.hidden = !panel.hidden; pMin.textContent = panel.hidden ? '+' : '–'; panelBox.classList.toggle('mini', panel.hidden); keepIn(); }, 'icon');
-  const pHead = el('div', { class: 'sch-phead', hidden: true }, pTitle, el('span', { class: 'sch-phbtn' }, pRun, pMin, btn('✕ Dock', () => setFloat(false))));
+  const pHead = el('div', { class: 'sch-phead', hidden: true }, pTitle, el('span', { class: 'sch-phbtn' }, pRun, btn('⟲ t = 0', () => { resetSim(); solve(); draw(); say('Time reset: clock back to 0, capacitors empty, coils without current, sketches restarted.'); }), pMin, btn('✕ Dock', () => setFloat(false))));
   const panelBox = el('div', { class: 'sch-pbox' }, pHead, panel);
   function keepIn() {
     if (!floating) return;
@@ -1049,7 +1049,51 @@ export function schematicTab(root) {
     return el('label', { class: 'field' }, el('span', { class: 'lab', text: label }), el('span', { class: 'box' }, inp, el('span', { class: 'unit', text: unit })));
   }
   // ---------- 💻 code editor + serial monitor for ESP32 / UNO ----------
-  let syncSerial = null;
+  let syncSerial = null, syncRelays = null;
+  // ---------- 🔌 relay control: for a running sketch with "const int NRELAYS = n" (the 74HC595 relay sketch) ----------
+  const relayCount = (b) => +((b?.props.code ?? '').match(/const\s+int\s+NRELAYS\s*=\s*(\d+)/)?.[1] ?? 0);
+  const relayBoard = () => c.parts.find(b => S.isBoard(b.type) && b.props.run && relayCount(b) > 0 && relayCount(b) <= 32);
+  const relayPicks = new Map();     // board id → relays you ticked (kept while you switch panels)
+  function relayControl(b) {
+    const nr = relayCount(b), sel0 = relayPicks.get(b.id) ?? new Set(); relayPicks.set(b.id, sel0);
+    const tx = (cmd) => { const rt = sketches.get(b.id); if (!b.props.run || !rt?.send) { say('Press ▶ Run first.'); return; } if (!running) { running = true; store.set('sch.run', '1'); syncTop(); } rt.send(cmd + '\n'); say(`Sent "${cmd}" to ${b.name}.`); };
+    const btns = [], grid = el('div', { class: 'relay-grid' });
+    for (let k = 0; k < nr; k++) {
+      const bt = el('button', { class: 'btn relay-pick' + (sel0.has(k) ? ' on' : ''), type: 'button', text: String(k + 1), title: `Relay ${k + 1}`, onclick: () => { sel0.has(k) ? sel0.delete(k) : sel0.add(k); bt.classList.toggle('on', sel0.has(k)); } });
+      btns.push(bt); grid.append(bt);
+    }
+    const mark = (all) => { sel0.clear(); if (all) for (let k = 0; k < nr; k++) sel0.add(k); btns.forEach((bt, k) => bt.classList.toggle('on', sel0.has(k))); };
+    const pattern = () => btns.map((_, k) => (sel0.has(k) ? '1' : '0')).join('');
+    const tIn = el('input', { class: 'num', type: 'number', min: '0', step: '0.5', value: b.props.relayReset ?? '0', style: 'width:5.5em' });
+    const setT = () => { const v = Math.max(0, +tIn.value || 0); b.props.relayReset = v; tx('time ' + v); };
+    tIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); setT(); } });
+    const status = el('div', { class: 'note' });
+    syncRelays = () => {
+      const rt = sketches.get(b.id), lines = rt?.lines ?? [];
+      const m = [...lines].reverse().map(l => l.text.match(/Relays[^:]*:\s*([01]+)/)).find(Boolean), live = m?.[1] ?? '';
+      btns.forEach((bt, k) => bt.classList.toggle('live', live[k] === '1'));
+      const t = [...lines].reverse().map(l => l.text.match(/Reset time:\s*(.*)/)).find(Boolean);
+      const txt = !b.props.run ? 'Press ▶ Run: the sketch must be running.' : `Red dot = relay really ON. ${live ? 'ON now: ' + ([...live].map((x, k) => (x === '1' ? k + 1 : 0)).filter(Boolean).join(', ') || 'none') + '. ' : ''}Reset time: ${t ? t[1] : 'off'}.`;
+      if (status.textContent !== txt) status.textContent = txt;
+    };
+    syncRelays();
+    return el('div', { class: 'relay-box' },
+      el('b', { text: `🔌 Relays (${b.name}): tap numbers to select` }), grid,
+      el('div', { class: 'row', style: 'display:flex;gap:6px;flex-wrap:wrap' },
+        el('button', { class: 'btn primary', type: 'button', text: '⚡ ON selected', onclick: () => sel0.size ? tx('on ' + [...sel0].sort((x, y) => x - y).map(k => k + 1).join(',')) : say('Tap some relay numbers first.') }),
+        el('button', { class: 'btn', type: 'button', text: 'OFF selected', onclick: () => sel0.size ? tx('off ' + [...sel0].sort((x, y) => x - y).map(k => k + 1).join(',')) : say('Tap some relay numbers first.') }),
+        el('button', { class: 'btn', type: 'button', text: 'Only selected', title: 'Selected ON, all others OFF', onclick: () => tx(pattern()) })),
+      el('div', { class: 'row', style: 'display:flex;gap:6px;flex-wrap:wrap' },
+        el('button', { class: 'btn', type: 'button', text: 'Select all', onclick: () => mark(true) }),
+        el('button', { class: 'btn', type: 'button', text: 'Clear', onclick: () => mark(false) }),
+        el('button', { class: 'btn', type: 'button', text: 'All ON', onclick: () => tx('all on') }),
+        el('button', { class: 'btn', type: 'button', text: 'All OFF', onclick: () => tx('all off') })),
+      el('div', { class: 'row', style: 'display:flex;gap:6px;align-items:center;flex-wrap:wrap' },
+        el('span', { text: '⏱ Reset time' }), tIn, el('span', { text: 's' }),
+        el('button', { class: 'btn', type: 'button', text: 'Set', onclick: setT })),
+      el('div', { class: 'note', text: 'Reset time: each relay switches itself OFF that many seconds after it went ON. 0 = stays ON.' }),
+      status);
+  }
   function codeBox(p) {
     const q = p.props, esp = p.type === 'ESP32';
     const ta = el('textarea', { class: 'code-ed', spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', rows: 14 });
@@ -1215,7 +1259,7 @@ export function schematicTab(root) {
   }
 
   function renderPanel() {
-    syncNudgeSch();
+    syncNudgeSch(); syncRelays = null;
     panel.innerHTML = '';
     panelRefresh = null; syncSerial = null;
     if (!res) solve();
@@ -1296,7 +1340,8 @@ export function schematicTab(root) {
         note('Pins VCC (5 V), OUT, GND. OUT is 3.3 V while it sees motion: digitalRead() it directly, ESP32 or UNO. Tap the sensor on the drawing to toggle motion.')); break;
       case 'SR595': f.append(choice('Chip', q.model ?? '74HC595', [['74HC595', '74HC595 (inputs need 0.7 × VCC: 3.5 V at 5 V)'], ['74HCT595', '74HCT595 (inputs need 2 V: OK from a 3.3 V ESP32 at 5 V)']], v => { q.model = v; }),
         note('Pins: 14 SER data in · 11 SRCLK shift clock · 12 RCLK latch · 10 SRCLR to VCC · 13 OE to GND · 9 QH\' → SER of the next chip (cascade) · 16 VCC · 8 GND. Code: digitalWrite(LATCH, LOW); shiftOut(DATA, CLOCK, MSBFIRST, byte); digitalWrite(LATCH, HIGH); — the last chip\'s byte first.')); break;
-      case 'RMOD': f.append(choice('Trigger', q.trig ?? 'low', [['low', 'LOW level trigger (most modules: IN LOW = relay ON)'], ['high', 'HIGH level trigger (jumper on H)']], v => { q.trig = v; }),
+      case 'RMOD': { const rb = relayBoard(); if (rb) f.append(relayControl(rb)); }
+        f.append(choice('Trigger', q.trig ?? 'low', [['low', 'LOW level trigger (most modules: IN LOW = relay ON)'], ['high', 'HIGH level trigger (jumper on H)']], v => { q.trig = v; }),
         note('VCC 5 V, GND, IN from the controller (≈ 3 mA). COM / NO / NC are the switch: NO closes when the relay is ON. Load side up to 10 A 250 VAC on the usual SRD-05VDC relay. Each relay coil takes ≈ 70 mA: 10 relays ≈ 0.7 A, so use a 5 V supply, not the board\'s pin.')); break;
       case 'ENC': {
         const row = el('div', { class: 'row', style: 'display:flex;gap:6px;flex-wrap:wrap' },
@@ -1346,6 +1391,7 @@ export function schematicTab(root) {
         field('Current limit (set with the trimpot)', plain(q.ilim), 'A', v => { q.ilim = Math.max(0.05, Math.min(2, v)); }),
         note('A4988: each rising edge on STEP = one (micro)step. DIR picks the direction. EN LOW (or open) = driver on. VDD = logic 3–5.5 V, VMOT = motor 8–35 V with a 100 µF capacitor close by. Tie RST to SLP on the module.')); break;
       case 'ESP32': case 'UNO': {
+        if (relayCount(p) > 0 && relayCount(p) <= 32) f.append(relayControl(p));
         const B = S.BOARDS[p.type]; q.pins ??= {};
         const cur = boardPin(p), pin = B.pins.find(x => x.n === cur);
         const label = (x) => { const m = x.k === 'gpio' ? (q.pins[x.n]?.mode ?? 'in') : x.k; return `${x.n}${x.label && x.label !== x.n ? ` (${x.label})` : ''} · ${MODE_SHORT[m]}`; };
@@ -1392,7 +1438,7 @@ export function schematicTab(root) {
     updateReadings();
     panelRefresh = updateReadings;
     function updateReadings() {
-      syncSerial?.();
+      syncSerial?.(); syncRelays?.();
       const r = res.ok ? res.parts.get(p.id) : null;
       rd.innerHTML = '';
       if (!res.ok) { rd.append(el('p', { class: 'flag ' + (res.stopped ? 'warn' : 'bad'), text: res.error })); return; }
