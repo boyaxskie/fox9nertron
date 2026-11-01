@@ -200,11 +200,16 @@ export const TYPES = {
   // LCD 16×2 with I2C backpack. Schematic pin order (top→bottom) SCL, SDA, VCC, GND; index order GND, VCC, SDA, SCL like the real header
   LCD: { label: 'LCD 16×2 (I2C backpack)', prefix: 'LCD', pins: [[-7, 2], [-7, 1], [-7, 0], [-7, -1]], box: [-7, -2.3, 7, 2.8], props: { addr: 0x27 } },
   SEG7: { label: '7-segment display', prefix: 'DS', pins: [[-3, -4], [-3, -3], [-3, -2], [-3, -1], [-3, 0], [-3, 1], [-3, 2], [-3, 3], [-3, 4]], box: [-3, -4.7, 2.6, 4.7], props: { common: 'cathode', color: 'red' } },
+  // sensors: a slider in the panel sets what they "feel"; sketches read them (DHT library, pulseIn) or the voltage does the job (LDR, PIR)
+  DHT: { label: 'DHT22 / DHT11 temp + humidity', prefix: 'U', pins: [[-3, -1], [-3, 0], [-3, 1]], box: [-3, -2.2, 2.6, 2.2], props: { model: 'DHT22', temp: 25, hum: 60 } },
+  HCSR04: { label: 'HC-SR04 ultrasonic distance', prefix: 'U', pins: [[-4, -1], [-4, 0], [-4, 1], [-4, 2]], box: [-4, -2.3, 4, 2.8], props: { cm: 50 } },
+  LDR: { label: 'LDR light sensor', prefix: 'LDR', pins: [[-2, 0], [2, 0]], box: [-2, -1.3, 2, 1.1], props: { lux: 100 } },
+  PIR: { label: 'PIR motion sensor (HC-SR501)', prefix: 'U', pins: [[-3, -1], [-3, 0], [-3, 1]], box: [-3, -2, 2.8, 2.2], props: { motion: false } },
   GND: { label: 'Ground', prefix: 'GND', pins: [[0, 0]], box: [-0.8, 0, 0.8, 1.6], props: {} },
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'LCD', 'SEG7', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'LCD', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
 export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
@@ -288,6 +293,9 @@ export function junctions(c) {
   for (const p of c.parts) for (const [x, y] of pinsOf(p)) add(x, y);
   return [...count.entries()].filter(([, n]) => n >= 3).map(([k]) => k.split(',').map(Number));
 }
+
+// LDR (GL5528 style): ≈ 10 kΩ at 10 lux, ≈ 1 kΩ in daylight, 1 MΩ dark
+export const ldrOhms = (lux) => Math.max(100, Math.min(1e6, 15000 * Math.pow(Math.max(lux, 0.01) / 10, -0.75)));
 
 // ---------- faults (Troubleshoot mode): break a part on purpose and measure it like on the bench ----------
 // open = no connection between any pins · short = the two pins below welded together (others float) · weak = drifted value
@@ -398,6 +406,15 @@ export function solveCircuit(c, sim = null, opts = {}) {
         R(S1, nS, Math.max(pr.rs, 1e-4), p, 'rs');
         const vsx = { kind: 'V', a: nS, b: S2, val: 0, gp: nA, gn: CT, gain: pr.ns / n1, owner: p, role: 'ws' }; els.push(vsx);
         els.push({ kind: 'F', a: nA, b: CT, ctrl: vsx, val: -pr.ns / n1, owner: p, role: 'fs' });
+        break;
+      }
+      case 'DHT': R(pins[0], pins[2], 3.3 / 0.0015, p, 'main'); R(pins[1], pins[0], 10000, p, 'pull'); break;       // VCC, DATA (10 kΩ pull-up on the module), GND
+      case 'HCSR04': R(pins[0], pins[3], 5 / 0.015, p, 'main'); R(pins[1], pins[3], 100000, p, 'trig'); R(pins[2], pins[3], 1000, p, 'echo'); break;   // VCC, TRIG, ECHO (low between pulses), GND
+      case 'LDR': R(a, b, ldrOhms(pr.lux), p, 'main'); break;
+      case 'PIR': {
+        // VCC, OUT, GND: OUT is 3.3 V while it sees motion (even on a 5 V supply), 0 V otherwise
+        R(pins[0], pins[2], 5 / 0.00006, p, 'main'); const n2 = inner();
+        V(n2, pins[2], pr.motion ? 3.3 : 0, p, 'src'); R(n2, pins[1], 1000, p, 'out');
         break;
       }
       case 'LCD': {
@@ -712,6 +729,11 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, v1, v2, vs, i1, i2, is, im, v: v1, i: i1, pin, pout, p: pin - pout, dots: [[0, 1, i1], [1, 2, i2], [3, 4, is]] });
       continue;
     }
+    if (p.type === 'DHT' || p.type === 'HCSR04' || p.type === 'PIR') {
+      const m = mine.find(e => e.role === 'main'), gi = p.type === 'HCSR04' ? 3 : 2, v = res.v[pins[0]] - res.v[pins[gi]];
+      parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vout: res.v[pins[1 + (p.type === 'HCSR04' ? 1 : 0)]] - res.v[pins[gi]], dots: [] });
+      continue;
+    }
     if (p.type === 'LCD') {
       const m = mine.find(e => e.role === 'main'), v = res.v[pins[1]] - res.v[pins[0]];
       parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vsda: res.v[pins[2]] - res.v[pins[0]], vscl: res.v[pins[3]] - res.v[pins[0]], dots: [[1, 0, m.i]] });
@@ -917,6 +939,11 @@ function gauss(A0, z0) {
 }
 
 // ---------- examples ----------
+const SKETCH_EX = {
+  thermo: '#include <DHT.h>\n\nDHT dht(4, DHT22);        // DATA on GPIO4\nconst int FAN = 23;\n\nvoid setup() {\n  Serial.begin(115200);\n  dht.begin();\n  pinMode(FAN, OUTPUT);\n}\n\nvoid loop() {\n  float t = dht.readTemperature();\n  float h = dht.readHumidity();\n  if (isnan(t)) {\n    Serial.println("DHT not found!");\n    delay(1000);\n    return;\n  }\n  digitalWrite(FAN, t > 30 ? HIGH : LOW);   // fan above 30 C\n  Serial.printf("%.1f C  %.0f %%  fan %s\\n", t, h, t > 30 ? "ON" : "OFF");\n  delay(1000);\n}\n',
+  parking: 'const int TRIG = 9, ECHO = 10, LED = 13;\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(TRIG, OUTPUT);\n  pinMode(ECHO, INPUT);\n  pinMode(LED, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(TRIG, LOW);\n  delayMicroseconds(2);\n  digitalWrite(TRIG, HIGH);              // 10 us pulse starts a measurement\n  delayMicroseconds(10);\n  digitalWrite(TRIG, LOW);\n  long us = pulseIn(ECHO, HIGH, 30000);   // echo time in microseconds\n  float cm = us / 58.0;\n  digitalWrite(LED, cm > 0 && cm < 20 ? HIGH : LOW);\n  Serial.print("Distance: ");\n  Serial.print(cm, 1);\n  Serial.println(" cm");\n  delay(200);\n}\n',
+  autolight: 'const int LED = 9;   // PWM pin\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  int light = analogRead(A0);              // dark = low, bright = high\n  int pwm = map(light, 0, 1023, 255, 0);   // darker = brighter LED\n  analogWrite(LED, constrain(pwm, 0, 255));\n  Serial.print("light ");\n  Serial.print(light);\n  Serial.print("   LED ");\n  Serial.println(pwm);\n  delay(200);\n}\n',
+};
 export function example(name) {
   const c = newCircuit();
   const W = (x1, y1, x2, y2) => c.wires.push({ x1, y1, x2, y2 });
@@ -1302,6 +1329,34 @@ export function example(name) {
     addPart(c, 'GND', 11, 7); addPart(c, 'GND', -6, -2);
     for (let k = 0; k < 8; k++) W(4, -5 + k, 13, -5 + k);
     W(13, 3, 11, 3); W(-4, -2, -6, -2);
+  } else if (name === 'thermo') {
+    // ESP32 + DHT22 on GPIO4: above 30 °C the FAN LED (GPIO23) turns on. Slide the DHT temperature in its panel.
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.thermo; m.props.run = true;
+    const d = addPart(c, 'DHT', 12, 3); d.name = 'DHT1'; d.props.temp = 27;
+    const r = addPart(c, 'R', 7, -7); r.name = 'R1'; r.props.r = 330;
+    const l = addPart(c, 'LED', 12, -7); l.name = 'FAN'; l.props.color = 'blue';
+    addPart(c, 'GND', 9, 4); addPart(c, 'GND', 14, -7); addPart(c, 'GND', -6, 6); W(-4, 6, -6, 6);
+    W(4, 3, 9, 3); W(4, 7, 16, 7); W(16, 7, 16, 1); W(16, 1, 9, 1); W(9, 1, 9, 2);
+    W(4, -7, 5, -7); W(9, -7, 10, -7);
+  } else if (name === 'parking') {
+    // UNO + HC-SR04 (TRIG D9, ECHO D10): LED on D13 when something is closer than 20 cm. Slide the distance in the sensor panel.
+    const m = addPart(c, 'UNO', 0, 0); m.name = 'UNO'; m.props.code = SKETCH_EX.parking; m.props.run = true;
+    const u = addPart(c, 'HCSR04', 14, 2); u.name = 'SONAR'; u.props.cm = 35;
+    const r = addPart(c, 'R', 7, 6); r.name = 'R1'; r.props.r = 220;
+    const l = addPart(c, 'LED', 12, 6); l.name = 'NEAR'; l.props.color = 'red';
+    addPart(c, 'GND', 10, 4); addPart(c, 'GND', 14, 6); addPart(c, 'GND', -6, -2);
+    W(4, 2, 10, 2); W(4, 3, 10, 3); W(-4, -5, -6, -5); W(-6, -5, -6, -9); W(-6, -9, 8, -9); W(8, -9, 8, 1); W(8, 1, 10, 1);
+    W(4, 6, 5, 6); W(9, 6, 10, 6); W(-4, -2, -6, -2);
+  } else if (name === 'autolight') {
+    // UNO + LDR / 10 kΩ divider on A0: the darker it gets, the brighter the LED on D9 (PWM). Slide the light level in the LDR panel.
+    const m = addPart(c, 'UNO', 0, 0); m.name = 'UNO'; m.props.code = SKETCH_EX.autolight; m.props.run = true;
+    const ld = addPart(c, 'LDR', -8, -2, 1); ld.name = 'LDR1'; ld.props.lux = 50;
+    const rd = addPart(c, 'R', -8, 2, 1); rd.name = 'R1'; rd.props.r = 10000;
+    const r = addPart(c, 'R', 7, 2); r.name = 'R2'; r.props.r = 220;
+    const l = addPart(c, 'LED', 12, 2); l.name = 'LAMP'; l.props.color = 'white';
+    addPart(c, 'GND', -8, 4); addPart(c, 'GND', 14, 2); addPart(c, 'GND', -6, -2);
+    W(-8, -4, -8, -5); W(-8, -5, -4, -5); W(-8, 0, -4, 0); W(-4, -2, -6, -2);
+    W(4, 2, 5, 2); W(9, 2, 10, 2);
   } else if (name === 'esp32io') {
     // ESP32 pins set by hand: D23 OUTPUT HIGH → 330 Ω → LED · D15 INPUT_PULLUP + button to GND · D34 analogRead of a 10 kΩ pot on 3.3 V
     const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';
