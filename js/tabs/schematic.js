@@ -909,9 +909,14 @@ export function schematicTab(root) {
     const q = p.props, esp = p.type === 'ESP32';
     const ta = el('textarea', { class: 'code-ed', spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', rows: 14 });
     ta.value = q.code ?? SKETCHES.blink[esp ? 'esp' : 'uno'];
-    ta.addEventListener('input', () => { q.code = ta.value; });
+    let restartT = 0;
+    ta.addEventListener('input', () => {
+      q.code = ta.value;
+      // running code restarts by itself ≈ 1 s after you stop typing (phones don't send 'change' until the keyboard closes)
+      if (q.run) { clearTimeout(restartT); restartT = setTimeout(() => { if (!q.run) return; resetSim(); store.set('sch.cur', JSON.stringify(c)); say(sketches.get(p.id)?.err ? 'Code changed: it has an error, see below the editor.' : '🔄 Code changed: sketch restarted with your edit.'); }, 1200); }
+    });
     ta.addEventListener('keydown', (e) => { if (e.key === 'Tab') { e.preventDefault(); const a = ta.selectionStart; ta.setRangeText('  ', a, ta.selectionEnd, 'end'); q.code = ta.value; } });
-    ta.addEventListener('change', () => { q.code = ta.value; if (q.run) { resetSim(); say('Code changed: sketch restarted.'); } commit(); });
+    ta.addEventListener('change', () => { clearTimeout(restartT); const was = q.code; q.code = ta.value; if (q.run && was !== undefined) { resetSim(); say('🔄 Code changed: sketch restarted with your edit.'); } commit(); });
     const ex = el('select', { class: 'sel sm', 'aria-label': 'Example sketch' }, el('option', { value: '', text: '📄 Example code…' }), Object.entries(SKETCHES).map(([k, v]) => el('option', { value: k, text: v.name })));
     ex.onchange = () => { if (!ex.value) return; ta.value = q.code = SKETCHES[ex.value][esp ? 'esp' : 'uno']; ex.value = ''; if (q.run) resetSim(); commit(); };
     const runB = el('button', { class: 'btn ' + (q.run ? '' : 'primary'), type: 'button', text: q.run ? '⏹ Stop code' : '▶ Run code', onclick: () => {
