@@ -6,6 +6,7 @@ import { wattName } from './basic.js';
 import { pcbView } from './pcb.js';
 import { createRuntime, EXAMPLES as SKETCHES } from '../sketch.js';
 import { netlist, pinLabel } from '../pcb-core.js';
+import qrcode from '../qr.js';
 // what each LCD part shows right now: id → { lines, bl, on, powered, note }
 const LCDV = new Map();
 // keypad: taps waiting for the sketch, and the key that flashes on the drawing
@@ -169,7 +170,7 @@ export function schematicTab(root) {
     runBtn, modeBtns.select, modeBtns.wire, modeBtns.delete, modeBtns.meter,
     btn('↻', () => rotateSel(), 'icon'), btn('↶', () => undo(), 'icon'), btn('↷', () => redo(), 'icon'),
     btn('Fit', () => { fit(); draw(); }), voltsBtn, dotsBtn, floatBtn,
-    btn('Projects', () => projects()), btn('Examples', () => examples()), btn('🟫 PCB', () => setView('pcb'), 'pcbbtn'));
+    btn('Projects', () => projects()), btn('📲 Share', () => share()), btn('Examples', () => examples()), btn('🟫 PCB', () => setView('pcb'), 'pcbbtn'));
   const tray = el('div', { class: 'sch-tray' });
   for (const t of S.PALETTE) {
     const cv = el('canvas', { width: 96, height: 56, class: 'ico' });
@@ -1563,6 +1564,49 @@ export function schematicTab(root) {
     panel.append(box);
   }
 
+  // ---------- 📲 share: the whole project packed into a link (+ QR code). No server: the data is in the link itself ----------
+  const b64u = (u8) => { let t = ''; for (let i = 0; i < u8.length; i += 0x8000) t += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(t).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+  const unb64u = (t) => { const b = atob(t.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((t.length + 3) % 4)); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+  async function packCircuit(obj) {
+    const raw = new TextEncoder().encode(JSON.stringify(obj));
+    if (globalThis.CompressionStream) { try { return 'z' + b64u(new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer())); } catch { } }
+    return 'j' + b64u(raw);
+  }
+  async function unpackCircuit(t) {
+    const u = unb64u(t.slice(1));
+    const bytes = t[0] === 'z' ? new Uint8Array(await new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()) : u;
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+  async function share() {
+    const data = await packCircuit(c), url = location.origin + location.pathname + '#schematic?c=' + data;
+    let qrEl;
+    try {
+      const q = qrcode(0, 'L'); q.addData(url); q.make();
+      const n = q.getModuleCount(), cell = Math.max(2, Math.floor(320 / (n + 8))), cv = el('canvas', { class: 'qr' });
+      cv.width = cv.height = (n + 8) * cell;
+      const x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, cv.width, cv.height); x.fillStyle = '#000';
+      for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (q.isDark(r, k)) x.fillRect((k + 4) * cell, (r + 4) * cell, cell, cell);
+      qrEl = el('div', { class: 'qr-box' }, cv, note(n > 120 ? 'Big circuit = dense QR: hold the phone close and steady.' : 'Scan with any phone camera.'));
+    } catch { qrEl = note(`Too big for a QR code (${url.length} characters). Send the link instead.`); }
+    const inp = el('input', { class: 'num', value: url, readonly: true, onfocus: (e) => e.target.select() });
+    const copyB = el('button', { class: 'btn primary', type: 'button', text: '📋 Copy link', onclick: async () => { try { await navigator.clipboard.writeText(url); copyB.textContent = '✔ Copied'; } catch { inp.select(); } } });
+    const shareB = navigator.share ? el('button', { class: 'btn', type: 'button', text: '📤 Send…', onclick: () => navigator.share({ title: `Fox9nertron: ${c.title ?? 'circuit'}`, url }).catch(() => { }) }) : null;
+    const d = el('dialog', { class: 'dlg' }, el('div', { class: 'dlg-title2', text: '📲 Share this circuit' }),
+      el('div', { class: 'share-box' }, qrEl, inp, el('div', { class: 'row wrap' }, copyB, shareB),
+        note(`The link holds everything: circuit, sketch (💻 Code) and the PCB layout (${(url.length / 1024).toFixed(1)} KB). Nothing is uploaded. Whoever opens it gets their own copy; their current circuit is kept in Projects.`)),
+      el('form', { method: 'dialog', class: 'dlg-buttons' }, el('button', { class: 'btn', text: 'Close' })));
+    document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
+  }
+  async function openShared() {
+    const m = /[?&]c=([A-Za-z0-9_-]+)/.exec(location.hash); if (!m) return;
+    history.replaceState(null, '', location.pathname + location.search + '#schematic');
+    let j; try { j = await unpackCircuit(m[1]); if (!j || !Array.isArray(j.parts)) throw new Error('no circuit'); } catch (e) { say('This share link is broken or cut off (' + e.message + ').'); return; }
+    let kept = '';
+    if (c.parts.length) { const a = projStore.all(), d0 = new Date(), nm = `Before shared link ${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, '0')}-${String(d0.getDate()).padStart(2, '0')} ${String(d0.getHours()).padStart(2, '0')}:${String(d0.getMinutes()).padStart(2, '0')}`; a[nm] = { json: JSON.stringify(c), t: Date.now() }; projStore.save(a); kept = ` Your previous circuit is saved in Projects as "${nm}".`; }
+    if (view2 === 'pcb') setView('sch');
+    loadCircuit(j, `📲 Opened a shared circuit${j.title ? ': ' + j.title : ''}.${kept}`);
+  }
+
   // ---------- projects ----------
   const projStore = {
     all() { try { return JSON.parse(store.get('sch.projects', '{}')) || {}; } catch { return {}; } },
@@ -1626,7 +1670,8 @@ export function schematicTab(root) {
   syncTop(); setMode('select');
   new ResizeObserver(() => resize()).observe(wrap);
   addEventListener('resize', () => resize());
-  requestAnimationFrame(() => { resetSim(); resize(); commit(false); if (store.get('sch.view', 'sch') === 'pcb') setView('pcb'); });
+  requestAnimationFrame(() => { resetSim(); resize(); commit(false); if (store.get('sch.view', 'sch') === 'pcb') setView('pcb'); openShared(); });
+  addEventListener('hashchange', () => openShared());
 }
 
 // ---------- symbols (local grid units, pin a at left) ----------

@@ -4,3 +4,5 @@ Open: https://boyaxskie.github.io/fox9nertron/ (works offline after the first vi
 
 ## Copyright
 © 2026 Yaxboom (Fox9ner). All rights reserved. See LICENSE.
+
+Third-party: js/qr.js = QR Code Generator © 2009 Kazuhiko Arase, MIT license.

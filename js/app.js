@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '2.0.1';
+export const VERSION = '2.1.0';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -49,6 +49,7 @@ function help() {
 <p><b>📟 LCD 16×2 I2C + 🔢 7-segment</b>: wire the LCD's SDA / SCL to the board (ESP32 21 / 22, UNO A4 / A5) and print to it from a sketch with LiquidCrystal_I2C: the text shows on the drawing. 7-segment segments light from the real current.</p>
 <p><b>🌡 Sensors</b>: DHT22 / DHT11 (temperature + humidity), HC-SR04 (distance), LDR (light), PIR (motion). Slide what they sense in their panel (tap a PIR to toggle motion). Sketches read them with the DHT library, pulseIn(), analogRead(), digitalRead().</p>
 <p><b>🔐 Keypad, buzzer, door lock</b>: tap keypad keys on the drawing (or in its panel); sketches read them with the Keypad library. The buzzer really beeps (🔊 switch in its panel). The solenoid lock shows LOCKED / OPEN from its coil current.</p>
+<p><b>📲 Share</b> (Schematic toolbar): packs the whole project (circuit, sketch, PCB) into one link + QR code. Nothing is uploaded; opening the link loads a copy and keeps your own circuit in Projects.</p>
 <p><b>🔍 Meter + 🔧 Fault</b> (troubleshoot): 🔍 Meter puts a red and a black probe on any two points and reads the volts between them. In any part's panel, 🔧 Fault breaks it on purpose (open, shorted, weak) so you can practise finding bad parts. A red O / S badge marks broken parts.</p>
 <p><b>🔌 ESP32 / Arduino UNO</b>: board parts with real pin names. Either tap a pin and set it by hand (OUTPUT HIGH/LOW, PWM, INPUT, INPUT_PULLUP, analogRead), or open <b>💻 Code</b> in the board's panel, type an Arduino sketch (or pick an example) and ▶ Run code: setup() / loop(), digitalWrite, analogRead, delay, Serial, Servo… run in real time against the circuit, with a serial monitor. The panel shows the voltage, current, digitalRead / analogRead value and warns about too much current, 5 V on a 3.3 V pin and ESP32 boot pins. The PCB has the DevKit / UNO shield footprints.</p>
 <p><b>🟫 PCB</b> (button at the end of the Schematic toolbar): turns the same circuit into a single-sided board for a CNC 3018. Parts get footprints (tap one to change it or the transistor pin order), drag them into place, then <b>⚡ Autoroute</b> (it adds a blue jumper wire when a trace can't cross) or <b>✏ Route</b> by hand. Yellow dashed = not connected yet, red circle = too close / short. <b>🛠 G-code</b> makes 3 GRBL files: 1 isolation (V-bit), 2 drilling (pauses for bit changes), 3 cutout with tabs — mirrored for bottom copper. X0 Y0 = lower-left corner of the blank, Z0 = copper surface. Also a 1:1 copper SVG for toner transfer. <b>📤 Gerber + drill</b> saves bottom copper (.GBL), drill (.DRL) and outline (.GKO) like Proteus does, to load into the Fox9ner web app.</p>
@@ -73,6 +74,7 @@ function about() {
 <p><b>Author</b>: Yaxboom (Fox9ner), Cagayan de Oro, Philippines</p>
 <p><b>Copyright</b>: ${COPY}</p>
 <p><b>License</b>: free to use at <code>boyaxskie.github.io/fox9nertron</code> for personal use. Copying, modifying, redistributing, hosting elsewhere or selling this app or its source code, in whole or in part, is not allowed without written permission from the author. The source code being visible does not grant any license.</p>
+<p class="fine">Includes QR Code Generator © 2009 Kazuhiko Arase (MIT license). "QR Code" is a registered trademark of DENSO WAVE.</p>
 <p class="fine">Provided "as is", without warranty. Results are approximate; mains voltage can kill.</p>` }),
     el('form', { method: 'dialog', class: 'dlg-buttons' }, el('button', { class: 'btn primary', text: 'Close' })));
   document.body.append(d);
@@ -91,7 +93,7 @@ function start() {
   // second-layer toolbars stick right under the app bar, whatever its real height
   const setH = () => document.documentElement.style.setProperty('--appbar-h', bar.offsetHeight + 'px');
   setH(); if ('ResizeObserver' in globalThis) new ResizeObserver(setH).observe(bar); else addEventListener('resize', setH);
-  const route = () => show(location.hash.slice(1) || store.get('tab', 'ohm'));
+  const route = () => show(location.hash.slice(1).split('?')[0] || store.get('tab', 'ohm'));   // #schematic?c=… = a shared circuit
   addEventListener('hashchange', route);
   route();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => { });

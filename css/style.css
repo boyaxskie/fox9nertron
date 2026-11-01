@@ -288,3 +288,6 @@ svg text { fill: var(--dim); font: 11px var(--mono); }
 .serial.bad { color: #FF8A8A; background: #1A0B0B; }
 .kp-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-width: 240px; }
 .kp-key { padding: 10px 0; font: 700 16px var(--mono); }
+.share-box { display: flex; flex-direction: column; gap: 10px; padding: 0 20px; }
+.qr-box { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.qr { width: min(300px, 72vw); height: auto; image-rendering: pixelated; border-radius: 6px; }
