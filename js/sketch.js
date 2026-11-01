@@ -6,7 +6,7 @@ import { makeOled, OLED_CONST } from './oled.js';
 
 const TYPES = 'int|long|short|float|double|bool|boolean|byte|char|word|size_t|String|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t';
 const API_NAMES = ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'analogReadMilliVolts', 'ledcSetup', 'ledcAttachPin', 'ledcAttach', 'ledcWrite', 'ledcDetachPin', 'ledcDetach',
-  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'DHT', 'DHT11', 'DHT22', 'DHT21', 'pulseIn', 'pulseInLong', 'isnan', 'NAN', 'Keypad', 'makeKeymap', 'NO_KEY', 'Adafruit_SSD1306', ...Object.keys(OLED_CONST), 'attachInterrupt', 'detachInterrupt', 'digitalPinToInterrupt', 'interrupts', 'noInterrupts', 'RISING', 'FALLING', 'CHANGE', 'NOT_AN_INTERRUPT', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
+  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'DHT', 'DHT11', 'DHT22', 'DHT21', 'pulseIn', 'pulseInLong', 'isnan', 'NAN', 'Keypad', 'makeKeymap', 'NO_KEY', 'Adafruit_SSD1306', ...Object.keys(OLED_CONST), 'attachInterrupt', 'detachInterrupt', 'digitalPinToInterrupt', 'interrupts', 'noInterrupts', 'shiftOut', 'MSBFIRST', 'LSBFIRST', 'RISING', 'FALLING', 'CHANGE', 'NOT_AN_INTERRUPT', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
   'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'INPUT_PULLDOWN', 'LED_BUILTIN', 'PI', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'DEC', 'HEX', 'BIN', '__ops', 'int', 'float', 'yieldNow', '__no'];
 
 // find the ')' matching the '(' at i (skips strings / chars)
@@ -71,8 +71,20 @@ function arrayInits(s) {
   }
   return out + s.slice(last);
 }
+// drop // and /* */ comments (keeps strings and line breaks), so words like "byte" in a comment never get rewritten
+function stripComments(s) {
+  let out = '', i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === '"' || ch === "'") { let k = i + 1; while (k < s.length && s[k] !== ch && s[k] !== '\n') { if (s[k] === '\\') k++; k++; } out += s.slice(i, k + 1); i = k + 1; continue; }
+    if (ch === '/' && s[i + 1] === '/') { const k = s.indexOf('\n', i); i = k < 0 ? s.length : k; continue; }
+    if (ch === '/' && s[i + 1] === '*') { const k = s.indexOf('*/', i + 2), e = k < 0 ? s.length : k + 2; out += s.slice(i, e).replace(/[^\n]/g, ''); i = e; continue; }
+    out += ch; i++;
+  }
+  return out;
+}
 export function transpile(src) {
-  let s = src.replace(/\r/g, '');
+  let s = stripComments(src.replace(/\r/g, ''));
   s = s.replace(/^\s*#\s*include.*$/gm, '');
   s = s.replace(/^\s*#\s*define\s+(\w+)\s+(.+)$/gm, 'const $1 = $2;');
   s = s.replace(/\bLiquidCrystal_I2C\s+(\w+)\s*\(([^)]*)\)\s*;/g, 'let $1 = new LiquidCrystal_I2C($2);');
@@ -82,7 +94,8 @@ export function transpile(src) {
   s = s.replace(/\bPROGMEM\b/g, '').replace(/\bstatic\s+(?=const\b)/g, '');
   s = s.replace(/(?<!\}\s*)\b((?:for|while)\s*\([^()]*(?:\([^()]*\)[^()]*)*\))\s*;/g, '$1 { }');   // for (;;); / while (1); → a loop the guard can pause
   s = s.replace(/\bKeypad\s+(\w+)\s*=\s*Keypad\s*\(/g, 'let $1 = new Keypad(').replace(/\bKeypad\s+(\w+)\s*\(/g, 'let $1 = new Keypad(');
-  s = s.replace(/\.length\(\s*\)/g, '.length');      // Arduino String.length() → JS .length
+  s = s.replace(/\.length\(\s*\)/g, '.length');
+  s = s.replace(/\b(\w+)\.(trim|toUpperCase|toLowerCase)\(\s*\)\s*;/g, '$1 = $1.$2();');   // Arduino String changes itself; JS returns a new one      // Arduino String.length() → JS .length
   s = s.replace(/\bServo\s+(\w+(?:\s*,\s*\w+)*)\s*;/g, (_, names) => 'let ' + names.split(',').map(n => `${n.trim()} = new Servo()`).join(', ') + ';');
   // function definitions → generators (params lose their types)
   const fns = new Set();
@@ -108,7 +121,7 @@ export function transpile(src) {
   s = s.split(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/).map((part, i) => (i % 2 ? part : part.replace(/\b(\d+(?:\.\d+)?)[uUlLfF]+\b/g, '$1'))).join('');   // 10UL, 2.5f (not inside strings)
   s = s.replace(/\bF\(\s*("(?:[^"\\]|\\.)*")\s*\)/g, '$1');
   s = guardLoops(s);
-  s = wrapCalls(s, fns);
+  s = wrapCalls(s, new Set([...fns, 'digitalWrite', 'shiftOut']));   // these two may pause one circuit step so every edge reaches the circuit
   if (!fns.has('loop')) throw new Error('No loop() found. A sketch needs void setup() { … } and void loop() { … }.');
   return `"use strict";\nconst { ${API_NAMES.join(', ')} } = __api;\n${['print', 'println', 'alert', 'confirm', 'prompt', 'open', 'close', 'stop', 'focus', 'blur', 'find', 'scroll', 'fetch'].filter(n => !fns.has(n)).map(n => `const ${n} = __no('${n}');`).join(' ')} const window = undefined, document = undefined, location = undefined;\n${s}\nreturn function* __main() { ${fns.has('setup') ? 'yield* setup();' : ''} for (;;) { yield* loop(); yield 0; } };`;
 }
@@ -141,6 +154,9 @@ export function createRuntime(p, src, host) {
   const isrs = new Map(); let intOn = true;
   const level = (n) => { const v = host.v(n); return v == null ? 0 : v >= (B.vih + B.vil) / 2 ? 1 : 0; };
   const runIsr = (fn) => { const g = fn(); for (let k = 0; k < 100000; k++) if (g.next().done) return; throw new Error('the interrupt function never ends (no loops or delay() inside an ISR)'); };
+  const writePin = (n, v) => { const m = host.pins[n]?.mode; if (v) lastHigh.set(n, host.t()); if (m == null || m === 'in' || m === 'pu' || m === 'pd') { setMode(n, v ? { mode: 'pu' } : null); return; } setMode(n, { mode: v ? 'high' : 'low' }); };
+  const touched = new Set(); let rx = '';    // pins written in this circuit step · Serial input waiting to be read
+  if (!String.prototype.toInt) Object.defineProperties(String.prototype, { toInt: { value() { return parseInt(this, 10) || 0; } }, toFloat: { value() { return parseFloat(this) || 0; } }, equals: { value(x) { return this == x; } }, equalsIgnoreCase: { value(x) { return this.toLowerCase() == String(x).toLowerCase(); } } });
   let adcBits = B.adcBits, pwmBits = 8, pwmF = null;
   const pwmOut = (n, duty, f) => setMode(n, duty <= 0 ? { mode: 'low' } : duty >= 100 ? { mode: 'high' } : { mode: 'pwm', f, duty });
   class Servo {
@@ -194,7 +210,15 @@ export function createRuntime(p, src, host) {
     __ops: { n: 0 },
     int: (x) => Math.trunc(x), float: (x) => +x,
     pinMode(pin, m) { const n = PN(pin); setMode(n, m === 'out' ? { mode: host.pins[n]?.mode === 'high' ? 'high' : 'low' } : m === 'in' ? null : { mode: m }); },
-    digitalWrite(pin, v) { const n = PN(pin), m = host.pins[n]?.mode; if (v) lastHigh.set(n, host.t()); if (m == null || m === 'in' || m === 'pu' || m === 'pd') { setMode(n, v ? { mode: 'pu' } : null); return; } setMode(n, { mode: v ? 'high' : 'low' }); },
+    // a 2nd write to the same pin in one circuit step waits for the next step, so the circuit sees the pulse (clock lines, shiftOut)
+    *digitalWrite(pin, v) { const n = PN(pin); if (touched.has(n)) yield -1; touched.add(n); writePin(n, v); },
+    *shiftOut(dataPin, clockPin, order, val) {
+      for (let i = 0; i < 8; i++) {
+        const bit = order === 0 ? (val >> i) & 1 : (val >> (7 - i)) & 1;
+        yield* api.digitalWrite(dataPin, bit); yield* api.digitalWrite(clockPin, 1); yield* api.digitalWrite(clockPin, 0);
+      }
+    },
+    MSBFIRST: 1, LSBFIRST: 0,
     digitalRead(pin) { const n = PN(pin), v = host.v(n); return v == null ? 0 : v >= (B.vih + B.vil) / 2 ? 1 : 0; },
     analogRead(pin) { const n = PN(pin), v = host.v(n) ?? 0; return Math.round(Math.max(0, Math.min(1, v / B.adcRef)) * (2 ** adcBits - 1)); },
     analogReadMilliVolts(pin) { return Math.round(Math.max(0, Math.min(B.adcRef, host.v(PN(pin)) ?? 0)) * 1000); },
@@ -212,7 +236,12 @@ export function createRuntime(p, src, host) {
     map: (x, a, b, c, d) => Math.trunc((x - a) * (d - c) / (b - a) + c), constrain: (x, a, b) => Math.min(b, Math.max(a, x)),
     random: (a, b) => (b == null ? Math.floor(Math.random() * a) : Math.floor(a + Math.random() * (b - a))), randomSeed() { },
     abs: Math.abs, min: Math.min, max: Math.max, pow: Math.pow, sqrt: Math.sqrt, sq: (x) => x * x, sin: Math.sin, cos: Math.cos, tan: Math.tan, floor: Math.floor, ceil: Math.ceil, round: Math.round,
-    Serial: { begin() { }, print(x, f) { say(fmt(x, f)); }, println(x = '', f) { say(fmt(x, f)); endLine(); }, printf(f, ...a) { let i = 0; const t = String(f).replace(/%[-+0 #]*\d*(?:\.(\d+))?[dilufsxXc%]/g, (m, d) => m === '%%' ? '%' : /[xX]/.test(m) ? Math.trunc(a[i++]).toString(16) : /f/.test(m) ? (+a[i++]).toFixed(d ? +d : 6) : /[dilu]/.test(m) ? String(Math.trunc(a[i++])) : String(a[i++])); const parts = t.split('\n'); parts.forEach((x, k) => { if (x) say(x); if (k < parts.length - 1) endLine(); }); }, available: () => 0, read: () => -1, flush() { } },
+    Serial: { begin() { }, available: () => rx.length, read() { if (!rx.length) return -1; const ch = rx.charCodeAt(0); rx = rx.slice(1); return ch; }, peek: () => (rx.length ? rx.charCodeAt(0) : -1),
+      readStringUntil(c) { const ch = typeof c === 'number' ? String.fromCharCode(c) : String(c), k = rx.indexOf(ch); const out = k < 0 ? rx : rx.slice(0, k); rx = k < 0 ? '' : rx.slice(k + 1); return out; },
+      readString() { const out = rx; rx = ''; return out; },
+      parseInt() { const m = rx.match(/^[^-\d]*(-?\d+)/); if (!m) { rx = ''; return 0; } rx = rx.slice(m[0].length); return +m[1]; },
+      parseFloat() { const m = rx.match(/^[^-\d.]*(-?\d*\.?\d+)/); if (!m) { rx = ''; return 0; } rx = rx.slice(m[0].length); return +m[1]; },
+      setTimeout() { }, print(x, f) { say(fmt(x, f)); }, println(x = '', f) { say(fmt(x, f)); endLine(); }, printf(f, ...a) { let i = 0; const t = String(f).replace(/%[-+0 #]*\d*(?:\.(\d+))?[dilufsxXc%]/g, (m, d) => m === '%%' ? '%' : /[xX]/.test(m) ? Math.trunc(a[i++]).toString(16) : /f/.test(m) ? (+a[i++]).toFixed(d ? +d : 6) : /[dilu]/.test(m) ? String(Math.trunc(a[i++])) : String(a[i++])); const parts = t.split('\n'); parts.forEach((x, k) => { if (x) say(x); if (k < parts.length - 1) endLine(); }); }, flush() { } },
     RISING: 3, FALLING: 2, CHANGE: 4, NOT_AN_INTERRUPT: -1,
     digitalPinToInterrupt(pin) { if (esp) return pin; const n = PN(pin); return n === 'D2' ? 0 : n === 'D3' ? 1 : -1; },
     attachInterrupt(num, fn, mode) {
@@ -232,10 +261,11 @@ export function createRuntime(p, src, host) {
   const gen = main();
   let wake = 0, err = null, done = false;
   return {
-    lines, displays, oleds, get err() { return err; },
+    lines, displays, oleds, send(txt) { rx += txt; if (rx.length > 4096) rx = rx.slice(-4096); }, get err() { return err; },
     // run the sketch up to circuit time t (call once per simulator step)
     step(t) {
       if (err) return;
+      touched.clear();
       if (intOn && isrs.size) {
         try {
           for (const [n, q] of isrs) {
@@ -249,6 +279,7 @@ export function createRuntime(p, src, host) {
         let r;
         try { r = gen.next(); } catch (e) { err = 'Runtime error: ' + e.message; return; }
         if (r.done) { done = true; return; }
+        if (r.value === -1) return;               // a pin changes twice: let the circuit see this level first
         const d = +r.value || 0;
         if (d > 0) { wake = t + d; return; }
         if (k > 0 && r.value === 0) return;      // one loop() pass per step
@@ -266,6 +297,8 @@ export const EXAMPLES = {
     uno: 'const int LED = 9;   // a ~ PWM pin\n\nvoid setup() {\n}\n\nvoid loop() {\n  int pot = analogRead(A0);       // 0 ... 1023\n  analogWrite(LED, pot / 4);      // 0 ... 255\n  delay(20);\n}\n' },
   dac: { name: 'DAC ramp (ESP32 GPIO25) / PWM ramp (UNO)', esp: '// ESP32 DAC: real analog voltage 0 ... 3.3 V on GPIO25 / GPIO26\n\nvoid setup() {\n  Serial.begin(115200);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 15) {\n    dacWrite(25, v);                  // 0 ... 255 → 0 ... 3.3 V\n    Serial.printf("DAC %d = %.2f V\\n", v, v * 3.3 / 255);\n    delay(200);\n  }\n}\n',
     uno: '// The UNO has no DAC: analogWrite makes PWM (average voltage)\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 15) {\n    analogWrite(9, v);\n    Serial.print("PWM ");\n    Serial.println(v);\n    delay(200);\n  }\n}\n' },
+  relays595: { name: '74HC595 x2: 10 relays by Serial / binary', esp: '// 10 relay modules on 3 wires: two 74HC595 shift registers in a chain (cascade)\n// Serial Monitor commands (type below, press Send):\n//   3          toggle relay 3\n//   on 3 / off 3\n//   all on / all off\n//   1000000001 binary, one digit per relay (relay 1 first), 1 = ON\n\nconst int DATA  = 19;   // 74HC595 pin 14 SER   (only to the 1st chip)\nconst int CLOCK = 18;   // 74HC595 pin 11 SRCLK (both chips)\nconst int LATCH = 5;    // 74HC595 pin 12 RCLK  (both chips)\nconst int NRELAYS = 10;\nconst bool ACTIVE_LOW = true;   // most relay modules switch ON when IN is LOW\n\nunsigned int relays = 0;   // bit 0 = relay 1 ... bit 9 = relay 10\n\nvoid writeRelays() {\n  unsigned int out = relays;\n  if (ACTIVE_LOW) out = ~relays;              // flip: ON = LOW\n  digitalWrite(LATCH, LOW);\n  shiftOut(DATA, CLOCK, MSBFIRST, (out >> 8) & 0xFF);   // the LAST chip\'s byte goes first\n  shiftOut(DATA, CLOCK, MSBFIRST, out & 0xFF);          // the 1st chip\'s byte\n  digitalWrite(LATCH, HIGH);                             // all outputs change at the same moment\n}\n\nvoid printRelays() {\n  Serial.print("Relays 1-10: ");\n  for (int i = 0; i < NRELAYS; i++) Serial.print((relays >> i) & 1);\n  Serial.println();\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(DATA, OUTPUT);\n  pinMode(CLOCK, OUTPUT);\n  pinMode(LATCH, OUTPUT);\n  writeRelays();                    // all OFF first\n\n  // test: click each relay once, 1 to 10\n  for (int i = 0; i < NRELAYS; i++) {\n    relays = 1 << i;\n    writeRelays();\n    delay(250);\n  }\n  relays = 0;\n  writeRelays();\n  Serial.println("Ready. Type 3, on 3, off 3, all on, all off or 1000000001");\n}\n\nvoid loop() {\n  if (Serial.available()) {\n    String cmd = Serial.readStringUntil(\'\\n\');\n    cmd.trim();\n    cmd.toLowerCase();\n\n    if (cmd == "all on") relays = (1 << NRELAYS) - 1;\n    else if (cmd == "all off") relays = 0;\n    else if (cmd.startsWith("on ")) {\n      int n = cmd.substring(3).toInt();\n      if (n >= 1 && n <= NRELAYS) relays |= (1 << (n - 1));\n    } else if (cmd.startsWith("off ")) {\n      int n = cmd.substring(4).toInt();\n      if (n >= 1 && n <= NRELAYS) relays &= ~(1 << (n - 1));\n    } else if (cmd.length() == NRELAYS && cmd.indexOf(\'2\') < 0) {   // binary\n      relays = 0;\n      for (int i = 0; i < NRELAYS; i++) if (cmd.charAt(i) == \'1\') relays |= (1 << i);\n    } else {\n      int n = cmd.toInt();\n      if (n >= 1 && n <= NRELAYS) relays ^= (1 << (n - 1));   // toggle\n      else Serial.println("?? " + cmd);\n    }\n    writeRelays();\n    printRelays();\n  }\n}\n',
+    uno: '// 10 relay modules on 3 wires: two 74HC595 shift registers in a chain (cascade)\n// Serial Monitor commands (type below, press Send):\n//   3          toggle relay 3\n//   on 3 / off 3\n//   all on / all off\n//   1000000001 binary, one digit per relay (relay 1 first), 1 = ON\n\nconst int DATA  = 11;   // 74HC595 pin 14 SER   (only to the 1st chip)\nconst int CLOCK = 12;   // 74HC595 pin 11 SRCLK (both chips)\nconst int LATCH = 8;    // 74HC595 pin 12 RCLK  (both chips)\nconst int NRELAYS = 10;\nconst bool ACTIVE_LOW = true;   // most relay modules switch ON when IN is LOW\n\nunsigned int relays = 0;   // bit 0 = relay 1 ... bit 9 = relay 10\n\nvoid writeRelays() {\n  unsigned int out = relays;\n  if (ACTIVE_LOW) out = ~relays;              // flip: ON = LOW\n  digitalWrite(LATCH, LOW);\n  shiftOut(DATA, CLOCK, MSBFIRST, (out >> 8) & 0xFF);   // the LAST chip\'s byte goes first\n  shiftOut(DATA, CLOCK, MSBFIRST, out & 0xFF);          // the 1st chip\'s byte\n  digitalWrite(LATCH, HIGH);                             // all outputs change at the same moment\n}\n\nvoid printRelays() {\n  Serial.print("Relays 1-10: ");\n  for (int i = 0; i < NRELAYS; i++) Serial.print((relays >> i) & 1);\n  Serial.println();\n}\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(DATA, OUTPUT);\n  pinMode(CLOCK, OUTPUT);\n  pinMode(LATCH, OUTPUT);\n  writeRelays();                    // all OFF first\n\n  // test: click each relay once, 1 to 10\n  for (int i = 0; i < NRELAYS; i++) {\n    relays = 1 << i;\n    writeRelays();\n    delay(250);\n  }\n  relays = 0;\n  writeRelays();\n  Serial.println("Ready. Type 3, on 3, off 3, all on, all off or 1000000001");\n}\n\nvoid loop() {\n  if (Serial.available()) {\n    String cmd = Serial.readStringUntil(\'\\n\');\n    cmd.trim();\n    cmd.toLowerCase();\n\n    if (cmd == "all on") relays = (1 << NRELAYS) - 1;\n    else if (cmd == "all off") relays = 0;\n    else if (cmd.startsWith("on ")) {\n      int n = cmd.substring(3).toInt();\n      if (n >= 1 && n <= NRELAYS) relays |= (1 << (n - 1));\n    } else if (cmd.startsWith("off ")) {\n      int n = cmd.substring(4).toInt();\n      if (n >= 1 && n <= NRELAYS) relays &= ~(1 << (n - 1));\n    } else if (cmd.length() == NRELAYS && cmd.indexOf(\'2\') < 0) {   // binary\n      relays = 0;\n      for (int i = 0; i < NRELAYS; i++) if (cmd.charAt(i) == \'1\') relays |= (1 << i);\n    } else {\n      int n = cmd.toInt();\n      if (n >= 1 && n <= NRELAYS) relays ^= (1 << (n - 1));   // toggle\n      else Serial.println("?? " + cmd);\n    }\n    writeRelays();\n    printRelays();\n  }\n}\n' },
   encoder: { name: 'Rotary encoder + interrupt (count in Serial)', esp: '// Rotary encoder (KY-040) with an interrupt: the count changes the instant you turn\nconst int CLK = 32;   // must be an interrupt pin\nconst int DT  = 33;\nconst int SW  = 25;\n\nvolatile int count = 0;\n\nvoid IRAM_ATTR readEncoder() {\n  if (digitalRead(DT) == HIGH) count++;   // turned right\n  else count--;                           // turned left\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(CLK, INPUT);\n  pinMode(DT, INPUT);\n  pinMode(SW, INPUT_PULLUP);\n  attachInterrupt(digitalPinToInterrupt(CLK), readEncoder, FALLING);\n}\n\nint last = 0;\n\nvoid loop() {\n  if (count != last) {\n    last = count;\n    Serial.print("Count: ");\n    Serial.println(last);\n  }\n  if (digitalRead(SW) == LOW) {\n    count = 0;\n    Serial.println("Reset");\n    delay(300);\n  }\n  delay(10);\n}\n',
     uno: '// Rotary encoder (KY-040) with an interrupt: the count changes the instant you turn\nconst int CLK = 2  ;   // UNO: only D2 / D3 have interrupts\nconst int DT  = 3;\nconst int SW  = 4;\n\nvolatile int count = 0;\n\nvoid readEncoder() {\n  if (digitalRead(DT) == HIGH) count++;   // turned right\n  else count--;                           // turned left\n}\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(CLK, INPUT);\n  pinMode(DT, INPUT);\n  pinMode(SW, INPUT_PULLUP);\n  attachInterrupt(digitalPinToInterrupt(CLK), readEncoder, FALLING);\n}\n\nint last = 0;\n\nvoid loop() {\n  if (count != last) {\n    last = count;\n    Serial.print("Count: ");\n    Serial.println(last);\n  }\n  if (digitalRead(SW) == LOW) {\n    count = 0;\n    Serial.println("Reset");\n    delay(300);\n  }\n  delay(10);\n}\n' },
   oled: { name: 'OLED 128x64 SSD1306: text, bar and live graph', esp: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\n#define SCREEN_WIDTH 128\n#define SCREEN_HEIGHT 64\nAdafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);   // SDA = GPIO21, SCL = GPIO22\n\nint graph[128];   // last 128 readings for the moving graph\n\nvoid setup() {\n  Serial.begin(115200);\n  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {\n    Serial.println("OLED not found");\n    for (;;);\n  }\n  for (int i = 0; i < 128; i++) graph[i] = 63;\n  display.clearDisplay();\n  display.setTextSize(2);\n  display.setTextColor(SSD1306_WHITE);\n  display.setCursor(4, 24);\n  display.println("Hello migo");\n  display.display();\n  delay(1500);\n}\n\nvoid loop() {\n  float v = analogRead(34) * 3.3 / 4095;\n\n  for (int i = 0; i < 127; i++) graph[i] = graph[i + 1];\n  graph[127] = 63 - int(v / 3.3 * 28);\n\n  display.clearDisplay();\n  display.setTextSize(1);\n  display.setCursor(0, 0);\n  display.print("Pot voltage");\n  display.setTextSize(2);\n  display.setCursor(0, 14);\n  display.print(v, 2);\n  display.print(" V");\n  display.drawRect(84, 16, 44, 10, SSD1306_WHITE);\n  display.fillRect(86, 18, int(v / 3.3 * 40), 6, SSD1306_WHITE);\n  display.drawFastHLine(0, 34, 128, SSD1306_WHITE);\n  for (int x = 1; x < 128; x++) display.drawLine(x - 1, graph[x - 1], x, graph[x], SSD1306_WHITE);\n  display.display();\n  delay(100);\n}\n',

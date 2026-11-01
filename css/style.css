@@ -288,6 +288,7 @@ svg text { fill: var(--dim); font: 11px var(--mono); }
 .code-ed { width: 100%; box-sizing: border-box; font: 13px/1.45 var(--mono); background: #0B0F13; color: #E6EDF3; border: 1px solid var(--line2); border-radius: 8px; padding: 10px; tab-size: 2; white-space: pre; overflow: auto; resize: vertical; }
 .serial { margin: 0; min-height: 3.5em; max-height: 12em; overflow: auto; font: 12px/1.4 var(--mono); background: #071007; color: #8BE38B; border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; }
 .serial.bad { color: #FF8A8A; background: #1A0B0B; }
+.serial-in { flex: 1; min-width: 0; font: 13px var(--mono); text-align: left; }
 .kp-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-width: 240px; }
 .kp-key { padding: 10px 0; font: 700 16px var(--mono); }
 .share-box { display: flex; flex-direction: column; gap: 10px; padding: 0 20px; }
