@@ -205,12 +205,15 @@ export const TYPES = {
   HCSR04: { label: 'HC-SR04 ultrasonic distance', prefix: 'U', pins: [[-4, -1], [-4, 0], [-4, 1], [-4, 2]], box: [-4, -2.3, 4, 2.8], props: { cm: 50 } },
   LDR: { label: 'LDR light sensor', prefix: 'LDR', pins: [[-2, 0], [2, 0]], box: [-2, -1.3, 2, 1.1], props: { lux: 100 } },
   PIR: { label: 'PIR motion sensor (HC-SR501)', prefix: 'U', pins: [[-3, -1], [-3, 0], [-3, 1]], box: [-3, -2, 2.8, 2.2], props: { motion: false } },
+  KEYPAD: { label: 'Keypad 4×4 (tap the keys)', prefix: 'KP', pins: [[-5, -3], [-5, -2], [-5, -1], [-5, 0], [-5, 1], [-5, 2], [-5, 3], [-5, 4]], box: [-5, -4, 4, 5.2], props: {} },
+  BUZZER: { label: 'Buzzer (active, 3–5 V)', prefix: 'BZ', pins: [[-2, 0], [2, 0]], box: [-2, -1.3, 2, 1.3], props: {} },
+  LOCK: { label: 'Solenoid door lock (12 V)', prefix: 'LK', pins: [[-2, 0], [2, 0]], box: [-2, -1.6, 2, 1.4], props: { v: 12, r: 24, l: 0.05 } },
   GND: { label: 'Ground', prefix: 'GND', pins: [[0, 0]], box: [-0.8, 0, 0.8, 1.6], props: {} },
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'LCD', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
-export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'LCD', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
 // signal generator value at time t
@@ -406,6 +409,14 @@ export function solveCircuit(c, sim = null, opts = {}) {
         R(S1, nS, Math.max(pr.rs, 1e-4), p, 'rs');
         const vsx = { kind: 'V', a: nS, b: S2, val: 0, gp: nA, gn: CT, gain: pr.ns / n1, owner: p, role: 'ws' }; els.push(vsx);
         els.push({ kind: 'F', a: nA, b: CT, ctrl: vsx, val: -pr.ns / n1, owner: p, role: 'fs' });
+        break;
+      }
+      case 'KEYPAD': for (let k = 1; k < 8; k++) R(pins[0], pins[k], R_OPEN, p, k === 1 ? 'main' : 'k' + k); break;   // key presses go to the sketch (Keypad library)
+      case 'BUZZER': R(a, b, 3.3 / 0.012, p, 'main'); break;     // ≈ 12 mA at 3.3 V, 20 mA at 5 V
+      case 'LOCK': {
+        const s0 = st.get(p.id) ?? { i: 0 }, n = inner();
+        if (sim) { R(a, n, Math.max(pr.l, 1e-6) / sim.dt, p, 'main'); I(a, n, s0.i, p, 'hist'); } else R(a, n, R_WIRE, p, 'main');
+        R(n, b, Math.max(pr.r, 0.1), p, 'dcr');
         break;
       }
       case 'DHT': R(pins[0], pins[2], 3.3 / 0.0015, p, 'main'); R(pins[1], pins[0], 10000, p, 'pull'); break;       // VCC, DATA (10 kΩ pull-up on the module), GND
@@ -729,6 +740,11 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, v1, v2, vs, i1, i2, is, im, v: v1, i: i1, pin, pout, p: pin - pout, dots: [[0, 1, i1], [1, 2, i2], [3, 4, is]] });
       continue;
     }
+    if (p.type === 'LOCK') {
+      const s0 = st.get(p.id) ?? { i: 0 }, m = mine.find(e => e.role === 'main'), il = sim ? m.i + s0.i : m.i, inom = p.props.v / Math.max(p.props.r, 0.1);
+      parts.set(p.id, { va, vb, v: va - vb, i: il, p: (va - vb) * il, open: Math.abs(il) > 0.5 * inom, inom });
+      continue;
+    }
     if (p.type === 'DHT' || p.type === 'HCSR04' || p.type === 'PIR') {
       const m = mine.find(e => e.role === 'main'), gi = p.type === 'HCSR04' ? 3 : 2, v = res.v[pins[0]] - res.v[pins[gi]];
       parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vout: res.v[pins[1 + (p.type === 'HCSR04' ? 1 : 0)]] - res.v[pins[gi]], dots: [] });
@@ -863,6 +879,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
     if (p.type === 'C') next.set(p.id, { v: r.v });
     else if (p.type === 'L') next.set(p.id, { i: r.i });
     else if (p.type === 'XFMR') next.set(p.id, { im: r.im });
+    else if (p.type === 'LOCK') next.set(p.id, { i: r.i });
     else if (p.type === 'LED' || p.type === 'D') next.set(p.id, { on: r.on });
     else if (p.type === 'OPTO' || p.type === 'NPN' || p.type === 'PNP') { const o = trans.find(x => x.p === p); next.set(p.id, { on: o.d.on, ts: o.state, ib: o.d.ib }); }
     else if (p.type === 'NMOS' || p.type === 'PMOS') { const f = fets.find(x => x.p === p); next.set(p.id, { ts: f.state, vc: f.vc, bon: diodes.find(x => x.p === p).on }); }
@@ -940,6 +957,7 @@ function gauss(A0, z0) {
 
 // ---------- examples ----------
 const SKETCH_EX = {
+  doorlock: '#include <Keypad.h>\n#include <LiquidCrystal_I2C.h>\n\nconst byte ROWS = 4, COLS = 4;\nchar keys[ROWS][COLS] = {\n  {\'1\', \'2\', \'3\', \'A\'},\n  {\'4\', \'5\', \'6\', \'B\'},\n  {\'7\', \'8\', \'9\', \'C\'},\n  {\'*\', \'0\', \'#\', \'D\'}\n};\nbyte rowPins[ROWS] = {19, 18, 5, 17};\nbyte colPins[COLS] = {16, 4, 2, 15};\nKeypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);\nLiquidCrystal_I2C lcd(0x27, 16, 2);\n\nconst int LOCK = 13;      // MOSFET gate\nconst int BUZZ = 23;\nString code = "1234";     // change your PIN here\nString typed = "";\n\nvoid beep(int ms) {\n  digitalWrite(BUZZ, HIGH);\n  delay(ms);\n  digitalWrite(BUZZ, LOW);\n}\n\nvoid askPin() {\n  lcd.clear();\n  lcd.print("Enter PIN, #=OK");\n  lcd.setCursor(0, 1);\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(LOCK, OUTPUT);\n  pinMode(BUZZ, OUTPUT);\n  lcd.init();\n  lcd.backlight();\n  askPin();\n}\n\nvoid loop() {\n  char key = keypad.getKey();\n  if (!key) return;\n  Serial.println(key);\n  beep(40);\n  if (key == \'#\') {\n    if (typed == code) {\n      lcd.clear();\n      lcd.print("OPEN - welcome!");\n      digitalWrite(LOCK, HIGH);   // solenoid pulls the bolt\n      beep(200);\n      delay(3000);\n      digitalWrite(LOCK, LOW);\n    } else {\n      lcd.clear();\n      lcd.print("WRONG PIN");\n      beep(800);\n      delay(1000);\n    }\n    typed = "";\n    askPin();\n  } else if (key == \'*\') {\n    typed = "";\n    askPin();\n  } else if (typed.length() < 8) {\n    typed += key;\n    lcd.print(\'*\');\n  }\n}\n',
   thermo: '#include <DHT.h>\n\nDHT dht(4, DHT22);        // DATA on GPIO4\nconst int FAN = 23;\n\nvoid setup() {\n  Serial.begin(115200);\n  dht.begin();\n  pinMode(FAN, OUTPUT);\n}\n\nvoid loop() {\n  float t = dht.readTemperature();\n  float h = dht.readHumidity();\n  if (isnan(t)) {\n    Serial.println("DHT not found!");\n    delay(1000);\n    return;\n  }\n  digitalWrite(FAN, t > 30 ? HIGH : LOW);   // fan above 30 C\n  Serial.printf("%.1f C  %.0f %%  fan %s\\n", t, h, t > 30 ? "ON" : "OFF");\n  delay(1000);\n}\n',
   parking: 'const int TRIG = 9, ECHO = 10, LED = 13;\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(TRIG, OUTPUT);\n  pinMode(ECHO, INPUT);\n  pinMode(LED, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(TRIG, LOW);\n  delayMicroseconds(2);\n  digitalWrite(TRIG, HIGH);              // 10 us pulse starts a measurement\n  delayMicroseconds(10);\n  digitalWrite(TRIG, LOW);\n  long us = pulseIn(ECHO, HIGH, 30000);   // echo time in microseconds\n  float cm = us / 58.0;\n  digitalWrite(LED, cm > 0 && cm < 20 ? HIGH : LOW);\n  Serial.print("Distance: ");\n  Serial.print(cm, 1);\n  Serial.println(" cm");\n  delay(200);\n}\n',
   autolight: 'const int LED = 9;   // PWM pin\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  int light = analogRead(A0);              // dark = low, bright = high\n  int pwm = map(light, 0, 1023, 255, 0);   // darker = brighter LED\n  analogWrite(LED, constrain(pwm, 0, 255));\n  Serial.print("light ");\n  Serial.print(light);\n  Serial.print("   LED ");\n  Serial.println(pwm);\n  delay(200);\n}\n',
@@ -1357,6 +1375,28 @@ export function example(name) {
     addPart(c, 'GND', -8, 4); addPart(c, 'GND', 14, 2); addPart(c, 'GND', -6, -2);
     W(-8, -4, -8, -5); W(-8, -5, -4, -5); W(-8, 0, -4, 0); W(-4, -2, -6, -2);
     W(4, 2, 5, 2); W(9, 2, 10, 2);
+  } else if (name === 'doorlock') {
+    // Keypad door lock: ESP32 + 4×4 keypad + LCD 16×2 I2C + buzzer + IRLZ44N switching a 12 V solenoid lock. PIN 1234 then #.
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.doorlock; m.props.run = true;
+    addPart(c, 'KEYPAD', 17, 1).name = 'KEYPAD';
+    addPart(c, 'LCD', 22, -9).name = 'LCD1';
+    addPart(c, 'BUZZER', 8, -13).name = 'BUZZER';
+    const lk = addPart(c, 'LOCK', -13, 2, 1); lk.name = 'LOCK'; lk.lbl = [-1, -3.3];
+    const d = addPart(c, 'D', -10, 2, 3); d.name = 'D1'; d.props.model = '1N5819'; d.lbl = [0.6, 1.2];
+    const q = addPart(c, 'NMOS', -14, 8); q.name = 'Q1'; q.props.model = 'IRLZ44N'; q.lbl = [-4, 0.4];
+    const rg = addPart(c, 'R', -9, 12); rg.name = 'R1'; rg.props.r = 100;
+    const rp = addPart(c, 'R', -17, 14, 1); rp.name = 'R2'; rp.props.r = 10000;
+    const b = addPart(c, 'BAT', -20, 3, 1); b.name = '12V'; b.props.v = 12;
+    for (const [x, y] of [[15, -7], [10, -13], [6, 6], [-13, 10], [-17, 16], [-20, 5]]) addPart(c, 'GND', x, y);
+    for (let y = -2; y <= 5; y++) W(4, y, 12, y);
+    W(4, -6, 6, -6); W(6, -6, 6, -10); W(6, -10, 15, -10);
+    W(4, -3, 8, -3); W(8, -3, 8, -9); W(8, -9, 15, -9);
+    W(-4, 7, -4, 9); W(-4, 9, 24, 9); W(24, 9, 24, -5); W(24, -5, 13, -5); W(13, -5, 13, -8); W(13, -8, 15, -8);
+    W(4, -7, 5, -7); W(5, -7, 5, -13); W(5, -13, 6, -13);
+    W(4, 6, 6, 6);
+    W(-4, 5, -6, 5); W(-6, 5, -6, 12); W(-6, 12, -7, 12); W(-11, 12, -17, 12); W(-17, 12, -17, 8); W(-17, 8, -16, 8);
+    W(-13, 4, -13, 6); W(-10, 4, -10, 6); W(-10, 6, -13, 6); W(-13, 0, -10, 0);
+    W(-20, 1, -20, 0); W(-20, 0, -13, 0);
   } else if (name === 'esp32io') {
     // ESP32 pins set by hand: D23 OUTPUT HIGH → 330 Ω → LED · D15 INPUT_PULLUP + button to GND · D34 analogRead of a 10 kΩ pot on 3.3 V
     const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';

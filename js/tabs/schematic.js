@@ -8,6 +8,9 @@ import { createRuntime, EXAMPLES as SKETCHES } from '../sketch.js';
 import { netlist } from '../pcb-core.js';
 // what each LCD part shows right now: id → { lines, bl, on, powered, note }
 const LCDV = new Map();
+// keypad: taps waiting for the sketch, and the key that flashes on the drawing
+const KEYQ = new Map(), KEYFLASH = new Map();
+const KEYLAB = ['123A', '456B', '789C', '*0#D'];
 
 const C = {
   bg: '#0F1317', dot: '#252D36', wire: '#8A97A6', part: '#E4E9EF', sel: '#4FC3F7', pin: '#FFC857', text: '#C9D3DD', dim: '#7E8A97',
@@ -59,7 +62,7 @@ export function schematicTab(root) {
     for (const p of c.parts) {
       if (!S.isBoard(p.type) || !p.props.run || !p.props.code) continue;
       p.props.pins = {};                         // a fresh boot: every pin is an input until the code says otherwise
-      try { sketches.set(p.id, createRuntime(p, p.props.code, { t: () => sim.t, v: (n) => boardV(p, n), pins: p.props.pins, dht: (n) => dhtAt(p, n), echo: (n) => echoAt(p, n) })); }
+      try { sketches.set(p.id, createRuntime(p, p.props.code, { t: () => sim.t, v: (n) => boardV(p, n), pins: p.props.pins, dht: (n) => dhtAt(p, n), echo: (n) => echoAt(p, n), keypad: (rows, cols) => keyAt(p, rows, cols) })); }
       catch (e) { sketches.set(p.id, { err: e.message, lines: [], step() { } }); }
     }
   }
@@ -106,6 +109,13 @@ export function schematicTab(root) {
     const r = res?.ok ? res.parts.get(u.id) : null; if (!r || r.v < 4.5) return null;     // HC-SR04 needs 5 V
     const tn = pinNetOf(nl, u, 1), trig = S.BOARDS[b.type].pins.find((q, i) => pinNetOf(nl, b, i) === tn && q.k === 'gpio')?.n;
     return trig ? { cm: u.props.cm, trig } : null;
+  }
+  function keyAt(b, rows, cols) {
+    const nl = nets(); if (!nl) return null;
+    const want = [...rows, ...cols].map(n => boardNet(nl, b, n));
+    const kp = c.parts.find(p => p.type === 'KEYPAD' && want.every((nt, i) => nt != null && nt >= 0 && pinNetOf(nl, p, i) === nt));
+    if (!kp) return null;
+    const q = KEYQ.get(kp.id); return q?.length ? q.shift() : null;
   }
   function runSketches() { for (const rt of sketches.values()) rt.step(sim.t); }
   function resetSim() { restartSketches(); sim.t = 0; sim.buf = []; sim.next = null; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
@@ -387,6 +397,8 @@ export function schematicTab(root) {
       if (isSel) ctx.strokeStyle = C.sel;
       ctx.beginPath(); ctx.moveTo(sx(w.x1), sy(w.y1)); ctx.lineTo(sx(w.x2), sy(w.y2)); ctx.stroke();
     }
+    // buzzers: play a beep while any buzzer has voltage
+    buzz(res?.ok && c.parts.some(p => p.type === 'BUZZER' && Math.abs(res.parts.get(p.id)?.v ?? 0) > 1.5));
     // parts (LCDs first get the text their sketch wrote)
     if (c.parts.some(p => p.type === 'LCD')) updateLcds();
     for (const p of c.parts) drawPart(p);
@@ -417,6 +429,15 @@ export function schematicTab(root) {
     }
   }
 
+  // 🔊 one tiny oscillator for all buzzers (quiet, 2.5 kHz). Browsers allow sound after the first tap.
+  let actx = null, osc = null;
+  function buzz(on) {
+    on = on && store.get('sch.sound', '1') === '1' && view2 !== 'pcb' && !root.hidden;
+    try {
+      if (on && !osc) { actx ??= new (globalThis.AudioContext || globalThis.webkitAudioContext)(); osc = actx.createOscillator(); const gn = actx.createGain(); gn.gain.value = 0.04; osc.type = 'square'; osc.frequency.value = 2500; osc.connect(gn).connect(actx.destination); osc.start(); }
+      else if (!on && osc) { osc.stop(); osc.disconnect(); osc = null; }
+    } catch { osc = null; }
+  }
   // multimeter probes + the meter reading
   function drawProbes() {
     if (mode !== 'meter' || !probes.length) return;
@@ -447,7 +468,7 @@ export function schematicTab(root) {
     if (mode !== 'select' || !sel || !tipVals.length || !res?.ok || down?.drag) return;
     let ax, ay;
     if (sel.kind === 'wire') { const w = c.wires[sel.i]; if (!w) return; ax = sx((w.x1 + w.x2) / 2); ay = sy((w.y1 + w.y2) / 2); }
-    else { const p = selPart(); if (!p || p.type === 'GND') return; ax = sx(p.x); ay = sy(p.y); }
+    else { const p = selPart(); if (!p || ['GND', 'KEYPAD', 'LCD', 'ESP32', 'UNO'].includes(p.type)) return; ax = sx(p.x); ay = sy(p.y); }
     ctx.save(); ctx.font = '600 12px system-ui, sans-serif';
     const rows = tipVals.map(([l, v]) => [l + ':', v]);
     const lw = Math.max(...rows.map(r => ctx.measureText(r[0]).width)), vw = Math.max(...rows.map(r => ctx.measureText(r[1]).width));
@@ -566,6 +587,9 @@ export function schematicTab(root) {
       case 'T555': return q.model;
       case 'ESP32': case 'UNO': return '';
       case 'DHT': return `${q.model} ${plain(q.temp)} °C ${plain(q.hum)} %`;
+      case 'KEYPAD': return '4×4';
+      case 'BUZZER': return '';
+      case 'LOCK': return `${plain(q.v)} V`;
       case 'HCSR04': return `${plain(q.cm)} cm`;
       case 'LDR': return `${si(q.lux, 'lux', 2)}`;
       case 'PIR': return q.motion ? 'MOTION' : 'quiet';
@@ -857,6 +881,15 @@ export function schematicTab(root) {
     // select mode
     const p = partAt(x, y);
     if (p) {
+      if (p.type === 'KEYPAD') {
+        const [lx, ly] = S.rotPt([x - p.x, y - p.y], (4 - (p.rot & 3)) & 3);
+        const col = Math.floor((lx + 4.2) / 2), row = Math.floor((ly + 3.6) / 2.1);
+        if (col >= 0 && col < 4 && row >= 0 && row < 4) {
+          const q = KEYQ.get(p.id) ?? []; q.push({ r: row, c: col }); if (q.length > 16) q.shift(); KEYQ.set(p.id, q);
+          KEYFLASH.set(p.id, { r: row, c: col, until: performance.now() + 220 }); sel = { kind: 'part', id: p.id }; draw(); setTimeout(draw, 240);
+          say(`Key ${KEYLAB[row][col]} pressed.` + (sketches.size ? '' : ' (Run a sketch on the board with the Keypad library to read it.)')); return;
+        }
+      }
       if (p.type === 'PIR') { p.props.motion = !p.props.motion; sel = { kind: 'part', id: p.id }; commit(); say(`${p.name}: ${p.props.motion ? 'motion! OUT = 3.3 V' : 'quiet, OUT = 0 V'}. Tap again to toggle.`); return; }
       if (p.type === 'SW' || p.type === 'SPDT' || p.type === 'DPDT') { p.props.on = !p.props.on; sel = { kind: 'part', id: p.id }; commit(); say(`${p.name} ${p.props.on ? 'ON (closed)' : 'OFF (open)'}. Tap again to flip.`); return; }
       if (S.isBoard(p.type)) {
@@ -1101,6 +1134,15 @@ export function schematicTab(root) {
         f.append(note({ DHT: 'Pins VCC, DATA, GND. 3.3–5 V. Slide what the sensor "feels"; a sketch reads it with the DHT library (dht.readTemperature()).', HCSR04: 'Pins VCC (5 V!), TRIG, ECHO, GND. A sketch sends a 10 µs TRIG pulse and measures the ECHO pulse with pulseIn(): 58 µs per cm. ECHO is 5 V: use a divider (1 k / 2 k) into an ESP32.', LDR: 'Resistance drops with light: ≈ 1 MΩ dark, 10 kΩ at 10 lux (dim room), ≈ 1 kΩ in daylight. Use it with a 10 kΩ resistor as a divider into an analog pin.' }[p.type]));
         break;
       }
+      case 'KEYPAD': {
+        const g = el('div', { class: 'kp-grid' });
+        KEYLAB.forEach((row, rr) => [...row].forEach((ch, cc) => g.append(el('button', { class: 'btn kp-key', type: 'button', text: ch, onclick: () => { const qq = KEYQ.get(p.id) ?? []; qq.push({ r: rr, c: cc }); KEYQ.set(p.id, qq); KEYFLASH.set(p.id, { r: rr, c: cc, until: performance.now() + 220 }); draw(); setTimeout(draw, 240); } }))));
+        f.append(g, note('Tap a key here or on the drawing. Pins R1–R4 (rows), C1–C4 (columns) in order. A sketch reads keys with the Keypad library: keypad.getKey().')); break;
+      }
+      case 'LOCK': f.append(field('Rated voltage', plain(q.v), 'V', v => { q.v = v; }), field('Coil resistance', plain(q.r), 'Ω', v => { q.r = Math.max(v, 0.1); }),
+        note('Never straight from a pin: 12 V 0.5 A needs a MOSFET (IRLZ44N) or relay, plus a diode across the coil. Opens when the current reaches ½ of rated.')); break;
+      case 'BUZZER': f.append(el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: store.get('sch.sound', '1') === '1', onchange: (e) => { store.set('sch.sound', e.target.checked ? '1' : '0'); buzz(false); } }), ' 🔊 Play the beep on this device'),
+        note('Active buzzer: beeps at its own tone (≈ 2.5 kHz) whenever it gets 3–5 V. digitalWrite(pin, HIGH) = beep. About 12–20 mA: fine from an ESP32 / UNO pin.')); break;
       case 'PIR': f.append(el('button', { class: 'btn primary', type: 'button', text: q.motion ? '🚶 Motion → stop' : '🚶 Walk past it', onclick: () => { q.motion = !q.motion; commit(); } }),
         note('Pins VCC (5 V), OUT, GND. OUT is 3.3 V while it sees motion: digitalRead() it directly, ESP32 or UNO. Tap the sensor on the drawing to toggle motion.')); break;
       case 'LCD': f.append(choice('I2C address', String(q.addr ?? 0x27), [['39', '0x27 (PCF8574, most common)'], ['63', '0x3F (PCF8574A)']], v => { q.addr = +v; }),
@@ -1274,6 +1316,10 @@ export function schematicTab(root) {
         if (r.v < need) warn.push(['bad', r.v < 1 ? 'No power: wire VCC and GND.' : `${si(r.v, 'V')} is too low: it needs ${need === 3 ? '3.3–5 V' : '5 V'}.`]);
         break;
       }
+      case 'LOCK': vals.push(['State', r.open ? '🔓 OPEN' : '🔒 LOCKED', true], ['Current', si(Math.abs(r.i), 'A'), true], ['Voltage', si(Math.abs(Vab), 'V')]);
+        if (Math.abs(Vab) > 40) warn.push(['bad', `${si(Math.abs(Vab), 'V')} switch-off spike: add a diode across the lock.`]); break;
+      case 'BUZZER': vals.push(['State', Math.abs(Vab) > 1.5 ? '🔊 BEEP' : 'quiet', true], ['Voltage', si(Math.abs(Vab), 'V'), true], ['Current', si(I, 'A')]); break;
+      case 'KEYPAD': vals.push(['Keys waiting', String(KEYQ.get(p.id)?.length ?? 0), true]); break;
       case 'LDR': vals.push(['Resistance', si(S.ldrOhms(q.lux), 'Ω'), true], ['Voltage', si(Math.abs(Vab), 'V'), true], ['Current', si(I, 'A')]); break;
       case 'LCD': {
         const lv = LCDV.get(p.id) ?? {};
@@ -1497,9 +1543,10 @@ export function schematicTab(root) {
     document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal();
     return d;
   }
+  globalThis.__schDbg = { c: () => c, res: () => res, sim, sketches };     // for automated tests
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; probes = []; if (S.isDynamic(c)) { running = true; store.set('sch.run', '1'); syncTop(); autoTimeQuiet(); autoSpeed(); } hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -1589,6 +1636,33 @@ function symbol(ctx, p, r, g) {
       ctx.fillStyle = p.type === 'LED' ? col : 'transparent'; if (p.type === 'LED') { ctx.globalAlpha *= lit ? 1 : 0.35; ctx.fill(); ctx.globalAlpha /= lit ? 1 : 0.35; }
       ctx.strokeStyle = C.part; ctx.stroke(); L(0.55, -0.6, 0.55, 0.6);
       if (p.type === 'LED') { ctx.strokeStyle = lit ? col : C.dim; L(0.1, -0.75, 0.55, -1.2); L(0.4, -1.2, 0.55, -1.2, 0.55, -1.05); L(-0.35, -0.85, 0.1, -1.3); L(-0.05, -1.3, 0.1, -1.3, 0.1, -1.15); }
+      break;
+    }
+    case 'KEYPAD': {
+      ctx.fillStyle = '#1E2329'; ctx.fillRect(-4.6, -3.9, 8.4, 9); ctx.strokeRect(-4.6, -3.9, 8.4, 9);
+      const fl = KEYFLASH.get(p.id), now = performance.now();
+      for (let rr = 0; rr < 4; rr++) for (let cc = 0; cc < 4; cc++) {
+        const x0 = -4.2 + cc * 2, y0 = -3.6 + rr * 2.1, hot = fl && fl.until > now && fl.r === rr && fl.c === cc, ch = KEYLAB[rr][cc];
+        ctx.fillStyle = hot ? '#FFE16B' : /[A-D]/.test(ch) ? '#C62828' : /[*#]/.test(ch) ? '#1565C0' : '#ECEFF1';
+        ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x0, y0, 1.7, 1.75, 0.3) : ctx.rect(x0, y0, 1.7, 1.75); ctx.fill();
+        T(ch, x0 + 0.85, y0 + 0.9, 0.9, hot || !/[A-D*#]/.test(ch) ? '#111' : '#fff');
+      }
+      ['R1', 'R2', 'R3', 'R4', 'C1', 'C2', 'C3', 'C4'].forEach((n, k) => { L(-5, -3 + k, -4.6, -3 + k); });
+      break;
+    }
+    case 'BUZZER': {
+      const on = r && Math.abs(r.v) > 1.5;
+      L(-2, 0, -1.1, 0); L(1.1, 0, 2, 0); ctx.fillStyle = '#212121'; ctx.beginPath(); ctx.arc(0, 0, 1.1, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#555'; ctx.beginPath(); ctx.arc(0, 0, 0.25, 0, 7); ctx.fill(); T('+', -1.5, -0.6, 0.5, '#3DDC84');
+      if (on) { ctx.strokeStyle = '#FFE16B'; for (let i = 1; i <= 3; i++) { ctx.beginPath(); ctx.arc(0, 0, 1.1 + i * 0.35, -0.6, 0.6); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, 1.1 + i * 0.35, Math.PI - 0.6, Math.PI + 0.6); ctx.stroke(); } ctx.strokeStyle = C.part; }
+      break;
+    }
+    case 'LOCK': {
+      const open = r?.open;
+      L(-2, 0, -1.4, 0); L(1.4, 0, 2, 0);
+      ctx.fillStyle = open ? '#2E7D32' : '#455A64'; ctx.fillRect(-1.4, -0.5, 2.8, 1.8); ctx.strokeRect(-1.4, -0.5, 2.8, 1.8);
+      ctx.beginPath(); ctx.arc(open ? 0.6 : 0, -0.5, 0.75, Math.PI, 0); ctx.stroke(); if (open) L(1.35, -0.5, 1.35, -0.1);
+      T(open ? 'OPEN' : 'LOCKED', 0, 0.45, 0.48, '#fff');
       break;
     }
     case 'DHT': {
@@ -1849,6 +1923,6 @@ function arrowHead(ctx, x1, y1, x2, y2, f) {
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10, KEYPAD: 5.5, BUZZER: 14, LOCK: 14 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

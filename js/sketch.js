@@ -5,7 +5,7 @@ import { BOARDS } from './sch-core.js';
 
 const TYPES = 'int|long|short|float|double|bool|boolean|byte|char|word|size_t|String|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t';
 const API_NAMES = ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'analogReadMilliVolts', 'ledcSetup', 'ledcAttachPin', 'ledcAttach', 'ledcWrite', 'ledcDetachPin', 'ledcDetach',
-  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'DHT', 'DHT11', 'DHT22', 'DHT21', 'pulseIn', 'pulseInLong', 'isnan', 'NAN', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
+  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'DHT', 'DHT11', 'DHT22', 'DHT21', 'pulseIn', 'pulseInLong', 'isnan', 'NAN', 'Keypad', 'makeKeymap', 'NO_KEY', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
   'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'INPUT_PULLDOWN', 'LED_BUILTIN', 'PI', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'DEC', 'HEX', 'BIN', '__ops', 'int', 'float', 'yieldNow', '__no'];
 
 // find the ')' matching the '(' at i (skips strings / chars)
@@ -55,12 +55,29 @@ function guardLoops(s) {
   return out + s.slice(i);
 }
 
+// "name = {" (from an array declaration) … matching "}" → "[ … ]" (nested braces too), outside strings
+function arrayInits(s) {
+  const re = /\b(?:let|const)\s+\w+\s*=\s*\{/g; let m, out = '', last = 0;
+  // only the declarations we marked: they came from "name[...] = {"
+  while ((m = re.exec(s))) {
+    const start = m.index + m[0].length - 1;
+    // find matching brace
+    let d = 0, k = start;
+    for (; k < s.length; k++) { const ch = s[k]; if (ch === '"' || ch === "'") { const q = ch; k++; while (k < s.length && s[k] !== q) { if (s[k] === '\\') k++; k++; } continue; } if (ch === '{') d++; else if (ch === '}') { d--; if (!d) break; } }
+    let body = s.slice(start, k + 1), o = '';
+    for (let i = 0; i < body.length; i++) { const ch = body[i]; if (ch === '"' || ch === "'") { let j = i + 1; while (j < body.length && body[j] !== ch) { if (body[j] === '\\') j++; j++; } o += body.slice(i, j + 1); i = j; continue; } o += ch === '{' ? '[' : ch === '}' ? ']' : ch; }
+    out += s.slice(last, start) + o; last = k + 1; re.lastIndex = k + 1;
+  }
+  return out + s.slice(last);
+}
 export function transpile(src) {
   let s = src.replace(/\r/g, '');
   s = s.replace(/^\s*#\s*include.*$/gm, '');
   s = s.replace(/^\s*#\s*define\s+(\w+)\s+(.+)$/gm, 'const $1 = $2;');
   s = s.replace(/\bLiquidCrystal_I2C\s+(\w+)\s*\(([^)]*)\)\s*;/g, 'let $1 = new LiquidCrystal_I2C($2);');
   s = s.replace(/\bDHT\s+(\w+)\s*\(([^)]*)\)\s*;/g, 'let $1 = new DHT($2);');
+  s = s.replace(/\bKeypad\s+(\w+)\s*=\s*Keypad\s*\(/g, 'let $1 = new Keypad(').replace(/\bKeypad\s+(\w+)\s*\(/g, 'let $1 = new Keypad(');
+  s = s.replace(/\.length\(\s*\)/g, '.length');      // Arduino String.length() → JS .length
   s = s.replace(/\bServo\s+(\w+(?:\s*,\s*\w+)*)\s*;/g, (_, names) => 'let ' + names.split(',').map(n => `${n.trim()} = new Servo()`).join(', ') + ';');
   // function definitions → generators (params lose their types)
   const fns = new Set();
@@ -78,7 +95,10 @@ export function transpile(src) {
   s = s.replace(new RegExp(`\\bconst\\s+(?:unsigned\\s+)?(?:${TYPES})\\s+`, 'g'), 'const ');
   s = s.replace(new RegExp(`\\b(?:static\\s+)?(?:volatile\\s+)?(?:unsigned\\s+)?(?:${TYPES})\\s+(?=[A-Za-z_])`, 'g'), 'let ');
   s = s.replace(/\bunsigned\s+(?=[A-Za-z_])/g, 'let ');
-  s = s.replace(/\b(let|const)\s+(\w+)\s*\[\s*\w*\s*\]\s*=\s*\{([^}]*)\}/g, '$1 $2 = [$3]');
+  // arrays: int a[3] = {1, 2, 3};  char k[4][4] = {{...}, {...}};  → JS arrays
+  s = s.replace(/\b(let|const)\s+(\w+)\s*((?:\[\s*\w*\s*\])+)\s*=\s*\{/g, (m, kw, name, dims, off, all) => `${kw} ${name} = \u0001`);
+  s = s.replace(/\u0001/g, '{');
+  s = arrayInits(s);
   s = s.replace(/\blet\s+(\w+)\s*\[\s*(\w+)\s*\]\s*;/g, 'let $1 = new Array($2).fill(0);');
   s = s.split(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/).map((part, i) => (i % 2 ? part : part.replace(/\b(\d+(?:\.\d+)?)[uUlLfF]+\b/g, '$1'))).join('');   // 10UL, 2.5f (not inside strings)
   s = s.replace(/\bF\(\s*("(?:[^"\\]|\\.)*")\s*\)/g, '$1');
@@ -151,6 +171,12 @@ export function createRuntime(p, src, host) {
     const t = lastHigh.get(e.trig); if (t == null || host.t() - t > 0.06) return 0;
     const us = Math.round(e.cm * 58.3); return us > timeout ? 0 : us;
   };
+  // 4×4 keypad (Keypad library): getKey() returns the next key tapped on the keypad part wired to these row / column pins
+  class Keypad {
+    constructor(map, rowPins, colPins, rows = 4, cols = 4) { this.map = map; this.rows = [...rowPins].slice(0, rows).map(PN); this.cols = [...colPins].slice(0, cols).map(PN); this.last = ''; }
+    getKey() { const k = host.keypad?.(this.rows, this.cols); if (!k) return ''; const ch = this.map?.[k.r]?.[k.c] ?? ''; this.last = ch; return ch; }
+    getState() { return 0; } setDebounceTime() { } setHoldTime() { } isPressed(ch) { return this.last === ch; }
+  }
   const Wire = { begin() { }, setClock() { }, beginTransmission() { }, endTransmission: () => 0, write() { }, requestFrom: () => 0, available: () => 0, read: () => 0 };
   const api = {
     HIGH: 1, LOW: 0, INPUT: 'in', OUTPUT: 'out', INPUT_PULLUP: 'pu', INPUT_PULLDOWN: 'pd', LED_BUILTIN: esp ? 2 : 13, PI: Math.PI, DEC: 10, HEX: 16, BIN: 2,
@@ -178,6 +204,7 @@ export function createRuntime(p, src, host) {
     abs: Math.abs, min: Math.min, max: Math.max, pow: Math.pow, sqrt: Math.sqrt, sq: (x) => x * x, sin: Math.sin, cos: Math.cos, tan: Math.tan, floor: Math.floor, ceil: Math.ceil, round: Math.round,
     Serial: { begin() { }, print(x, f) { say(fmt(x, f)); }, println(x = '', f) { say(fmt(x, f)); endLine(); }, printf(f, ...a) { let i = 0; const t = String(f).replace(/%[-+0 #]*\d*(?:\.(\d+))?[dilufsxXc%]/g, (m, d) => m === '%%' ? '%' : /[xX]/.test(m) ? Math.trunc(a[i++]).toString(16) : /f/.test(m) ? (+a[i++]).toFixed(d ? +d : 6) : /[dilu]/.test(m) ? String(Math.trunc(a[i++])) : String(a[i++])); const parts = t.split('\n'); parts.forEach((x, k) => { if (x) say(x); if (k < parts.length - 1) endLine(); }); }, available: () => 0, read: () => -1, flush() { } },
     __no: (n) => () => { throw new Error(`${n}() is not an Arduino function` + (n === 'print' || n === 'println' ? `. Use Serial.${n}() or lcd.${n}().` : '.')); },
+    Keypad, makeKeymap: (m) => m, NO_KEY: '',
     Servo, LiquidCrystal_I2C, Wire, DHT, DHT11: 11, DHT22: 22, DHT21: 21, pulseIn, pulseInLong: pulseIn, isnan: Number.isNaN, NAN: NaN, yieldNow: 0,
   };
   let main;

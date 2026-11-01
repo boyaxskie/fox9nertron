@@ -164,6 +164,19 @@ const ARTICLES = [
     tryit: ['Watch digit 1 vs 8: brightness changes (one shared resistor).', 'Change R1 to 47 Ω: the panel warns about segment current.', 'Change DS1 to common anode without changing the code: dark (wrong type).', 'Make it count down: for (int n = 9; n >= 0; n--).'],
   },
   {
+    id: 'doorlock', title: 'Keypad door lock (ESP32 + 12 V solenoid)', example: 'doorlock', tag: 'Project',
+    intro: 'A complete door lock: type the PIN on the 4×4 keypad, the LCD shows ****, # checks it. Right PIN: the MOSFET powers the 12 V solenoid for 3 s and the buzzer beeps. Wrong PIN: long beep. The code is running: tap the keys on the drawing (PIN 1234 then #).',
+    parts: [['ESP32', 'runs the sketch (💻 Code)'], ['KEYPAD', '4×4 membrane keypad: rows → GPIO 19, 18, 5, 17 · columns → 16, 4, 2, 15'], ['LCD1', '16×2 I2C: SDA 21, SCL 22, VCC from VIN (5 V)'], ['BUZZER', 'active buzzer on GPIO23'], ['Q1 + R1 + R2', 'IRLZ44N logic-level MOSFET, 100 Ω gate resistor, 10 kΩ pull-down (lock stays shut while the ESP32 boots)'], ['LOCK + D1', '12 V 0.5 A solenoid lock, 1N5819 across it for the switch-off spike'], ['12V', '12 V 1 A adapter (the ESP32 needs its own 5 V: a buck module from the 12 V, or USB)']],
+    steps: [
+      ['1. How the keypad works', 'The 16 keys sit where 4 row wires cross 4 column wires. The Keypad library drives one row at a time and reads the columns: pressed key = that row + that column connected. No resistors needed (it uses the internal pull-ups).'],
+      ['2. The PIN logic', 'Each key is added to the String typed and a * goes to the LCD. # compares typed with code ("1234"). * clears. Change the PIN in the code: String code = "1234";'],
+      ['3. Driving the lock', 'The lock coil needs 12 V × 0.5 A; an ESP32 pin gives 3.3 V × 20 mA. The IRLZ44N is fully on at 3.3 V on its gate, so the pin switches the lock through it. R2 keeps the gate at 0 V during boot (no unlocking at power-up!).'],
+      ['4. Why D1', 'Switching off a coil makes a big voltage spike (L × dI/dt). D1 gives the current a path and protects the MOSFET. Delete D1 and watch the drain voltage jump.'],
+      ['5. Making it real', 'Fail-secure lock (locked without power) for a cabinet, fail-safe (open without power) for a door people must exit. Add a "door open" switch on a free pin, and store the PIN in Preferences / EEPROM so it survives a power cut.'],
+    ],
+    tryit: ['Type 1234 # : LCD "OPEN - welcome!", the lock turns green for 3 s, beep.', 'Type a wrong PIN: "WRONG PIN" and a long beep.', 'Change String code = "2580"; (edit while running: it restarts by itself).', 'Set Q1 Fault = shorted: the lock is always open. That is a blown MOSFET.', 'Open 🟫 PCB: the keypad gets an 8-pin header, the lock a screw terminal.'],
+  },
+  {
     id: 'unoio', title: 'Arduino UNO: LED, button, pot', example: 'unoio', tag: 'Microcontroller',
     intro: 'The same idea as the ESP32 page on a 5 V board: D13 drives an LED, D2 reads a button with the internal pull-up, A0 reads a pot.',
     parts: [['UNO', 'Arduino UNO, USB powered, 5 V logic'], ['R1 + LED1', 'D13 OUTPUT HIGH → 220 Ω → red LED'], ['BTN', 'D2 INPUT_PULLUP, button to GND'], ['RV1', '10 kΩ pot on 5 V, wiper → A0']],
