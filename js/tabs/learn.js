@@ -139,6 +139,31 @@ const ARTICLES = [
     note2: 'Pins set by hand stay as you set them, so the LED does not react to the button by itself. To make it react: tap the ESP32 → 💻 Code → pick "Button → LED + Serial" → ▶ Run code. Now hold BTN and watch D23 and the serial monitor, exactly like the real board.',
   },
   {
+    id: 'lcd', title: 'LCD 16×2 with I2C (4 wires)', example: 'lcd', tag: 'Microcontroller',
+    intro: 'The classic blue / green 16×2 LCD with the small I2C "backpack" (PCF8574) needs only 4 wires: GND, VCC, SDA, SCL. The ESP32 reads a pot and prints its voltage. The code is already running: tap the ESP32 → 💻 Code to see it.',
+    parts: [['ESP32', 'SDA = GPIO21, SCL = GPIO22'], ['LCD1', '16×2 LCD + PCF8574 backpack, address 0x27'], ['RV1', '10 kΩ pot on 3.3 V → GPIO34']],
+    steps: [
+      ['1. Wiring', 'LCD GND → GND, VCC → 5 V (ESP32 VIN pin, UNO 5V), SDA → GPIO21 (UNO A4), SCL → GPIO22 (UNO A5). The backpack already has the I2C pull-up resistors.'],
+      ['2. The library', 'Arduino IDE → Library Manager → "LiquidCrystal I2C" (Frank de Brabander). lcd.init() once, lcd.backlight(), then setCursor(column, row) and print(). Columns 0–15, rows 0–1.'],
+      ['3. Address', 'Most backpacks are 0x27, the PCF8574A ones 0x3F. Wrong address = the screen shows only a row of boxes. Change it in the LCD panel to try.'],
+      ['4. 5 V LCD on a 3.3 V ESP32', 'Powering the LCD from 5 V is right (at 3.3 V the text is very faint). The pull-ups then go to 5 V; the ESP32 pins usually survive it, but the clean way is a level shifter or removing the backpack pull-ups and adding 4.7 kΩ to 3.3 V.'],
+      ['5. Leftover characters', 'print() only overwrites where it writes. "Pot: 1.98 V" followed by "Pot: 2 V" leaves a stray "V". Hence the extra spaces after " V   " in the code.'],
+    ],
+    tryit: ['Turn RV1: the LCD follows.', 'Change the LCD address to 0x3F: boxes only (address mismatch).', 'Delete the SCL wire: boxes only.', 'Edit the code: lcd.setCursor(0, 0); lcd.print("Hello migo!"); and ▶ Run code again.'],
+  },
+  {
+    id: 'seg7', title: '7-segment display counter', example: 'seg7', tag: 'Microcontroller',
+    intro: 'A 7-segment display is 8 LEDs (a–g + dot) sharing one common pin. The UNO lights the right segments for each digit from a table of bits. The code is running: tap the UNO → 💻 Code.',
+    parts: [['UNO', 'D2 … D9 → segments a, b, c, d, e, f, g, dp'], ['DS1', 'common cathode 0.56" display (5161AS)'], ['R1', '330 Ω on the common pin']],
+    steps: [
+      ['1. Common cathode vs anode', 'CC: the common pin goes to GND, a HIGH segment pin lights. CA: common to +5 V, a LOW lights. Set the type in the DS1 panel; the code must match.'],
+      ['2. The digit table', 'Each digit is one byte: bit 0 = a … bit 6 = g. 0 = 0x3F (a–f on), 1 = 0x06 (b, c), 8 = 0x7F (all). show(n) writes bit i of DIGITS[n] to segment pin i.'],
+      ['3. One resistor or eight', 'One 330 Ω on the common pin is the lazy way: the current is shared, so "1" (2 segments, ≈ 4.6 mA each) is brighter than "8" (7 segments, ≈ 1.4 mA). Watch the segment current in the DS1 panel. Proper way: 220–330 Ω in each segment line.'],
+      ['4. PCB', 'The footprint is the common 10-pin 0.56" layout: top 10 g · 9 f · 8 COM · 7 a · 6 b, bottom 1 e · 2 d · 3 COM · 4 c · 5 dp. Check your display\'s datasheet; some clones differ.'],
+    ],
+    tryit: ['Watch digit 1 vs 8: brightness changes (one shared resistor).', 'Change R1 to 47 Ω: the panel warns about segment current.', 'Change DS1 to common anode without changing the code: dark (wrong type).', 'Make it count down: for (int n = 9; n >= 0; n--).'],
+  },
+  {
     id: 'unoio', title: 'Arduino UNO: LED, button, pot', example: 'unoio', tag: 'Microcontroller',
     intro: 'The same idea as the ESP32 page on a 5 V board: D13 drives an LED, D2 reads a button with the internal pull-up, A0 reads a pot.',
     parts: [['UNO', 'Arduino UNO, USB powered, 5 V logic'], ['R1 + LED1', 'D13 OUTPUT HIGH → 220 Ω → red LED'], ['BTN', 'D2 INPUT_PULLUP, button to GND'], ['RV1', '10 kΩ pot on 5 V, wiper → A0']],

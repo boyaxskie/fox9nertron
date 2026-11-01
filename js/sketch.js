@@ -5,7 +5,7 @@ import { BOARDS } from './sch-core.js';
 
 const TYPES = 'int|long|short|float|double|bool|boolean|byte|char|word|size_t|String|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t';
 const API_NAMES = ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'analogReadMilliVolts', 'ledcSetup', 'ledcAttachPin', 'ledcAttach', 'ledcWrite', 'ledcDetachPin', 'ledcDetach',
-  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
+  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
   'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'INPUT_PULLDOWN', 'LED_BUILTIN', 'PI', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'DEC', 'HEX', 'BIN', '__ops', 'int', 'float', 'yieldNow'];
 
 // find the ')' matching the '(' at i (skips strings / chars)
@@ -59,6 +59,7 @@ export function transpile(src) {
   let s = src.replace(/\r/g, '');
   s = s.replace(/^\s*#\s*include.*$/gm, '');
   s = s.replace(/^\s*#\s*define\s+(\w+)\s+(.+)$/gm, 'const $1 = $2;');
+  s = s.replace(/\bLiquidCrystal_I2C\s+(\w+)\s*\(([^)]*)\)\s*;/g, 'let $1 = new LiquidCrystal_I2C($2);');
   s = s.replace(/\bServo\s+(\w+(?:\s*,\s*\w+)*)\s*;/g, (_, names) => 'let ' + names.split(',').map(n => `${n.trim()} = new Servo()`).join(', ') + ';');
   // function definitions → generators (params lose their types)
   const fns = new Set();
@@ -106,7 +107,7 @@ export function createRuntime(p, src, host) {
   const PN = (pin) => { const n = pinName(board, pin); if (!n) throw new Error(`pin ${pin} does not exist on the ${B.name}`); return n; };
   const setMode = (n, cfg) => { if (cfg == null) delete host.pins[n]; else host.pins[n] = cfg; };
   const fmt = (x, f) => {
-    if (typeof x === 'number') { if (f === 16) return Math.trunc(x).toString(16).toUpperCase(); if (f === 2) return Math.trunc(x).toString(2); if (f === 10) return String(Math.trunc(x)); if (Number.isInteger(x)) return String(x); return x.toFixed(typeof f === 'number' ? f : 2); }
+    if (typeof x === 'number') { if (Number.isInteger(x)) { if (f === 16) return x.toString(16).toUpperCase(); if (f === 2) return x.toString(2); if (f === 8) return x.toString(8); return String(x); } return x.toFixed(typeof f === 'number' ? Math.min(10, f) : 2); }   // print(float, n) = n decimals, print(int, HEX/BIN) = base
     if (typeof x === 'boolean') return x ? '1' : '0';
     return String(x);
   };
@@ -120,6 +121,20 @@ export function createRuntime(p, src, host) {
     attached() { return !!this.n; }
     detach() { if (this.n) setMode(this.n, { mode: 'low' }); this.n = null; }
   }
+  // LCD 16×2 / 20×4 over I2C (LiquidCrystal_I2C library). The schematic shows the text on an LCD part wired to SDA / SCL.
+  const displays = [];
+  class LiquidCrystal_I2C {
+    constructor(addr = 0x27, cols = 16, rows = 2) { this.addr = addr; this.cols = cols; this.rows = rows; this.buf = Array.from({ length: rows }, () => ' '.repeat(cols)); this.cx = 0; this.cy = 0; this.bl = false; this.on = false; displays.push(this); }
+    init() { this.on = true; this.clear(); } begin() { this.init(); }
+    backlight() { this.bl = true; } noBacklight() { this.bl = false; } setBacklight(v) { this.bl = !!v; }
+    display() { this.on = true; } noDisplay() { this.on = false; }
+    clear() { this.buf = this.buf.map(() => ' '.repeat(this.cols)); this.cx = this.cy = 0; } home() { this.cx = this.cy = 0; }
+    setCursor(c, r) { this.cx = Math.max(0, Math.trunc(c)); this.cy = Math.max(0, Math.min(this.rows - 1, Math.trunc(r))); }
+    print(x, f) { for (const ch of fmt(x, f)) this.write(ch); return 1; }
+    write(ch) { if (typeof ch === 'number') ch = String.fromCharCode(ch); if (this.cx < this.cols) { const r = this.buf[this.cy]; this.buf[this.cy] = r.slice(0, this.cx) + ch + r.slice(this.cx + 1); } this.cx++; }
+    cursor() { } noCursor() { } blink() { } noBlink() { } createChar() { } scrollDisplayLeft() { } scrollDisplayRight() { } leftToRight() { } rightToLeft() { } autoscroll() { } noAutoscroll() { }
+  }
+  const Wire = { begin() { }, setClock() { }, beginTransmission() { }, endTransmission: () => 0, write() { }, requestFrom: () => 0, available: () => 0, read: () => 0 };
   const api = {
     HIGH: 1, LOW: 0, INPUT: 'in', OUTPUT: 'out', INPUT_PULLUP: 'pu', INPUT_PULLDOWN: 'pd', LED_BUILTIN: esp ? 2 : 13, PI: Math.PI, DEC: 10, HEX: 16, BIN: 2,
     A0: esp ? 36 : 'A0', A1: esp ? 37 : 'A1', A2: esp ? 38 : 'A2', A3: esp ? 39 : 'A3', A4: esp ? 32 : 'A4', A5: esp ? 33 : 'A5', A6: esp ? 34 : 'A6', A7: esp ? 35 : 'A7',
@@ -145,14 +160,14 @@ export function createRuntime(p, src, host) {
     random: (a, b) => (b == null ? Math.floor(Math.random() * a) : Math.floor(a + Math.random() * (b - a))), randomSeed() { },
     abs: Math.abs, min: Math.min, max: Math.max, pow: Math.pow, sqrt: Math.sqrt, sq: (x) => x * x, sin: Math.sin, cos: Math.cos, tan: Math.tan, floor: Math.floor, ceil: Math.ceil, round: Math.round,
     Serial: { begin() { }, print(x, f) { say(fmt(x, f)); }, println(x = '', f) { say(fmt(x, f)); endLine(); }, printf(f, ...a) { let i = 0; const t = String(f).replace(/%[-+0 #]*\d*(?:\.(\d+))?[dilufsxXc%]/g, (m, d) => m === '%%' ? '%' : /[xX]/.test(m) ? Math.trunc(a[i++]).toString(16) : /f/.test(m) ? (+a[i++]).toFixed(d ? +d : 6) : /[dilu]/.test(m) ? String(Math.trunc(a[i++])) : String(a[i++])); const parts = t.split('\n'); parts.forEach((x, k) => { if (x) say(x); if (k < parts.length - 1) endLine(); }); }, available: () => 0, read: () => -1, flush() { } },
-    Servo, yieldNow: 0,
+    Servo, LiquidCrystal_I2C, Wire, yieldNow: 0,
   };
   let main;
   try { main = new Function('__api', js)(api); } catch (e) { throw new Error('Code error: ' + e.message); }
   const gen = main();
   let wake = 0, err = null, done = false;
   return {
-    lines, get err() { return err; },
+    lines, displays, get err() { return err; },
     // run the sketch up to circuit time t (call once per simulator step)
     step(t) {
       if (err || done || t + 1e-12 < wake) return;
@@ -177,6 +192,8 @@ export const EXAMPLES = {
     uno: 'const int LED = 9;   // a ~ PWM pin\n\nvoid setup() {\n}\n\nvoid loop() {\n  int pot = analogRead(A0);       // 0 ... 1023\n  analogWrite(LED, pot / 4);      // 0 ... 255\n  delay(20);\n}\n' },
   dac: { name: 'DAC ramp (ESP32 GPIO25) / PWM ramp (UNO)', esp: '// ESP32 DAC: real analog voltage 0 ... 3.3 V on GPIO25 / GPIO26\n\nvoid setup() {\n  Serial.begin(115200);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 15) {\n    dacWrite(25, v);                  // 0 ... 255 → 0 ... 3.3 V\n    Serial.printf("DAC %d = %.2f V\\n", v, v * 3.3 / 255);\n    delay(200);\n  }\n}\n',
     uno: '// The UNO has no DAC: analogWrite makes PWM (average voltage)\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 15) {\n    analogWrite(9, v);\n    Serial.print("PWM ");\n    Serial.println(v);\n    delay(200);\n  }\n}\n' },
+  lcd: { name: 'LCD 16x2 I2C: show the pot voltage', esp: '#include <Wire.h>\n#include <LiquidCrystal_I2C.h>\n\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // SDA = GPIO21, SCL = GPIO22\n\nvoid setup() {\n  lcd.init();\n  lcd.backlight();\n  lcd.print("Hello migo!");\n}\n\nvoid loop() {\n  float v = analogRead(34) * 3.3 / 4095;\n  lcd.setCursor(0, 1);\n  lcd.print("Pot: ");\n  lcd.print(v, 2);\n  lcd.print(" V   ");\n  delay(200);\n}\n',
+    uno: '#include <Wire.h>\n#include <LiquidCrystal_I2C.h>\n\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // SDA = A4, SCL = A5\n\nvoid setup() {\n  lcd.init();\n  lcd.backlight();\n  lcd.print("Hello migo!");\n}\n\nvoid loop() {\n  float v = analogRead(A0) * 5.0 / 1023;\n  lcd.setCursor(0, 1);\n  lcd.print("A0: ");\n  lcd.print(v, 2);\n  lcd.print(" V   ");\n  delay(200);\n}\n' },
   servo: { name: 'Servo sweep', esp: '#include <ESP32Servo.h>\n\nServo arm;\n\nvoid setup() {\n  arm.attach(18);\n}\n\nvoid loop() {\n  for (int a = 0; a <= 180; a += 10) {\n    arm.write(a);\n    delay(100);\n  }\n  for (int a = 180; a >= 0; a -= 10) {\n    arm.write(a);\n    delay(100);\n  }\n}\n',
     uno: '#include <Servo.h>\n\nServo arm;\n\nvoid setup() {\n  arm.attach(9);\n}\n\nvoid loop() {\n  for (int a = 0; a <= 180; a += 10) {\n    arm.write(a);\n    delay(100);\n  }\n  for (int a = 180; a >= 0; a -= 10) {\n    arm.write(a);\n    delay(100);\n  }\n}\n' },
 };

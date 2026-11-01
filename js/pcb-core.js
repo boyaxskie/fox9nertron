@@ -68,6 +68,15 @@ export const FOOTPRINTS = {
   } },
   // small mains / inverter transformer: primary P1, CT, P2 on one side, secondary S1, S2 on the other, 10 mm apart (high voltage gap)
   XF5: { label: 'Transformer 5-pin (P1 CT P2 | S1 S2)', n: 5, make: () => ({ pads: square1([th(-7.5, -5, 0, 2.6, 1.2), th(-7.5, 0, 1, 2.6, 1.2), th(-7.5, 5, 2, 2.6, 1.2), th(7.5, -5, 3, 2.6, 1.2), th(7.5, 5, 4, 2.6, 1.2)]), body: [box(-10.5, -9, 10.5, 9), [[0, -9], [0, 9]]] }) },
+  // LCD I2C backpack header: GND VCC SDA SCL in a row (fits a 4-pin female header or the wires to the LCD)
+  HDR4: { label: 'Pin header 4-pin (GND VCC SDA SCL)', n: 4, make: () => ({ pads: square1([th(-3.81, 0, 0, 1.8, 1.0), th(-1.27, 0, 1, 1.8, 1.0), th(1.27, 0, 2, 1.8, 1.0), th(3.81, 0, 3, 1.8, 1.0)]), body: [box(-5.08, -1.27, 5.08, 1.27)] }) },
+  // 0.56" single digit (5161AS / 5161BS): top row 10 g · 9 f · 8 COM · 7 a · 6 b, bottom row 1 e · 2 d · 3 COM · 4 c · 5 dp, rows 15.24 mm apart
+  SEG10: { label: '7-segment 0.56" (10 pins, 5161)', n: 9, make: () => {
+    const top = [6, 5, 8, 0, 1], bot = [4, 3, 8, 2, 7], pads = [];
+    bot.forEach((pin, k) => pads.push({ ...th((k - 2) * PITCH, 7.62, pin, 1.8, 0.9, k === 0 ? 'rect' : 'round'), num: k + 1 }));
+    top.forEach((pin, k) => pads.push({ ...th((k - 2) * PITCH, -7.62, pin, 1.8, 0.9), num: 10 - k }));
+    return { pads, body: [box(-6.25, -9.5, 6.25, 9.5)] };
+  } },
   // SRD-05VDC-SL-C style relay (check against your relay's datasheet)
   SRD: { label: 'Relay SRD (Songle) 5-pin', n: 5, make: () => ({ pads: [th(-6, -2, 0, 2.2, 1.2), th(-6, 10, 1, 2.2, 1.2), th(-8, 4, 2, 2.4, 1.3), th(6.2, -2, 3, 2.4, 1.3), th(6.2, 10, 4, 2.4, 1.3)], body: [box(-9.8, -4.3, 9.2, 11.2)] }) },
 };
@@ -106,6 +115,8 @@ export function fpChoices(p) {
   if (p.type === 'UNO') return ['UNOSH'];
   if (p.type === 'RELAY') return ['SRD'];
   if (p.type === 'XFMR') return ['XF5'];
+  if (p.type === 'LCD') return ['HDR4'];
+  if (p.type === 'SEG7') return ['SEG10'];
   if (p.type === 'DPDT') return ['HDR2x3'];
   if (p.type === 'PB') return ['TACT6', 'HDR2', 'TERM2'];
   if (p.type === 'POT') return ['POT3', 'HDR3'];
@@ -168,7 +179,7 @@ export function footprintOf(p, bp = {}, big = BIG) {
 export function pinLabel(p, i) {
   if (isBoard(p.type)) return BOARDS[p.type].pins[i]?.n ?? String(i + 1);
   const L = { BAT: ['+', '−'], LED: ['A', 'K'], D: ['A', 'K'], ZD: ['A', 'K'], C: ['+', '−'], NPN: ['B', 'C', 'E'], PNP: ['B', 'C', 'E'], NMOS: ['G', 'D', 'S'], PMOS: ['G', 'D', 'S'],
-    OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], SERVO: ['SIG', 'V+', 'GND'], STEPPER: ['STEP', 'DIR', 'EN', 'VDD', 'GND', 'VMOT'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
+    OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], SERVO: ['SIG', 'V+', 'GND'], LCD: ['GND', 'VCC', 'SDA', 'SCL'], SEG7: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp', 'COM'], STEPPER: ['STEP', 'DIR', 'EN', 'VDD', 'GND', 'VMOT'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
   return L?.[i] ?? String(i + 1);
 }
 

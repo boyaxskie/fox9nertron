@@ -197,11 +197,14 @@ export const TYPES = {
   T555: { label: '555 timer', prefix: 'U', pins: [[0, 4], [-4, 2], [4, 0], [1, -4], [2, 4], [-4, 0], [-4, -2], [-1, -4]], box: [-4, -4, 4, 4], props: { model: 'NE555' } },
   RELAY: { label: 'Relay (coil + changeover)', prefix: 'K', pins: [[-3, -2], [-3, 2], [0, 2], [0, -2], [2, -2]], box: [-3.7, -2.4, 2.4, 2.4], props: { vcoil: 5, rcoil: 70, l: 0.02 } },
   XFMR: { label: 'Transformer (center tap)', prefix: 'TR', pins: [[-3, -2], [-3, 0], [-3, 2], [3, -2], [3, 2]], box: [-3, -2.6, 3, 2.6], props: { n1: 10, n2: 10, ns: 190, lm: 0.3, r1: 0.02, r2: 0.02, rs: 2 } },
+  // LCD 16×2 with I2C backpack. Schematic pin order (top→bottom) SCL, SDA, VCC, GND; index order GND, VCC, SDA, SCL like the real header
+  LCD: { label: 'LCD 16×2 (I2C backpack)', prefix: 'LCD', pins: [[-7, 2], [-7, 1], [-7, 0], [-7, -1]], box: [-7, -2.3, 7, 2.8], props: { addr: 0x27 } },
+  SEG7: { label: '7-segment display', prefix: 'DS', pins: [[-3, -4], [-3, -3], [-3, -2], [-3, -1], [-3, 0], [-3, 1], [-3, 2], [-3, 3], [-3, 4]], box: [-3, -4.7, 2.6, 4.7], props: { common: 'cathode', color: 'red' } },
   GND: { label: 'Ground', prefix: 'GND', pins: [[0, 0]], box: [-0.8, 0, 0.8, 1.6], props: {} },
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'LCD', 'SEG7', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
 export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
@@ -395,6 +398,18 @@ export function solveCircuit(c, sim = null, opts = {}) {
         R(S1, nS, Math.max(pr.rs, 1e-4), p, 'rs');
         const vsx = { kind: 'V', a: nS, b: S2, val: 0, gp: nA, gn: CT, gain: pr.ns / n1, owner: p, role: 'ws' }; els.push(vsx);
         els.push({ kind: 'F', a: nA, b: CT, ctrl: vsx, val: -pr.ns / n1, owner: p, role: 'fs' });
+        break;
+      }
+      case 'LCD': {
+        // pins GND, VCC, SDA, SCL. ≈ 25 mA (backlight + controller), 4.7 kΩ I2C pull-ups to VCC on the backpack
+        const [Gp, Vp, SDA, SCL] = pins;
+        R(Vp, Gp, 200, p, 'main'); R(SDA, Vp, 4700, p, 'sda'); R(SCL, Vp, 4700, p, 'scl');
+        break;
+      }
+      case 'SEG7': {
+        // 8 LEDs (a–g, dp) sharing one common pin: cathode (CC) or anode (CA)
+        const m = LED_COLORS[pr.color] ?? LED_COLORS.red, cc = pr.common !== 'anode', prev = st.get(p.id)?.segOn ?? [];
+        for (let k = 0; k < 8; k++) diodes.push({ p, a: cc ? pins[k] : pins[8], b: cc ? pins[8] : pins[k], vf: m.vf, rs: m.rs, on: !!prev[k], n: inner(), role: 'seg' + k });
         break;
       }
       case 'SIG': V(a, b, opts.sigOff ? pr.off : sigValue(pr, sim ? sim.t : 0), p, 'main'); break;
@@ -697,6 +712,17 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, v1, v2, vs, i1, i2, is, im, v: v1, i: i1, pin, pout, p: pin - pout, dots: [[0, 1, i1], [1, 2, i2], [3, 4, is]] });
       continue;
     }
+    if (p.type === 'LCD') {
+      const m = mine.find(e => e.role === 'main'), v = res.v[pins[1]] - res.v[pins[0]];
+      parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vsda: res.v[pins[2]] - res.v[pins[0]], vscl: res.v[pins[3]] - res.v[pins[0]], dots: [[1, 0, m.i]] });
+      continue;
+    }
+    if (p.type === 'SEG7') {
+      const ds = diodes.filter(d => d.p === p), segs = ds.map((d, k) => (d.on ? (mine.find(e => e.role === 'seg' + k && e.kind === 'V')?.i ?? 0) : 0));
+      const vf = (LED_COLORS[p.props.color] ?? LED_COLORS.red).vf, tot = segs.reduce((x, y) => x + y, 0);
+      parts.set(p.id, { va, vb, v: 0, i: tot, segs, segOn: ds.map(d => d.on), p: segs.reduce((x, y) => x + y * vf, 0), dots: [] });
+      continue;
+    }
     if (p.type === 'SCOPE') { parts.set(p.id, { ch1: res.v[pins[0]] - res.v[pins[2]], ch2: res.v[pins[1]] - res.v[pins[2]], v: 0, i: 0, p: 0 }); continue; }
     if (p.type === 'OPTO' || p.type === 'NPN' || p.type === 'PNP') {
       const o = trans.find(x => x.p === p), d = o.d, inV = d.on ? mine.find(e => e.role === d.role && e.kind === 'V') : null, ce = mine.find(e => e.role === 'ce');
@@ -823,6 +849,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
     else if (p.type === 'REG') next.set(p.id, { rs: r.state });
     else if (p.type === 'RELAY') next.set(p.id, { i: r.icoil, on: r.on });
     else if (p.type === 'T555') next.set(p.id, { q: r.q });
+    else if (p.type === 'SEG7') next.set(p.id, { segOn: r.segOn });
     else if (p.type === 'SERVO') next.set(p.id, { ang: r.ang, tgt: r.tgt, acc: r.acc, hi: r.hi, vh: r.vh, w: r.w, moving: r.moving });
     else if (p.type === 'STEPPER') next.set(p.id, { ang: r.ang, lvl: r.lvl, n: r.n, en: r.en, last: r.last, rate: r.rate });
   }
@@ -1254,6 +1281,27 @@ export function example(name) {
     W(38, 0, 38, 16); W(37, 16, 38, 16); W(31, 16, 33, 16); W(29, 16, 31, 16); W(25, 16, 25, 12);
     W(27, 18, 27, 21); W(27, 21, 15, 21); W(27, 18, 30, 18);
     W(24, 4, 24, -3); W(24, -3, 27, -3); W(15, 4, 15, -5); W(15, -5, 27, -5);
+  } else if (name === 'lcd') {
+    // ESP32 + LCD 16×2 I2C (SDA = GPIO21, SCL = GPIO22) shows the pot voltage. The code runs by itself (💻 Code in the ESP32 panel).
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';
+    m.props.code = '#include <Wire.h>\n#include <LiquidCrystal_I2C.h>\n\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // address 0x27, 16 x 2\n\nvoid setup() {\n  lcd.init();\n  lcd.backlight();\n  lcd.setCursor(0, 0);\n  lcd.print("Fox9nertron");\n}\n\nvoid loop() {\n  int raw = analogRead(34);           // pot on GPIO34\n  float v = raw * 3.3 / 4095;\n  lcd.setCursor(0, 1);\n  lcd.print("Pot: ");\n  lcd.print(v, 2);\n  lcd.print(" V   ");\n  delay(200);\n}\n';
+    m.props.run = true;
+    const d = addPart(c, 'LCD', 17, -5); d.name = 'LCD1';
+    const pot = addPart(c, 'POT', -10, -2); pot.name = 'RV1'; pot.props.pos = 60;
+    addPart(c, 'GND', 9, -3); addPart(c, 'GND', -6, 6); addPart(c, 'GND', -12, -2);
+    W(4, -6, 10, -6); W(4, -3, 7, -3); W(7, -3, 7, -5); W(7, -5, 10, -5);
+    W(10, -3, 9, -3); W(10, -4, 8, -4); W(8, -4, 8, 9); W(8, 9, -4, 9); W(-4, 9, -4, 7); W(-4, 6, -6, 6);
+    W(-10, -4, -4, -4); W(4, 7, 6, 7); W(6, 7, 6, 11); W(6, 11, -14, 11); W(-14, 11, -14, 0); W(-14, 0, -8, 0); W(-8, 0, -8, -2);
+  } else if (name === 'seg7') {
+    // UNO counts 0 → 9 on a common-cathode 7-segment: a … dp on D2 … D9, one 330 Ω on the common pin
+    const m = addPart(c, 'UNO', 0, 0); m.name = 'UNO';
+    m.props.code = '// 7-segment, common cathode: a b c d e f g dp on D2 ... D9\nconst int SEG[8] = {2, 3, 4, 5, 6, 7, 8, 9};\n//                      0     1     2     3     4     5     6     7     8     9\nconst byte DIGITS[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};\n\nvoid setup() {\n  Serial.begin(9600);\n  for (int i = 0; i < 8; i++) pinMode(SEG[i], OUTPUT);\n}\n\nvoid show(int n) {\n  for (int i = 0; i < 7; i++) digitalWrite(SEG[i], (DIGITS[n] >> i) & 1);\n}\n\nvoid loop() {\n  for (int n = 0; n < 10; n++) {\n    show(n);\n    Serial.println(n);\n    delay(700);\n  }\n}\n';
+    m.props.run = true;
+    const d = addPart(c, 'SEG7', 16, -1); d.name = 'DS1';
+    const r = addPart(c, 'R', 11, 5, 1); r.name = 'R1'; r.props.r = 330; r.lbl = [-6, 0];
+    addPart(c, 'GND', 11, 7); addPart(c, 'GND', -6, -2);
+    for (let k = 0; k < 8; k++) W(4, -5 + k, 13, -5 + k);
+    W(13, 3, 11, 3); W(-4, -2, -6, -2);
   } else if (name === 'esp32io') {
     // ESP32 pins set by hand: D23 OUTPUT HIGH → 330 Ω → LED · D15 INPUT_PULLUP + button to GND · D34 analogRead of a 10 kΩ pot on 3.3 V
     const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32';
