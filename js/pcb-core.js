@@ -133,7 +133,23 @@ export function defaultFp(p) {
   }
 }
 // footprint (local pads + body) for a part, using its board settings
-export function footprintOf(p, bp = {}) {
+// DIY big pads (default ON): more copper to solder on CNC-milled boards. Pads in a tight row become ovals that grow
+// across the row (the gap to the next pin stays the same), lone pads become 2.4 mm round. Set by analyze() from c.pcb.rules.bigPads.
+let BIG = true;
+export const setBigPads = (v) => { BIG = v !== false; };
+function bigPads(pads) {
+  const th2 = pads.filter(q => q.drill > 0);
+  for (const pd of th2) {
+    let fx = Infinity, fy = Infinity;
+    for (const q of th2) { if (q === pd) continue; const dx = Math.abs(q.x - pd.x), dy = Math.abs(q.y - pd.y); if (dy < 0.6 && dx > 0.01) fx = Math.min(fx, dx); if (dx < 0.6 && dy > 0.01) fy = Math.min(fy, dy); if (dx >= 0.6 && dy >= 0.6 && Math.hypot(dx, dy) < 3.2) { fx = Math.min(fx, dx); fy = Math.min(fy, dy); } }
+    const short = Math.min(pd.w, pd.h), longMax = 3.0;
+    if (fx >= 4 && fy >= 4) { if (pd.shape === 'round' && pd.w < 2.4) pd.w = pd.h = 2.4; else if (pd.shape !== 'round') { pd.w = Math.max(pd.w, 2.4); pd.h = Math.max(pd.h, 2.4); } continue; }
+    if (fx >= 3.8 && fx > fy) { const L = Math.min(longMax, fx - 0.8); if (L > pd.w) { pd.w = L; pd.h = short; if (pd.shape === 'round') pd.shape = 'oval'; } }
+    else if (fy >= 3.8 && fy > fx) { const L = Math.min(longMax, fy - 0.8); if (L > pd.h) { pd.h = L; pd.w = short; if (pd.shape === 'round') pd.shape = 'oval'; } }
+  }
+  return pads;
+}
+export function footprintOf(p, bp = {}, big = BIG) {
   const d = defaultFp(p);
   let fpKey = bp.fp && FOOTPRINTS[bp.fp] && fpChoices(p).includes(bp.fp) ? bp.fp : d.fp;
   const F = FOOTPRINTS[fpKey];
@@ -145,6 +161,7 @@ export function footprintOf(p, bp = {}) {
   const sp = SPACINGS[fpKey], nat = made.pads.length === 2 ? Math.abs(made.pads[1].x - made.pads[0].x) : 0;
   let pitch = nat;
   if (sp && bp.pitch && sp.includes(bp.pitch)) { pitch = bp.pitch; made.pads[0].x = -pitch / 2; made.pads[1].x = pitch / 2; }
+  if (big) bigPads(made.pads);
   return { key: fpKey, ...made, pitch: sp ? Math.round(pitch * 100) / 100 : null, orderStr: F.ordered && letters ? [...order].map(i => Object.keys(letters).find(k => letters[k] === i)).join('') : null };
 }
 // pad name shown on the board
@@ -198,11 +215,12 @@ export const DEFAULT_CAM = {
   zSafe: 3, zTravel: 1, bits: '0.8, 1.0, 1.2', drillDepth: 1.8, drillFeed: 60,
   cutDia: 1.5, cutDepth: 1.7, cutStep: 0.4, cutFeed: 120, tabs: 4, tabW: 3, tabH: 0.6, thick: 1.6, mirror: true,
 };
-export const DEFAULT_RULES = { trace: 0.6, power: 1.0, clear: 0.4, grid: 0.25, edge: 0.6 };
+export const DEFAULT_RULES = { trace: 0.6, power: 1.0, clear: 0.4, grid: 0.25, edge: 0.6, bigPads: true };
 export function newLayout() { return { v: 1, w: 50, h: 40, parts: {}, traces: [], jumpers: [], cam: { ...DEFAULT_CAM }, rules: { ...DEFAULT_RULES } }; }
 
 // make sure every board part has a place; drop removed parts. New parts land near their schematic spot.
 export function syncLayout(c) {
+  setBigPads(c.pcb?.rules?.bigPads);
   const L = c.pcb ?? (c.pcb = newLayout());
   L.cam = { ...DEFAULT_CAM, ...L.cam }; L.rules = { ...DEFAULT_RULES, ...L.rules }; L.jumpers ??= [];
   const live = new Set();
@@ -258,6 +276,7 @@ export function partExtents(p, bp) {
 }
 // shrink / grow the board around the parts (grow only if growOnly)
 export function fitBoard(c, margin = 4, growOnly = false) {
+  setBigPads(c.pcb?.rules?.bigPads);
   const L = c.pcb; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const p of c.parts) { const bp = L.parts[p.id]; if (!bp) continue; const e = partExtents(p, bp); x0 = Math.min(x0, e[0]); y0 = Math.min(y0, e[1]); x1 = Math.max(x1, e[2]); y1 = Math.max(y1, e[3]); }
   if (!Number.isFinite(x0)) return;
@@ -278,6 +297,7 @@ export function shiftAll(L, dx, dy) {
 
 // pads in board coordinates, with their nets
 export function boardPads(c, nl) {
+  setBigPads(c.pcb?.rules?.bigPads);
   const L = c.pcb, out = [];
   for (const p of c.parts) {
     const bp = L.parts[p.id]; if (!bp) continue;
@@ -319,6 +339,7 @@ export function copperItems(c, nl) {
 }
 // connectivity: which copper touches which. Gives shorts, the net of each trace, and the missing connections (ratsnest).
 export function analyze(c, nl = netlist(c)) {
+  setBigPads(c.pcb?.rules?.bigPads);
   const { pads, items } = copperItems(c, nl);
   const n = items.length, par = items.map((_, i) => i);
   const find = (a) => { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };

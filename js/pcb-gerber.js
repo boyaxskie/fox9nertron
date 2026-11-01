@@ -1,14 +1,14 @@
 // Gerber export in the same style Proteus 9 writes ("CADCAM" Gerber X2), so the Fox9ner web app reads it like a Proteus file:
 // %FSLAX45Y45*% (mm, 5 decimals, signed coordinates like X+1649620Y+600000), round apertures, drill marks as a Gerber too.
 // Seen from the TOP, not mirrored, origin = lower-left board corner. Excellon is still available for other tools.
-import { analyze } from './pcb-core.js';
+import { analyze, padCapsule } from './pcb-core.js';
 
 const N = (v) => { const n = Math.round(v * 1e5); return (n < 0 ? '-' : '+') + Math.abs(n); };
 const A = (v) => v.toFixed(6);
 const uuid = () => (crypto?.randomUUID?.() ?? 'f9t-' + Date.now().toString(16));
 
 function head(func, same) {
-  return ['G04 FOX9NERTRON GERBER X2 FILE (Proteus CADCAM style)*', '%TF.GenerationSoftware,Fox9ner,Fox9nertron,1.9.2*%', `%TF.CreationDate,${new Date().toISOString().slice(0, 19)}+00:00*%`,
+  return ['G04 FOX9NERTRON GERBER X2 FILE (Proteus CADCAM style)*', '%TF.GenerationSoftware,Fox9ner,Fox9nertron,1.9.3*%', `%TF.CreationDate,${new Date().toISOString().slice(0, 19)}+00:00*%`,
     `%TF.FileFunction,${func}*%`, '%TF.FilePolarity,Positive*%', '%TF.Part,Single*%', `%TF.SameCoordinates,{${same}}*%`, '%FSLAX45Y45*%', '%MOMM*%', 'G01*'];
 }
 // pad size as a round aperture (square / oval pads become round, like Proteus' round pads)
@@ -37,7 +37,12 @@ export function gerberCopper(c, an = analyze(c), same = uuid()) {
   }
   for (const [w, ap] of pA) {
     out.push(`D${ap}*`);
-    for (const p of an.pads) if (+padD(p).toFixed(6) === w) out.push(`X${N(p.x)}Y${N(Y(p.y))}D03*`);
+    for (const p of an.pads) {
+      if (+padD(p).toFixed(6) !== w) continue;
+      // oval (big) pads: a short stroke with the round aperture = obround pad, readable by any Gerber tool
+      if (Math.abs(p.w - p.h) > 0.01) { const k = padCapsule({ ...p, shape: 'oval' }); out.push(`X${N(k.x1)}Y${N(Y(k.y1))}D02*`, `X${N(k.x2)}Y${N(Y(k.y2))}D01*`); }
+      else out.push(`X${N(p.x)}Y${N(Y(p.y))}D03*`);
+    }
   }
   out.push('M02*');
   return out.join('\n') + '\n';

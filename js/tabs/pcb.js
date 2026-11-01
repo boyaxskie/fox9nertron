@@ -439,7 +439,8 @@ export function pcbView(api) {
         numIn('Signal trace', R.trace, 'mm', v => { R.trace = Math.max(0.2, v); change(); }), numIn('Power trace (GND, supply)', R.power, 'mm', v => { R.power = Math.max(0.2, v); change(); }),
         numIn('Clearance', R.clear, 'mm', v => { R.clear = Math.max(0.1, v); change(); }, 'gap between nets')),
       el('div', { class: 'row wrap' }, btn('Fit board to parts', () => { P.fitBoard(api.getC(), 4); change('Board fitted around the parts (4 mm margin).'); W = 0; resize(); }),
-        el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: R.jumpers !== false, onchange: (e) => { R.jumpers = e.target.checked; change(); } }), ' Autoroute may use jumper wires'))));
+        el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: R.jumpers !== false, onchange: (e) => { R.jumpers = e.target.checked; change(); } }), ' Autoroute may use jumper wires'),
+        el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: R.bigPads !== false, onchange: (e) => { R.bigPads = e.target.checked; P.setBigPads(R.bigPads); change(R.bigPads ? 'Big pads ON: header pins get oval pads, lone pads 2.4 mm. Autoroute again.' : 'Big pads OFF: standard 1.8 mm pads.'); W = 0; resize(); } }), ' DIY big pads (oval, easier to solder)'))));
     // CAM
     const C = L.cam, w = vWidth(C);
     const camSec = el('details', { class: 'pcb-sec pcb-cam', open: showCam || undefined }, el('summary', { text: '🛠 G-code for CNC 3018 (GRBL)' }),
