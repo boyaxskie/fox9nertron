@@ -199,6 +199,21 @@ const ARTICLES = [
     tryit: ['Turn RV1: number, bar and graph follow.', 'Change the OLED address to 0x3D: the screen stays black (address mismatch).', 'Delete display.display(); at the end of loop(): the picture freezes.', 'Add display.drawCircle(110, 50, 10, SSD1306_WHITE); before display.display(); and watch it appear.', 'Change the colour in the OLED panel to white or blue.'],
   },
   {
+    id: 'encoder', title: 'Rotary encoder + interrupts (menu on the OLED)', example: 'encoder', tag: 'Microcontroller',
+    intro: 'A rotary encoder is a knob that turns forever in clicks and can be pushed. It is the classic way to set a value or walk through a menu. Here the ESP32 reads it with an interrupt and shows a menu on the OLED: turn to move, push to choose. Tap the knob on the drawing: left half ⟲, right half ⟳, middle = push.',
+    parts: [['ENC1', 'KY-040 module: CLK → GPIO32, DT → GPIO33, SW → GPIO25, + → 3V3'], ['OLED1', 'SSD1306 menu screen (GPIO21 / 22)'], ['LED1 + R1', 'LED on GPIO23 through 330 Ω']],
+    steps: [
+      ['1. How it works', 'Inside are two switches, A (CLK) and B (DT), that both close and open once per click, a little after each other. Turning right, CLK goes LOW first; turning left, DT goes LOW first. That order (quadrature) tells the direction.'],
+      ['2. Reading the direction', 'At the moment CLK falls, look at DT: still HIGH = DT has not moved yet = turned right (count + 1). Already LOW = turned left (count − 1).'],
+      ['3. Why an interrupt', 'One click is over in a few milliseconds. If loop() is busy (drawing the OLED, delay()), polling misses clicks. attachInterrupt(digitalPinToInterrupt(CLK), readEncoder, FALLING) makes the board stop whatever it is doing and run readEncoder() the instant CLK falls.'],
+      ['4. ISR rules', 'Keep it tiny: read a pin, change a number, return. No delay(), no Serial, no display inside. Variables shared with loop() must be volatile. On the ESP32 mark it IRAM_ATTR. In loop(), copy the count between noInterrupts() and interrupts() so it cannot change halfway.'],
+      ['5. Which pins', 'ESP32: any GPIO can interrupt. UNO: only D2 (interrupt 0) and D3 (interrupt 1): put CLK on D2. Modes: RISING, FALLING, CHANGE, LOW (and HIGH on the ESP32).'],
+      ['6. The push button', 'SW connects to GND when pushed and the KY-040 has no pull-up for it: pinMode(SW, INPUT_PULLUP). Act once per press by remembering the last state (wasPressed), otherwise one push counts many times.'],
+      ['7. Real knobs bounce', 'A real encoder\'s contacts chatter for about 1 ms, giving extra counts. The KY-040 already has the pull-ups; add 100 nF from CLK and DT to GND, or ignore a second edge within 2 ms (millis()). The simulator\'s contacts are clean.'],
+    ],
+    tryit: ['Turn right 2 clicks, push: Blink ON, the LED blinks.', 'Move to Speed, push, turn: the blink speed changes; push again to leave.', 'Change FALLING to CHANGE in the code: every click now counts twice (CLK falls and rises).', 'Swap the CLK and DT wires: the menu moves the other way.', 'Delete the attachInterrupt line: the menu stops moving.'],
+  },
+  {
     id: 'seg7', title: '7-segment display counter', example: 'seg7', tag: 'Microcontroller',
     intro: 'A 7-segment display is 8 LEDs (a–g + dot) sharing one common pin. The UNO lights the right segments for each digit from a table of bits. The code is running: tap the UNO → 💻 Code.',
     parts: [['UNO', 'D2 … D9 → segments a, b, c, d, e, f, g, dp'], ['DS1', 'common cathode 0.56" display (5161AS)'], ['R1', '330 Ω on the common pin']],

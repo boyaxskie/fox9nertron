@@ -28,6 +28,7 @@ export function partValue(p) {
     case 'SERVO': return `servo ${q.model} (3-pin header)`;
     case 'STEPPER': return 'A4988 module (+ 2x8 female headers)';
     case 'OPTO': return 'PC817';
+    case 'ENC': return 'rotary encoder KY-040 (5-pin header)';
     case 'OLED': return 'OLED 0.96in SSD1306 I2C (4-pin header)';
     case 'LCD': return 'LCD 16x2 + I2C backpack (4-pin header)';
     case 'ISRC': return 'current source';

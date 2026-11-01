@@ -1,12 +1,12 @@
 // Arduino sketch runner: turns simple Arduino C++ (setup / loop, pinMode, digitalWrite, analogRead, delay, Serial, Servo, ledc…)
 // into a JavaScript generator that the simulator steps through in circuit time. delay() pauses the sketch while the circuit runs on.
-// Not a full C++ compiler: no classes / structs / pointers / interrupts. Ints divide like floats unless you use int().
+// Not a full C++ compiler: no classes / structs / pointers. attachInterrupt works: the ISR runs on the pin edge, between circuit steps. Ints divide like floats unless you use int().
 import { BOARDS } from './sch-core.js';
 import { makeOled, OLED_CONST } from './oled.js';
 
 const TYPES = 'int|long|short|float|double|bool|boolean|byte|char|word|size_t|String|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t';
 const API_NAMES = ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'analogReadMilliVolts', 'ledcSetup', 'ledcAttachPin', 'ledcAttach', 'ledcWrite', 'ledcDetachPin', 'ledcDetach',
-  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'DHT', 'DHT11', 'DHT22', 'DHT21', 'pulseIn', 'pulseInLong', 'isnan', 'NAN', 'Keypad', 'makeKeymap', 'NO_KEY', 'Adafruit_SSD1306', ...Object.keys(OLED_CONST), 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
+  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'DHT', 'DHT11', 'DHT22', 'DHT21', 'pulseIn', 'pulseInLong', 'isnan', 'NAN', 'Keypad', 'makeKeymap', 'NO_KEY', 'Adafruit_SSD1306', ...Object.keys(OLED_CONST), 'attachInterrupt', 'detachInterrupt', 'digitalPinToInterrupt', 'interrupts', 'noInterrupts', 'RISING', 'FALLING', 'CHANGE', 'NOT_AN_INTERRUPT', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
   'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'INPUT_PULLDOWN', 'LED_BUILTIN', 'PI', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'DEC', 'HEX', 'BIN', '__ops', 'int', 'float', 'yieldNow', '__no'];
 
 // find the ')' matching the '(' at i (skips strings / chars)
@@ -78,6 +78,7 @@ export function transpile(src) {
   s = s.replace(/\bLiquidCrystal_I2C\s+(\w+)\s*\(([^)]*)\)\s*;/g, 'let $1 = new LiquidCrystal_I2C($2);');
   s = s.replace(/\bDHT\s+(\w+)\s*\(([^)]*)\)\s*;/g, 'let $1 = new DHT($2);');
   s = s.replace(/\bAdafruit_SSD1306\s+(\w+)\s*\(([^)]*)\)\s*;/g, (_, n, a) => `let ${n} = new Adafruit_SSD1306(${a.replace(/&/g, '')});`).replace(/\bAdafruit_SSD1306\s+(\w+)\s*;/g, 'let $1 = new Adafruit_SSD1306();');
+  s = s.replace(/\b(?:IRAM_ATTR|ICACHE_RAM_ATTR|ARDUINO_ISR_ATTR)\b/g, '');
   s = s.replace(/\bPROGMEM\b/g, '').replace(/\bstatic\s+(?=const\b)/g, '');
   s = s.replace(/(?<!\}\s*)\b((?:for|while)\s*\([^()]*(?:\([^()]*\)[^()]*)*\))\s*;/g, '$1 { }');   // for (;;); / while (1); → a loop the guard can pause
   s = s.replace(/\bKeypad\s+(\w+)\s*=\s*Keypad\s*\(/g, 'let $1 = new Keypad(').replace(/\bKeypad\s+(\w+)\s*\(/g, 'let $1 = new Keypad(');
@@ -136,6 +137,10 @@ export function createRuntime(p, src, host) {
     if (typeof x === 'boolean') return x ? '1' : '0';
     return String(x);
   };
+  // interrupts: attachInterrupt(digitalPinToInterrupt(pin), isr, RISING / FALLING / CHANGE / LOW / HIGH)
+  const isrs = new Map(); let intOn = true;
+  const level = (n) => { const v = host.v(n); return v == null ? 0 : v >= (B.vih + B.vil) / 2 ? 1 : 0; };
+  const runIsr = (fn) => { const g = fn(); for (let k = 0; k < 100000; k++) if (g.next().done) return; throw new Error('the interrupt function never ends (no loops or delay() inside an ISR)'); };
   let adcBits = B.adcBits, pwmBits = 8, pwmF = null;
   const pwmOut = (n, duty, f) => setMode(n, duty <= 0 ? { mode: 'low' } : duty >= 100 ? { mode: 'high' } : { mode: 'pwm', f, duty });
   class Servo {
@@ -208,6 +213,16 @@ export function createRuntime(p, src, host) {
     random: (a, b) => (b == null ? Math.floor(Math.random() * a) : Math.floor(a + Math.random() * (b - a))), randomSeed() { },
     abs: Math.abs, min: Math.min, max: Math.max, pow: Math.pow, sqrt: Math.sqrt, sq: (x) => x * x, sin: Math.sin, cos: Math.cos, tan: Math.tan, floor: Math.floor, ceil: Math.ceil, round: Math.round,
     Serial: { begin() { }, print(x, f) { say(fmt(x, f)); }, println(x = '', f) { say(fmt(x, f)); endLine(); }, printf(f, ...a) { let i = 0; const t = String(f).replace(/%[-+0 #]*\d*(?:\.(\d+))?[dilufsxXc%]/g, (m, d) => m === '%%' ? '%' : /[xX]/.test(m) ? Math.trunc(a[i++]).toString(16) : /f/.test(m) ? (+a[i++]).toFixed(d ? +d : 6) : /[dilu]/.test(m) ? String(Math.trunc(a[i++])) : String(a[i++])); const parts = t.split('\n'); parts.forEach((x, k) => { if (x) say(x); if (k < parts.length - 1) endLine(); }); }, available: () => 0, read: () => -1, flush() { } },
+    RISING: 3, FALLING: 2, CHANGE: 4, NOT_AN_INTERRUPT: -1,
+    digitalPinToInterrupt(pin) { if (esp) return pin; const n = PN(pin); return n === 'D2' ? 0 : n === 'D3' ? 1 : -1; },
+    attachInterrupt(num, fn, mode) {
+      const n = esp ? PN(num) : num === 0 ? 'D2' : num === 1 ? 'D3' : null;
+      if (!n) throw new Error('attachInterrupt: on the UNO only D2 (interrupt 0) and D3 (interrupt 1) have interrupts. Use attachInterrupt(digitalPinToInterrupt(2), …)');
+      if (typeof fn !== 'function') throw new Error('attachInterrupt: the 2nd argument must be the name of your function, without ()');
+      isrs.set(n, { fn, mode, last: level(n) });
+    },
+    detachInterrupt(num) { isrs.delete(esp ? PN(num) : num === 0 ? 'D2' : 'D3'); },
+    interrupts() { intOn = true; }, noInterrupts() { intOn = false; },
     __no: (n) => () => { throw new Error(`${n}() is not an Arduino function` + (n === 'print' || n === 'println' ? `. Use Serial.${n}() or lcd.${n}().` : '.')); },
     Keypad, makeKeymap: (m) => m, NO_KEY: '', Adafruit_SSD1306, ...OLED_CONST,
     Servo, LiquidCrystal_I2C, Wire, DHT, DHT11: 11, DHT22: 22, DHT21: 21, pulseIn, pulseInLong: pulseIn, isnan: Number.isNaN, NAN: NaN, yieldNow: 0,
@@ -220,7 +235,16 @@ export function createRuntime(p, src, host) {
     lines, displays, oleds, get err() { return err; },
     // run the sketch up to circuit time t (call once per simulator step)
     step(t) {
-      if (err || done || t + 1e-12 < wake) return;
+      if (err) return;
+      if (intOn && isrs.size) {
+        try {
+          for (const [n, q] of isrs) {
+            const lv = level(n), m = q.mode, hit = m === 4 ? lv !== q.last : m === 3 ? !q.last && lv : m === 2 ? q.last && !lv : m === 0 ? !lv : m === 1 ? !!lv : false;
+            q.last = lv; if (hit) runIsr(q.fn);
+          }
+        } catch (e) { err = 'Runtime error in interrupt: ' + e.message; return; }
+      }
+      if (done || t + 1e-12 < wake) return;
       for (let k = 0; k < 4000; k++) {
         let r;
         try { r = gen.next(); } catch (e) { err = 'Runtime error: ' + e.message; return; }
@@ -242,6 +266,8 @@ export const EXAMPLES = {
     uno: 'const int LED = 9;   // a ~ PWM pin\n\nvoid setup() {\n}\n\nvoid loop() {\n  int pot = analogRead(A0);       // 0 ... 1023\n  analogWrite(LED, pot / 4);      // 0 ... 255\n  delay(20);\n}\n' },
   dac: { name: 'DAC ramp (ESP32 GPIO25) / PWM ramp (UNO)', esp: '// ESP32 DAC: real analog voltage 0 ... 3.3 V on GPIO25 / GPIO26\n\nvoid setup() {\n  Serial.begin(115200);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 15) {\n    dacWrite(25, v);                  // 0 ... 255 → 0 ... 3.3 V\n    Serial.printf("DAC %d = %.2f V\\n", v, v * 3.3 / 255);\n    delay(200);\n  }\n}\n',
     uno: '// The UNO has no DAC: analogWrite makes PWM (average voltage)\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  for (int v = 0; v <= 255; v += 15) {\n    analogWrite(9, v);\n    Serial.print("PWM ");\n    Serial.println(v);\n    delay(200);\n  }\n}\n' },
+  encoder: { name: 'Rotary encoder + interrupt (count in Serial)', esp: '// Rotary encoder (KY-040) with an interrupt: the count changes the instant you turn\nconst int CLK = 32;   // must be an interrupt pin\nconst int DT  = 33;\nconst int SW  = 25;\n\nvolatile int count = 0;\n\nvoid IRAM_ATTR readEncoder() {\n  if (digitalRead(DT) == HIGH) count++;   // turned right\n  else count--;                           // turned left\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(CLK, INPUT);\n  pinMode(DT, INPUT);\n  pinMode(SW, INPUT_PULLUP);\n  attachInterrupt(digitalPinToInterrupt(CLK), readEncoder, FALLING);\n}\n\nint last = 0;\n\nvoid loop() {\n  if (count != last) {\n    last = count;\n    Serial.print("Count: ");\n    Serial.println(last);\n  }\n  if (digitalRead(SW) == LOW) {\n    count = 0;\n    Serial.println("Reset");\n    delay(300);\n  }\n  delay(10);\n}\n',
+    uno: '// Rotary encoder (KY-040) with an interrupt: the count changes the instant you turn\nconst int CLK = 2  ;   // UNO: only D2 / D3 have interrupts\nconst int DT  = 3;\nconst int SW  = 4;\n\nvolatile int count = 0;\n\nvoid readEncoder() {\n  if (digitalRead(DT) == HIGH) count++;   // turned right\n  else count--;                           // turned left\n}\n\nvoid setup() {\n  Serial.begin(9600);\n  pinMode(CLK, INPUT);\n  pinMode(DT, INPUT);\n  pinMode(SW, INPUT_PULLUP);\n  attachInterrupt(digitalPinToInterrupt(CLK), readEncoder, FALLING);\n}\n\nint last = 0;\n\nvoid loop() {\n  if (count != last) {\n    last = count;\n    Serial.print("Count: ");\n    Serial.println(last);\n  }\n  if (digitalRead(SW) == LOW) {\n    count = 0;\n    Serial.println("Reset");\n    delay(300);\n  }\n  delay(10);\n}\n' },
   oled: { name: 'OLED 128x64 SSD1306: text, bar and live graph', esp: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\n#define SCREEN_WIDTH 128\n#define SCREEN_HEIGHT 64\nAdafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);   // SDA = GPIO21, SCL = GPIO22\n\nint graph[128];   // last 128 readings for the moving graph\n\nvoid setup() {\n  Serial.begin(115200);\n  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {\n    Serial.println("OLED not found");\n    for (;;);\n  }\n  for (int i = 0; i < 128; i++) graph[i] = 63;\n  display.clearDisplay();\n  display.setTextSize(2);\n  display.setTextColor(SSD1306_WHITE);\n  display.setCursor(4, 24);\n  display.println("Hello migo");\n  display.display();\n  delay(1500);\n}\n\nvoid loop() {\n  float v = analogRead(34) * 3.3 / 4095;\n\n  for (int i = 0; i < 127; i++) graph[i] = graph[i + 1];\n  graph[127] = 63 - int(v / 3.3 * 28);\n\n  display.clearDisplay();\n  display.setTextSize(1);\n  display.setCursor(0, 0);\n  display.print("Pot voltage");\n  display.setTextSize(2);\n  display.setCursor(0, 14);\n  display.print(v, 2);\n  display.print(" V");\n  display.drawRect(84, 16, 44, 10, SSD1306_WHITE);\n  display.fillRect(86, 18, int(v / 3.3 * 40), 6, SSD1306_WHITE);\n  display.drawFastHLine(0, 34, 128, SSD1306_WHITE);\n  for (int x = 1; x < 128; x++) display.drawLine(x - 1, graph[x - 1], x, graph[x], SSD1306_WHITE);\n  display.display();\n  delay(100);\n}\n',
     uno: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\n#define SCREEN_WIDTH 128\n#define SCREEN_HEIGHT 64\nAdafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);   // SDA = A4, SCL = A5\n\nint graph[128];   // last 128 readings for the moving graph\n\nvoid setup() {\n  Serial.begin(9600);\n  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {\n    Serial.println("OLED not found");\n    for (;;);\n  }\n  for (int i = 0; i < 128; i++) graph[i] = 63;\n  display.clearDisplay();\n  display.setTextSize(2);\n  display.setTextColor(SSD1306_WHITE);\n  display.setCursor(4, 24);\n  display.println("Hello migo");\n  display.display();\n  delay(1500);\n}\n\nvoid loop() {\n  float v = analogRead(A0) * 5.0 / 1023;\n\n  for (int i = 0; i < 127; i++) graph[i] = graph[i + 1];\n  graph[127] = 63 - int(v / 5.0 * 28);\n\n  display.clearDisplay();\n  display.setTextSize(1);\n  display.setCursor(0, 0);\n  display.print("Pot voltage");\n  display.setTextSize(2);\n  display.setCursor(0, 14);\n  display.print(v, 2);\n  display.print(" V");\n  display.drawRect(84, 16, 44, 10, SSD1306_WHITE);\n  display.fillRect(86, 18, int(v / 5.0 * 40), 6, SSD1306_WHITE);\n  display.drawFastHLine(0, 34, 128, SSD1306_WHITE);\n  for (int x = 1; x < 128; x++) display.drawLine(x - 1, graph[x - 1], x, graph[x], SSD1306_WHITE);\n  display.display();\n  delay(100);\n}\n' },
   lcd: { name: 'LCD 16x2 I2C: show the pot voltage', esp: '#include <Wire.h>\n#include <LiquidCrystal_I2C.h>\n\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // SDA = GPIO21, SCL = GPIO22\n\nvoid setup() {\n  lcd.init();\n  lcd.backlight();\n  lcd.print("Hello migo!");\n}\n\nvoid loop() {\n  float v = analogRead(34) * 3.3 / 4095;\n  lcd.setCursor(0, 1);\n  lcd.print("Pot: ");\n  lcd.print(v, 2);\n  lcd.print(" V   ");\n  delay(200);\n}\n',

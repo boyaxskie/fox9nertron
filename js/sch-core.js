@@ -200,6 +200,8 @@ export const TYPES = {
   // LCD 16×2 with I2C backpack. Schematic pin order (top→bottom) SCL, SDA, VCC, GND; index order GND, VCC, SDA, SCL like the real header
   // OLED 0.96" SSD1306 128×64 I2C. Schematic pin order (top→bottom) SCL, SDA, VCC, GND; index order GND, VCC, SCL, SDA like the real header
   OLED: { label: 'OLED 0.96" 128×64 (SSD1306 I2C)', prefix: 'OLED', pins: [[-5, 2], [-5, 1], [-5, -1], [-5, 0]], box: [-5, -2.3, 5, 3.3], props: { addr: 0x3C, color: 'white' } },
+  // KY-040 rotary encoder module: header CLK, DT, SW, +, GND on the right. CLK / DT have 10 kΩ pull-ups to +, contacts pull them to GND
+  ENC: { label: 'Rotary encoder (KY-040)', prefix: 'ENC', pins: [[3, -2], [3, -1], [3, 0], [3, 1], [3, 2]], box: [-3.4, -2.6, 3, 2.6], props: {} },
   LCD: { label: 'LCD 16×2 (I2C backpack)', prefix: 'LCD', pins: [[-7, 2], [-7, 1], [-7, 0], [-7, -1]], box: [-7, -2.3, 7, 2.8], props: { addr: 0x27 } },
   SEG7: { label: '7-segment display', prefix: 'DS', pins: [[-3, -4], [-3, -3], [-3, -2], [-3, -1], [-3, 0], [-3, 1], [-3, 2], [-3, 3], [-3, 4]], box: [-3, -4.7, 2.6, 4.7], props: { common: 'cathode', color: 'red' } },
   // sensors: a slider in the panel sets what they "feel"; sketches read them (DHT library, pulseIn) or the voltage does the job (LDR, PIR)
@@ -214,8 +216,8 @@ export const TYPES = {
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'LCD', 'OLED', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
-export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER']);
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'ESP32', 'UNO', 'LCD', 'OLED', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'ENC', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER', 'ENC']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
 // signal generator value at time t
@@ -428,6 +430,13 @@ export function solveCircuit(c, sim = null, opts = {}) {
         // VCC, OUT, GND: OUT is 3.3 V while it sees motion (even on a 5 V supply), 0 V otherwise
         R(pins[0], pins[2], 5 / 0.00006, p, 'main'); const n2 = inner();
         V(n2, pins[2], pr.motion ? 3.3 : 0, p, 'src'); R(n2, pins[1], 1000, p, 'out');
+        break;
+      }
+      case 'ENC': {
+        // pins CLK, DT, SW, +, GND. _a / _b / _sw = contact closed right now (set by the schematic as the knob turns)
+        const [A, Bp, SWp, Vp, Gp] = pins;
+        R(A, Vp, 10000, p, 'main'); R(Bp, Vp, 10000, p, 'pb');
+        R(A, Gp, pr._a ? 1 : R_OPEN, p, 'ca'); R(Bp, Gp, pr._b ? 1 : R_OPEN, p, 'cb'); R(SWp, Gp, pr._sw ? 1 : R_OPEN, p, 'csw');
         break;
       }
       case 'OLED': {
@@ -758,6 +767,11 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vout: res.v[pins[1 + (p.type === 'HCSR04' ? 1 : 0)]] - res.v[pins[gi]], dots: [] });
       continue;
     }
+    if (p.type === 'ENC') {
+      const g = res.v[pins[4]];
+      parts.set(p.id, { va, vb, v: res.v[pins[3]] - g, vclk: res.v[pins[0]] - g, vdt: res.v[pins[1]] - g, vsw: res.v[pins[2]] - g, i: 0, p: 0, dots: [] });
+      continue;
+    }
     if (p.type === 'OLED') {
       const m = mine.find(e => e.role === 'main'), v = res.v[pins[1]] - res.v[pins[0]];
       parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vsda: res.v[pins[3]] - res.v[pins[0]], vscl: res.v[pins[2]] - res.v[pins[0]], dots: [[1, 0, m.i]] });
@@ -970,6 +984,7 @@ function gauss(A0, z0) {
 
 // ---------- examples ----------
 const SKETCH_EX = {
+  encoder: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\nAdafruit_SSD1306 display(128, 64, &Wire, -1);   // SDA = GPIO21, SCL = GPIO22\n\nconst int CLK = 32;   // encoder CLK (A)\nconst int DT  = 33;   // encoder DT (B)\nconst int SW  = 25;   // encoder push button\nconst int LED = 23;\n\nvolatile int steps = 0;   // changed by the interrupt, read by loop()\n\n// runs by itself the instant CLK falls (one click of the knob)\nvoid IRAM_ATTR readEncoder() {\n  if (digitalRead(DT) == HIGH) steps++;   // CLK fell first: clockwise\n  else steps--;                           // DT fell first: counter-clockwise\n}\n\nconst String items[4] = {"LED", "Blink", "Speed", "About"};\nint sel = 0;            // selected line\nbool editing = false;   // pushed on Speed: the knob changes the number\nbool ledOn = true;\nbool blinking = false;\nint speed = 2;          // blinks per second\nbool about = false;\nbool wasPressed = false;\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(CLK, INPUT);          // the KY-040 has its own 10k pull-ups on CLK and DT\n  pinMode(DT, INPUT);\n  pinMode(SW, INPUT_PULLUP);    // SW has none: use the internal one\n  pinMode(LED, OUTPUT);\n  attachInterrupt(digitalPinToInterrupt(CLK), readEncoder, FALLING);\n  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);\n  delay(100);                   // let the pull-ups settle before the first read\n}\n\nvoid loop() {\n  // 1. knob turns since last time (stop interrupts for a moment while we copy)\n  noInterrupts();\n  int s = steps;\n  steps = 0;\n  interrupts();\n  if (s != 0) {\n    if (editing) speed = constrain(speed + s, 1, 10);\n    else sel = (sel + s + 40) % 4;\n    Serial.print("turn ");\n    Serial.println(s);\n  }\n\n  // 2. push button: act once per press\n  bool pressed = digitalRead(SW) == LOW;\n  if (pressed && !wasPressed) {\n    if (about) about = false;\n    else if (editing) editing = false;\n    else if (sel == 0) ledOn = !ledOn;\n    else if (sel == 1) blinking = !blinking;\n    else if (sel == 2) editing = true;\n    else about = true;\n    Serial.println("push");\n  }\n  wasPressed = pressed;\n\n  // 3. the LED\n  bool on = ledOn && (!blinking || int(millis() * speed / 500) % 2 == 0);\n  digitalWrite(LED, on ? HIGH : LOW);\n\n  // 4. the screen\n  display.clearDisplay();\n  display.setTextColor(SSD1306_WHITE);\n  if (about) {\n    display.setTextSize(2);\n    display.setCursor(0, 0);\n    display.println("Fox9ner");\n    display.setTextSize(1);\n    display.setCursor(0, 24);\n    display.println("Rotary encoder menu");\n    display.println("with interrupts.");\n    display.println("");\n    display.println("Push to go back.");\n  } else {\n    display.setTextSize(1);\n    display.setCursor(0, 0);\n    display.print(editing ? "Turn: speed, push: OK" : "MENU  turn + push");\n    for (int i = 0; i < 4; i++) {\n      int y = 18 + i * 11;\n      if (i == sel) {\n        display.fillRect(0, y - 2, 128, 11, SSD1306_WHITE);\n        display.setTextColor(SSD1306_BLACK);\n      } else {\n        display.setTextColor(SSD1306_WHITE);\n      }\n      display.setCursor(4, y);\n      display.print(items[i]);\n      display.setCursor(84, y);\n      if (i == 0) display.print(ledOn ? "ON" : "OFF");\n      if (i == 1) display.print(blinking ? "ON" : "OFF");\n      if (i == 2) {\n        display.print(speed);\n        display.print(editing ? " /s <" : " /s");\n      }\n    }\n  }\n  display.display();\n  delay(20);\n}\n',
   oled: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\n#define SCREEN_WIDTH 128\n#define SCREEN_HEIGHT 64\nAdafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);   // SDA = GPIO21, SCL = GPIO22\n\nint graph[128];   // last 128 readings for the moving graph\n\nvoid setup() {\n  Serial.begin(115200);\n  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {\n    Serial.println("OLED not found");\n    for (;;);\n  }\n  for (int i = 0; i < 128; i++) graph[i] = 63;\n  display.clearDisplay();\n  display.setTextSize(2);\n  display.setTextColor(SSD1306_WHITE);\n  display.setCursor(4, 24);\n  display.println("Hello migo");\n  display.display();\n  delay(1500);\n}\n\nvoid loop() {\n  float v = analogRead(34) * 3.3 / 4095;\n\n  for (int i = 0; i < 127; i++) graph[i] = graph[i + 1];\n  graph[127] = 63 - int(v / 3.3 * 28);\n\n  display.clearDisplay();\n  display.setTextSize(1);\n  display.setCursor(0, 0);\n  display.print("Pot voltage");\n  display.setTextSize(2);\n  display.setCursor(0, 14);\n  display.print(v, 2);\n  display.print(" V");\n  display.drawRect(84, 16, 44, 10, SSD1306_WHITE);\n  display.fillRect(86, 18, int(v / 3.3 * 40), 6, SSD1306_WHITE);\n  display.drawFastHLine(0, 34, 128, SSD1306_WHITE);\n  for (int x = 1; x < 128; x++) display.drawLine(x - 1, graph[x - 1], x, graph[x], SSD1306_WHITE);\n  display.display();\n  delay(100);\n}\n',
   doorlock: '#include <Keypad.h>\n#include <LiquidCrystal_I2C.h>\n\nconst byte ROWS = 4, COLS = 4;\nchar keys[ROWS][COLS] = {\n  {\'1\', \'2\', \'3\', \'A\'},\n  {\'4\', \'5\', \'6\', \'B\'},\n  {\'7\', \'8\', \'9\', \'C\'},\n  {\'*\', \'0\', \'#\', \'D\'}\n};\nbyte rowPins[ROWS] = {19, 18, 5, 17};\nbyte colPins[COLS] = {16, 4, 2, 15};\nKeypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);\nLiquidCrystal_I2C lcd(0x27, 16, 2);\n\nconst int LOCK = 13;      // MOSFET gate\nconst int BUZZ = 23;\nString code = "1234";     // change your PIN here\nString typed = "";\n\nvoid beep(int ms) {\n  digitalWrite(BUZZ, HIGH);\n  delay(ms);\n  digitalWrite(BUZZ, LOW);\n}\n\nvoid askPin() {\n  lcd.clear();\n  lcd.print("Enter PIN, #=OK");\n  lcd.setCursor(0, 1);\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(LOCK, OUTPUT);\n  pinMode(BUZZ, OUTPUT);\n  lcd.init();\n  lcd.backlight();\n  askPin();\n}\n\nvoid loop() {\n  char key = keypad.getKey();\n  if (!key) return;\n  Serial.println(key);\n  beep(40);\n  if (key == \'#\') {\n    if (typed == code) {\n      lcd.clear();\n      lcd.print("OPEN - welcome!");\n      digitalWrite(LOCK, HIGH);   // solenoid pulls the bolt\n      beep(200);\n      delay(3000);\n      digitalWrite(LOCK, LOW);\n    } else {\n      lcd.clear();\n      lcd.print("WRONG PIN");\n      beep(800);\n      delay(1000);\n    }\n    typed = "";\n    askPin();\n  } else if (key == \'*\') {\n    typed = "";\n    askPin();\n  } else if (typed.length() < 8) {\n    typed += key;\n    lcd.print(\'*\');\n  }\n}\n',
   thermo: '#include <DHT.h>\n\nDHT dht(4, DHT22);        // DATA on GPIO4\nconst int FAN = 23;\n\nvoid setup() {\n  Serial.begin(115200);\n  dht.begin();\n  pinMode(FAN, OUTPUT);\n}\n\nvoid loop() {\n  float t = dht.readTemperature();\n  float h = dht.readHumidity();\n  if (isnan(t)) {\n    Serial.println("DHT not found!");\n    delay(1000);\n    return;\n  }\n  digitalWrite(FAN, t > 30 ? HIGH : LOW);   // fan above 30 C\n  Serial.printf("%.1f C  %.0f %%  fan %s\\n", t, h, t > 30 ? "ON" : "OFF");\n  delay(1000);\n}\n',
@@ -1360,6 +1375,22 @@ export function example(name) {
     W(4, -6, 10, -6); W(4, -3, 7, -3); W(7, -3, 7, -5); W(7, -5, 10, -5);
     W(10, -3, 9, -3); W(10, -4, 8, -4); W(8, -4, 8, 9); W(8, 9, -4, 9); W(-4, 9, -4, 7); W(-4, 6, -6, 6);
     W(-10, -4, -4, -4); W(4, 7, 6, 7); W(6, 7, 6, 11); W(6, 11, -14, 11); W(-14, 11, -14, 0); W(-14, 0, -8, 0); W(-8, 0, -8, -2);
+  } else if (name === 'encoder') {
+    // ESP32 + KY-040 rotary encoder (interrupt on CLK) + OLED menu + LED. Turn = move, push = choose
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.encoder; m.props.run = true;
+    const d = addPart(c, 'OLED', 15, -5); d.name = 'OLED1'; d.props.color = 'yb';
+    addPart(c, 'ENC', -12, 0).name = 'ENC1';
+    const r = addPart(c, 'R', 7, -10); r.name = 'R1'; r.props.r = 330;
+    addPart(c, 'LED', 12, -10).name = 'LED1';
+    addPart(c, 'GND', 9, -3); addPart(c, 'GND', -6, 6); addPart(c, 'GND', -8, 2); addPart(c, 'GND', 15, -10);
+    // OLED (same as the OLED example)
+    W(4, -6, 10, -6); W(4, -3, 7, -3); W(7, -3, 7, -5); W(7, -5, 10, -5);
+    W(10, -3, 9, -3); W(10, -4, 8, -4); W(8, -4, 8, 9); W(8, 9, -4, 9); W(-4, 9, -4, 7); W(-4, 6, -6, 6);
+    // encoder: CLK → GPIO32, DT → GPIO33, SW → GPIO25, + → 3V3, GND
+    W(-9, -2, -4, -2); W(-9, -1, -4, -1); W(-9, 0, -4, 0); W(-9, 2, -8, 2);
+    W(-9, 1, -7, 1); W(-7, 1, -7, 11); W(-7, 11, 6, 11); W(6, 11, 6, 7); W(6, 7, 4, 7);
+    // LED on GPIO23 through 330 Ω
+    W(4, -7, 5, -7); W(5, -7, 5, -10); W(9, -10, 10, -10); W(14, -10, 15, -10);
   } else if (name === 'seg7') {
     // UNO counts 0 → 9 on a common-cathode 7-segment: a … dp on D2 … D9, one 330 Ω on the common pin
     const m = addPart(c, 'UNO', 0, 0); m.name = 'UNO';

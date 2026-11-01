@@ -70,6 +70,7 @@ export const FOOTPRINTS = {
   XF5: { label: 'Transformer 5-pin (P1 CT P2 | S1 S2)', n: 5, make: () => ({ pads: square1([th(-7.5, -5, 0, 2.6, 1.2), th(-7.5, 0, 1, 2.6, 1.2), th(-7.5, 5, 2, 2.6, 1.2), th(7.5, -5, 3, 2.6, 1.2), th(7.5, 5, 4, 2.6, 1.2)]), body: [box(-10.5, -9, 10.5, 9), [[0, -9], [0, 9]]] }) },
   HDR8: { label: 'Pin header 8-pin (keypad R1-R4 C1-C4)', n: 8, make: () => ({ pads: square1([...Array(8)].map((_, k) => th((k - 3.5) * PITCH, 0, k, 1.8, 1.0))), body: [box(-10.4, -1.27, 10.4, 1.27)] }) },
   // LCD I2C backpack header: GND VCC SDA SCL in a row (fits a 4-pin female header or the wires to the LCD)
+  HDR5: { label: 'Pin header 5-pin', n: 5, make: () => ({ pads: square1([...Array(5)].map((_, k) => th((k - 2) * PITCH, 0, k, 1.8, 1.0))), body: [box(-6.35, -1.27, 6.35, 1.27)] }) },
   HDR4: { label: 'Pin header 4-pin', n: 4, make: () => ({ pads: square1([th(-3.81, 0, 0, 1.8, 1.0), th(-1.27, 0, 1, 1.8, 1.0), th(1.27, 0, 2, 1.8, 1.0), th(3.81, 0, 3, 1.8, 1.0)]), body: [box(-5.08, -1.27, 5.08, 1.27)] }) },
   // 0.56" single digit (5161AS / 5161BS): top row 10 g · 9 f · 8 COM · 7 a · 6 b, bottom row 1 e · 2 d · 3 COM · 4 c · 5 dp, rows 15.24 mm apart
   SEG10: { label: '7-segment 0.56" (10 pins, 5161)', n: 9, make: () => {
@@ -120,6 +121,7 @@ export function fpChoices(p) {
   if (p.type === 'DHT' || p.type === 'PIR') return ['HDR3'];
   if (p.type === 'HCSR04') return ['HDR4'];
   if (p.type === 'KEYPAD') return ['HDR8'];
+  if (p.type === 'ENC') return ['HDR5'];
   if (p.type === 'SEG7') return ['SEG10'];
   if (p.type === 'DPDT') return ['HDR2x3'];
   if (p.type === 'PB') return ['TACT6', 'HDR2', 'TERM2'];
@@ -186,7 +188,7 @@ export function footprintOf(p, bp = {}, big = BIG) {
 export function pinLabel(p, i) {
   if (isBoard(p.type)) return BOARDS[p.type].pins[i]?.n ?? String(i + 1);
   const L = { BAT: ['+', '−'], LED: ['A', 'K'], D: ['A', 'K'], ZD: ['A', 'K'], C: ['+', '−'], NPN: ['B', 'C', 'E'], PNP: ['B', 'C', 'E'], NMOS: ['G', 'D', 'S'], PMOS: ['G', 'D', 'S'],
-    OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], SERVO: ['SIG', 'V+', 'GND'], LCD: ['GND', 'VCC', 'SDA', 'SCL'], OLED: ['GND', 'VCC', 'SCL', 'SDA'], DHT: ['VCC', 'DATA', 'GND'], HCSR04: ['VCC', 'TRIG', 'ECHO', 'GND'], PIR: ['VCC', 'OUT', 'GND'], KEYPAD: ['R1', 'R2', 'R3', 'R4', 'C1', 'C2', 'C3', 'C4'], BUZZER: ['+', '-'], SEG7: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp', 'COM'], STEPPER: ['STEP', 'DIR', 'EN', 'VDD', 'GND', 'VMOT'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
+    OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], SERVO: ['SIG', 'V+', 'GND'], LCD: ['GND', 'VCC', 'SDA', 'SCL'], OLED: ['GND', 'VCC', 'SCL', 'SDA'], ENC: ['CLK', 'DT', 'SW', '+', 'GND'], DHT: ['VCC', 'DATA', 'GND'], HCSR04: ['VCC', 'TRIG', 'ECHO', 'GND'], PIR: ['VCC', 'OUT', 'GND'], KEYPAD: ['R1', 'R2', 'R3', 'R4', 'C1', 'C2', 'C3', 'C4'], BUZZER: ['+', '-'], SEG7: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp', 'COM'], STEPPER: ['STEP', 'DIR', 'EN', 'VDD', 'GND', 'VMOT'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
   return L?.[i] ?? String(i + 1);
 }
 
