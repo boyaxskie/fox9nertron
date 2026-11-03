@@ -155,7 +155,8 @@ export function createRuntime(p, src, host) {
   const PN = (pin) => { const n = pinName(board, pin); if (!n) throw new Error(`pin ${pin} does not exist on the ${B.name}`); return n; };
   const setMode = (n, cfg) => { if (cfg == null) delete host.pins[n]; else host.pins[n] = cfg; };
   const fmt = (x, f) => {
-    if (typeof x === 'number') { if (Number.isInteger(x)) { if (f === 16) return x.toString(16).toUpperCase(); if (f === 2) return x.toString(2); if (f === 8) return x.toString(8); return String(x); } return x.toFixed(typeof f === 'number' ? Math.min(10, f) : 2); }   // print(float, n) = n decimals, print(int, HEX/BIN) = base
+    if (typeof x === 'number') { if (Number.isInteger(x)) { if (typeof f === 'number' && ![2, 8, 10, 16].includes(f)) return x.toFixed(Math.min(10, f));   // print(1.0, 1) → "1.0" (a float that happens to be whole)
+      if (f === 16) return x.toString(16).toUpperCase(); if (f === 2) return x.toString(2); if (f === 8) return x.toString(8); return String(x); } return x.toFixed(typeof f === 'number' ? Math.min(10, f) : 2); }   // print(float, n) = n decimals, print(int, HEX/BIN) = base
     if (typeof x === 'boolean') return x ? '1' : '0';
     return String(x);
   };

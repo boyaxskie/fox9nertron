@@ -257,7 +257,7 @@ export function schematicTab(root) {
     delete: btn('🗑 Delete', () => { if (mode === 'select' && deleteSel()) return; setMode('delete'); }),
     meter: btn('🔍 Meter', () => setMode('meter')),
   };
-  let meterBox = null;
+  let meterBox = null, lastPtrType = 'mouse';
   let probes = [], clip = null, placeRot = 0, lastPtr = null;        // multimeter: [red point, black point] in grid units
   // DC / AC selector for the meter probes and the wire tips (like the dial on a real multimeter)
   const AC_NEXT = { dc: 'ac', ac: 'both', both: 'dc' }, AC_SAY = { dc: 'Meter + wire tips on DC ⎓ (average).', ac: 'Meter + wire tips on AC ~ (true RMS).', both: 'Meter + wire tips show DC and AC.' };
@@ -781,7 +781,7 @@ export function schematicTab(root) {
       const tm2 = tm && view2 !== 'pcb'; if (scopeBox.hidden === tm2) scopeBox.hidden = !tm2;
       if (tm) {
         const fdt = Math.min(0.05, Math.max(0, (t - (lastFrame ?? t)) / 1000)); lastFrame = t;
-        if (!sim.paused && !down?.drag) sim.lag = stepSim(sim.speed === 'screen' ? sim.tdiv * 10 / 120 : (+sim.speed) * (fdt || 1 / 60));
+        if (!sim.paused && !(down?.drag && (down.moved || !down.pb))) sim.lag = stepSim(sim.speed === 'screen' ? sim.tdiv * 10 / 120 : (+sim.speed) * (fdt || 1 / 60));
         draw(); drawScope();
         if (t - lastPanel > 250) { lastPanel = t; panelRefresh?.(); }
       } else if (showDots && res?.ok) draw();
@@ -877,6 +877,7 @@ export function schematicTab(root) {
   let down = null, pinch = 0;
   canvas.style.touchAction = 'none';
   canvas.addEventListener('pointerdown', (e) => {
+    lastPtrType = e.pointerType || 'mouse';
     if (e.button === 2) return;            // right button: handled by 'contextmenu'
     canvas.setPointerCapture?.(e.pointerId);
     const [px, py] = pos(e); ptrs.set(e.pointerId, [px, py]);
@@ -891,7 +892,7 @@ export function schematicTab(root) {
       if (lb) down.lab = { p: lb.p, ox: lb.p.lbl?.[0] ?? 0, oy: lb.p.lbl?.[1] ?? 0, ax: x, ay: y };
       else if (p) {
         down.drag = { p, ox: p.x, oy: p.y, ax: x, ay: y, ends: attachedEnds(p) };
-        if (p.type === 'PB') { p.props.on = true; down.pb = p; commit(false); }
+        if (p.type === 'PB') { p.props.on = true; down.pb = p; if (sel?.kind !== 'part' || sel.id !== p.id) { sel = { kind: 'part', id: p.id }; renderPanel(); } commit(false); panelRefresh?.(); }
       } else if (wEnd) down.wend = { k: wEnd, orig: structuredClone(c.wires) };
       else if (wi >= 0) down.wdrag = { i: wi, orig: structuredClone(c.wires), ax: x, ay: y };
       else down.pan = true;
@@ -908,7 +909,7 @@ export function schematicTab(root) {
       if (pinch > 0) zoomAt(d / pinch, mx, my);
       pinch = d; down.last = [mx, my]; draw(); return;
     }
-    if (!down.moved && Math.hypot(px - down.px, py - down.py) > 6) down.moved = true;
+    if (!down.moved && Math.hypot(px - down.px, py - down.py) > (down.pb ? 18 : 6)) { down.moved = true; if (down.pb) { down.pb.props.on = false; down.pb = null; commit(false); panelRefresh?.(); } }
     if (!down.moved) return;
     hover = [wx(px), wy(py)];
     if (down.lab) {
@@ -934,18 +935,19 @@ export function schematicTab(root) {
     if (!down) return;
     if (down.pinch) { if (ptrs.size === 0) down = null; return; }
     const d = down; down = null;
-    if (d.pb) { d.pb.props.on = false; commit(false); }
+    if (d.pb) { d.pb.props.on = false; commit(false); panelRefresh?.(); }
     if (d.drag && d.moved) { commit(); return; }
     if (d.lab && d.moved) { sel = { kind: 'part', id: d.lab.p.id }; commit(); say('Label moved. Reset it from the part panel.'); return; }
     if ((d.wdrag || d.wend) && d.moved) { if (d.wend) sel = null; commit(); say(d.wend ? 'Wire corner moved.' : 'Wire moved: connected wires stretch along.'); return; }
     if (!d.moved) { if (d.lab) { sel = { kind: 'part', id: d.lab.p.id }; renderPanel(); draw(); return; } tap(d.x, d.y, d); }
   };
   canvas.addEventListener('pointerup', up);
-  canvas.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (down?.pb) { down.pb.props.on = false; commit(false); } down = null; });
+  canvas.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (down?.pb) { down.pb.props.on = false; commit(false); panelRefresh?.(); } down = null; });
   canvas.addEventListener('pointerleave', () => { if (!down && hover) { hover = null; draw(); } });
   // right-click: stop placing / stop a wire / let go of the selection (like most CAD programs)
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    if (down || lastPtrType !== 'mouse') return;     // a finger held down (e.g. on a push button) also fires this on phones: ignore it
     if (mode === 'place') { setMode('select'); hover = null; say('Done placing. Tap a part in the tray to place more.'); }
     else if (mode === 'wire' && wireStart) { wireStart = null; draw(); say('Wire cancelled. Tap a pin to start a new one, or right-click again to leave Wire mode.'); }
     else if (mode !== 'select') setMode('select');
