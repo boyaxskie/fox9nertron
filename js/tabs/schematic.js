@@ -307,6 +307,60 @@ export function schematicTab(root) {
     padBtn('◀', 'Move the view left', () => { view.ox += step(); }), padBtn('▶', 'Move the view right', () => { view.ox -= step(); }),
     padBtn('＋', 'Zoom in', () => zoomAt(1.18, W / 2, H / 2)), padBtn('－', 'Zoom out', () => zoomAt(1 / 1.18, W / 2, H / 2)));
   const wrap = el('div', { class: 'sch-wrap' }, canvas, viewPad);
+  // ---------- quick controls: a small box beside the selected part (pot wiper, switch, battery volts, sensor values…) ----------
+  const quick = el('div', { class: 'qk' }); quick.hidden = true; wrap.append(quick);
+  let quickFor = null, quickDirty = true, quickOff = null, quickBusy = false;
+  const LOGS = { r: [1, 1e7], c: [1e-12, 1e-2], l: [1e-6, 10], i: [1e-6, 10], f: [0.1, 1e6], lux: [1, 20000] };
+  // [prop, label, min, max, step, unit, log?]
+  const QUICK = {
+    POT: [['pos', 'Wiper', 0, 100, 1, '%']], R: [['r', 'R', 0, 0, 0, 'Ω', 1]], C: [['c', 'C', 0, 0, 0, 'F', 1]], L: [['l', 'L', 0, 0, 0, 'H', 1]],
+    BAT: [['v', 'Volts', 0, 60, 0.1, 'V']], ISRC: [['i', 'Current', 0, 0, 0, 'A', 1]], SIG: [['f', 'Freq', 0, 0, 0, 'Hz', 1], ['amp', 'Amplitude', 0, 50, 0.1, 'V'], ['duty', 'Duty', 0, 100, 1, '%']],
+    LAMP: [['vr', 'Rated V', 1, 240, 1, 'V'], ['wr', 'Rated W', 0.5, 100, 0.5, 'W']],
+    DHT: [['temp', 'Temp', -20, 80, 0.5, '°C'], ['hum', 'Humidity', 0, 100, 1, '%']], HCSR04: [['cm', 'Distance', 2, 400, 1, 'cm']], LDR: [['lux', 'Light', 0, 0, 0, 'lux', 1]],
+  };
+  const TOGGLE = { SW: ['on', 'Switch ON (close)', 'Switch OFF (open)'], SPDT: ['on', 'Flip ▼ down', 'Flip ▲ up'], DPDT: ['on', 'Flip ▼ down', 'Flip ▲ up'], PIR: ['motion', 'Motion: none → 🚶', 'Motion: 🚶 → none'] };
+  function quickChanged() { quickBusy = true; solve(); draw(); panelRefresh?.(); quickBusy = false; }
+  function buildQuick(p) {
+    quick.innerHTML = ''; quickFor = p?.id ?? null; quickDirty = false;
+    if (!p) return false;
+    const q = p.props, rows = [];
+    for (const [k, lab, mn, mx, st, unit, log] of QUICK[p.type] ?? []) {
+      if (q[k] == null) continue;
+      const lg = log ? LOGS[k] : null, toR = (v) => lg ? Math.log10(Math.max(lg[0], v)) : v, fromR = (v) => lg ? +(10 ** v).toPrecision(3) : v;
+      const rng = el('input', { type: 'range', class: 'rng', min: lg ? Math.log10(lg[0]) : mn, max: lg ? Math.log10(lg[1]) : mx, step: lg ? 0.01 : st, value: toR(q[k]) });
+      const show = (v) => unit === '%' || unit === '°C' || unit === 'cm' ? `${+(+v).toFixed(1)} ${unit}` : si(v, unit, 3);
+      const val = el('b', { text: show(q[k]) });
+      rng.addEventListener('input', () => { q[k] = fromR(+rng.value); val.textContent = show(q[k]); quickChanged(); });
+      rng.addEventListener('change', () => { quickBusy = true; commit(); quickBusy = false; });
+      rows.push(el('label', { class: 'qk-row' }, el('span', { class: 'qk-l', text: lab }), rng, val));
+    }
+    const tg = TOGGLE[p.type];
+    if (tg) { const b = el('button', { class: 'btn primary qk-b', type: 'button', text: q[tg[0]] ? tg[2] : tg[1] }); b.onclick = () => { q[tg[0]] = !q[tg[0]]; b.textContent = q[tg[0]] ? tg[2] : tg[1]; quickBusy = true; commit(); quickBusy = false; }; rows.push(b); }
+    if (p.type === 'PB') {
+      const b = el('button', { class: 'btn primary hold qk-b', type: 'button', text: 'Hold to press' });
+      const rel = () => { if (!q.on) return; q.on = false; quickChanged(); };
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); q.on = true; quickChanged(); });
+      b.addEventListener('pointerup', rel); b.addEventListener('pointercancel', rel); b.addEventListener('lostpointercapture', rel);
+      rows.push(b);
+    }
+    if (p.type === 'ENC') rows.push(el('div', { class: 'row' }, el('button', { class: 'btn qk-b', type: 'button', text: '⟲ turn', onclick: () => encTurn(p, -1) }), el('button', { class: 'btn qk-b', type: 'button', text: 'push', onclick: () => encPush(p) }), el('button', { class: 'btn qk-b', type: 'button', text: 'turn ⟳', onclick: () => encTurn(p, 1) })));
+    if (!rows.length) return false;
+    quick.append(el('div', { class: 'qk-h' }, el('span', { text: p.name }), el('button', { class: 'qk-x', type: 'button', text: '✕', title: 'Hide (comes back when you tap the part again)', onclick: () => { quickOff = p.id; quick.hidden = true; } })), ...rows);
+    return true;
+  }
+  function placeQuick() {
+    const p = mode === 'select' && !(down?.drag && down.moved) ? selPart() : null;
+    if (!p || quickOff === p.id) { quick.hidden = true; if (!p) quickOff = null; return; }
+    if (quickFor !== p.id || (quickDirty && !quickBusy)) { if (!buildQuick(p)) { quick.hidden = true; return; } }
+    if (quick.childElementCount === 0) { quick.hidden = true; return; }
+    quick.hidden = false;
+    const b = S.TYPES[p.type].box, cs = [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]].map(pt => S.rotPt(pt, p.rot));
+    const ys = cs.map(c2 => c2[1]), bottom = sy(p.y + Math.max(...ys)) + 8, top = sy(p.y + Math.min(...ys)) - 8;
+    const w = quick.offsetWidth, h = quick.offsetHeight;
+    let x = sx(p.x) - w / 2, y = bottom + h <= H - 4 ? bottom : top - h;
+    x = Math.max(4, Math.min(W - w - 4, x)); y = Math.max(4, Math.min(H - h - 4, y));
+    quick.style.left = x + 'px'; quick.style.top = y + 'px';
+  }
   const status = el('div', { class: 'sch-status' });
   const panel = el('div', { class: 'sch-panel' });
   // floating settings: the part panel can float over the page (drag its bar) so you see the circuit while changing values
@@ -315,11 +369,12 @@ export function schematicTab(root) {
   const pRun = btn('', toggleRun, 'run');
   // 📈 put the oscilloscope inside the floating window (under its title bar), so it stays in view beside the circuit
   let scopeFloat = store.get('sch.scopefloat', '0') === '1';
-  const pScope = btn('📈', () => { scopeFloat = !scopeFloat; store.set('sch.scopefloat', scopeFloat ? '1' : '0'); placeScope(); say(scopeFloat ? 'Oscilloscope moved into the floating window (shows while a time simulation runs).' : 'Oscilloscope back under the circuit.'); });
-  pScope.title = 'Oscilloscope in this window';
+  const pScope = btn('📈', () => { scopeFloat = !scopeFloat; store.set('sch.scopefloat', scopeFloat ? '1' : '0'); placeScope(); say(scopeFloat ? 'Oscilloscope + Serial monitor moved into the floating window: they stay there whatever part you select.' : 'Oscilloscope + Serial monitor back under the circuit.'); });
+  pScope.title = 'Oscilloscope + Serial monitor in this window';
   const pMin = btn('–', () => { panel.hidden = !panel.hidden; pMin.textContent = panel.hidden ? '+' : '–'; panelBox.classList.toggle('mini', panel.hidden); keepIn(); }, 'icon');
   const pHead = el('div', { class: 'sch-phead', hidden: true }, pTitle, el('span', { class: 'sch-phbtn' }, pRun, pScope, btn('⟲ t = 0', () => { resetSim(); solve(); draw(); say('Time reset: clock back to 0, capacitors empty, coils without current, sketches restarted.'); }), pMin, btn('✕ Dock', () => setFloat(false))));
-  const panelBox = el('div', { class: 'sch-pbox' }, pHead, panel);
+  const pGrip = el('div', { class: 'sch-grip', title: 'Drag to resize' });
+  const panelBox = el('div', { class: 'sch-pbox' }, pHead, panel, pGrip);
   function keepIn() {
     if (!floating) return;
     const w = panelBox.offsetWidth, h = panelBox.offsetHeight;
@@ -347,6 +402,18 @@ export function schematicTab(root) {
     const up = () => { if (!d0) return; d0 = null; store.set('sch.floatpos', parseFloat(panelBox.style.left) + ',' + parseFloat(panelBox.style.top)); };
     pHead.addEventListener('pointerup', up); pHead.addEventListener('pointercancel', up);
     addEventListener('resize', keepIn);
+    // resize by finger (phones have no CSS resize corner): drag the ◢ grip
+    let g0 = null;
+    pGrip.addEventListener('pointerdown', (e) => { if (!floating) return; g0 = { x: e.clientX, y: e.clientY, w: panelBox.offsetWidth, h: panelBox.offsetHeight }; pGrip.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation(); });
+    pGrip.addEventListener('pointermove', (e) => {
+      if (!g0) return;
+      const l = parseFloat(panelBox.style.left) || 0, t = parseFloat(panelBox.style.top) || 0;
+      panelBox.style.width = Math.max(220, Math.min(innerWidth - l - 4, g0.w + e.clientX - g0.x)) + 'px';
+      panelBox.style.height = Math.max(120, Math.min(innerHeight - t - 4, g0.h + e.clientY - g0.y)) + 'px';
+      drawScope();
+    });
+    const gUp = () => { if (!g0) return; g0 = null; store.set('sch.floatsize', panelBox.offsetWidth + ',' + panelBox.offsetHeight); requestAnimationFrame(drawScope); };
+    pGrip.addEventListener('pointerup', gUp); pGrip.addEventListener('pointercancel', gUp);
     let szT = 0;
     if ('ResizeObserver' in globalThis) new ResizeObserver(() => { if (!floating || panel.hidden) return; clearTimeout(szT); szT = setTimeout(() => store.set('sch.floatsize', panelBox.offsetWidth + ',' + panelBox.offsetHeight), 300); }).observe(panelBox);
   }
@@ -376,8 +443,11 @@ export function schematicTab(root) {
   const posCtl = (k, col) => el('span', { class: 'pos-ctl', style: `border-color:${col}` }, el('b', { text: `CH${k + 1}`, style: `color:${col}` }),
     btn('▲', () => movePos(k, 0.5), 'icon'), btn('▼', () => movePos(k, -0.5), 'icon'), posLbl[k], btn('0', () => movePos(k, 0), 'icon'));
   syncPos();
-  const scopeBox = el('div', { class: 'scope-box' }, el('div', { class: 'scope-head' }, el('b', { text: '📈 Oscilloscope' }), tInfo),
-    scv, el('div', { class: 'scope-ctl' }, pauseBtn, resetBtn, autoBtn, fftBtn, tSel, spSel, v1Sel, v2Sel), el('div', { class: 'scope-ctl' }, posCtl(0, '#FFE16B'), posCtl(1, '#4FC3F7')));
+  const scTitle = el('b', { text: '📈 Oscilloscope' }), posRow = el('div', { class: 'scope-ctl' }, posCtl(0, '#FFE16B'), posCtl(1, '#4FC3F7'));
+  const scopeBox = el('div', { class: 'scope-box' }, el('div', { class: 'scope-head' }, scTitle, tInfo),
+    scv, el('div', { class: 'scope-ctl' }, pauseBtn, resetBtn, autoBtn, fftBtn, tSel, spSel, v1Sel, v2Sel), posRow);
+  // without a Scope part only the time controls (pause, t = 0, speed) are useful: hide the rest
+  function scopeParts(has) { for (const e of [scv, autoBtn, fftBtn, tSel, v1Sel, v2Sel, posRow]) e.hidden = !has; scTitle.textContent = has ? '📈 Oscilloscope' : '⏱ Simulation time'; if (has) requestAnimationFrame(drawScope); }
   scopeBox.hidden = true;
   // nudge arrows: move the selected part (wires follow), wire, or label one step
   let nudgeWhat = 'part';
@@ -386,12 +456,39 @@ export function schematicTab(root) {
   const nudgeBar = el('div', { class: 'pcb-nudge', hidden: true }, el('span', { class: 'muted', text: 'Nudge' }),
     btn('◀', () => nudgeSch(-1, 0), 'icon'), btn('▲', () => nudgeSch(0, -1), 'icon'), btn('▼', () => nudgeSch(0, 1), 'icon'), btn('▶', () => nudgeSch(1, 0), 'icon'), whatSel, btn('⧉ Duplicate', () => duplicateSel()));
   const scopeHome = el('div', { class: 'scope-home' });
+  // 💻 Serial monitor that stays on screen whatever part is selected (follows the scope into the floating window)
+  const serOut = el('pre', { class: 'serial' }), serSel = el('select', { class: 'sel sm', 'aria-label': 'Board' });
+  const serIn = el('input', { class: 'num serial-in', type: 'text', placeholder: 'Send to Serial…', autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false' });
+  let serId = null, serKey = '';
+  const serSend = () => { const b = part(serId), rt = b && sketches.get(b.id); if (!b?.props.run || !rt?.send) { say('Run the code first.'); return; } if (!running) { running = true; store.set('sch.run', '1'); syncTop(); } rt.send(serIn.value + '\n'); say(`Sent "${serIn.value}" to ${b.name}.`); serIn.value = ''; };
+  serIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); serSend(); } });
+  serSel.onchange = () => { serId = +serSel.value; syncSer(); };
+  const serBox = el('div', { class: 'scope-box ser-box' }, el('div', { class: 'scope-head' }, el('b', { text: '💻 Serial monitor' }), serSel), serOut,
+    el('div', { class: 'row', style: 'display:flex;gap:6px' }, serIn, el('button', { class: 'btn primary', type: 'button', text: 'Send', onclick: serSend })));
+  serBox.hidden = true;
+  function syncSer() {
+    const boards = c.parts.filter(p => S.isBoard(p.type) && p.props.run && p.props.code);
+    const show = boards.length > 0 && view2 !== 'pcb';
+    if (serBox.hidden === show) serBox.hidden = !show;
+    if (!show) return;
+    const key = boards.map(b => b.id + ':' + b.name).join(',');
+    if (key !== serKey) { serKey = key; serSel.innerHTML = ''; for (const b of boards) serSel.append(el('option', { value: b.id, text: b.name })); serSel.hidden = boards.length < 2; }
+    if (!boards.some(b => b.id === serId)) serId = boards[0].id;
+    serSel.value = serId;
+    const rt = sketches.get(serId);
+    let txt;
+    if (!rt) txt = running ? '(starting…)' : 'Tap ▶ Run to start the code.';
+    else if (rt.err) txt = rt.err;
+    else txt = rt.lines.slice(-14).map(l => l.text).join('\n') || '(no Serial output yet)';
+    serOut.classList.toggle('bad', !!rt?.err);
+    if (serOut.textContent !== txt) { serOut.textContent = txt; serOut.scrollTop = serOut.scrollHeight; }
+  }
   root.append(el('div', { class: 'sch-sticky' }, top, tray), wrap, nudgeBar, status, scopeHome, panelBox);
-  scopeHome.append(scopeBox);
+  scopeHome.append(scopeBox, serBox);
   function placeScope() {
     const inF = scopeFloat && floating;
-    if (inF && scopeBox.parentNode !== panelBox) panelBox.insertBefore(scopeBox, panel);
-    if (!inF && scopeBox.parentNode !== scopeHome) scopeHome.append(scopeBox);
+    if (inF && scopeBox.parentNode !== panelBox) { panelBox.insertBefore(scopeBox, panel); panelBox.insertBefore(serBox, panel); }
+    if (!inF && scopeBox.parentNode !== scopeHome) scopeHome.append(scopeBox, serBox);
     scopeBox.classList.toggle('in-float', inF); pScope.classList.toggle('on', scopeFloat);
     panelBox.classList.toggle('has-scope', inF);
     if (inF && panelBox.offsetHeight && panelBox.offsetHeight < 520) {
@@ -458,7 +555,8 @@ export function schematicTab(root) {
       const js = JSON.stringify(c);
       if (hist[hi] !== js) { hist.length = hi + 1; hist.push(js); if (hist.length > 80) hist.shift(); hi = hist.length - 1; }
     }
-    renderPanel(); draw(); animate();
+    if (!quickBusy) quickDirty = true;
+    renderPanel(); syncSer(); draw(); animate();
     if (view2 === 'pcb') pcb.refresh();
   }
   function undo() { if (hi <= 0) return say('Nothing to undo.'); hi--; c = JSON.parse(hist[hi]); sel = null; commit(false); say('Undone.'); }
@@ -574,6 +672,7 @@ export function schematicTab(root) {
     }
     drawTip();
     drawProbes();
+    placeQuick();
     if (mode === 'place' && hover) {
       const ghost = { id: -1, type: placeType, x: Math.round(hover[0]), y: Math.round(hover[1]), rot: placeRot, props: S.TYPES[placeType].props, name: '' };
       ctx.globalAlpha = 0.45; drawPart(ghost); ctx.globalAlpha = 1;
@@ -690,7 +789,8 @@ export function schematicTab(root) {
 
   function meterText(p, r) {
     const u = p.type === 'VM' ? 'V' : 'A', x = rd('p' + p.id, p.type === 'VM' ? r.v : r.i);
-    return (p.props.mode ?? 'dc') === 'ac' ? acTxt(x.ac, u) : si(x.dc, u);
+    const z = (v) => (Math.abs(v) < 1e-9 ? 0 : v);   // solver noise (pV, pA) shows as 0
+    return (p.props.mode ?? 'dc') === 'ac' ? acTxt(z(x.ac), u) : si(z(x.dc), u);
   }
   function drawLabel(p) {
     if (p.type === 'GND') return;
@@ -778,12 +878,12 @@ export function schematicTab(root) {
       tAnim = t;
       if (!root.isConnected || root.hidden || !W) return;
       const tm = timeMode();
-      const tm2 = tm && view2 !== 'pcb'; if (scopeBox.hidden === tm2) scopeBox.hidden = !tm2;
+      const tm2 = tm && view2 !== 'pcb'; if (scopeBox.hidden === tm2) scopeBox.hidden = !tm2; const hasSc = c.parts.some(p => p.type === 'SCOPE'); if (scv.hidden === hasSc) scopeParts(hasSc);   // no Scope part: only the time controls (room for the Serial monitor)
       if (tm) {
         const fdt = Math.min(0.05, Math.max(0, (t - (lastFrame ?? t)) / 1000)); lastFrame = t;
         if (!sim.paused && !(down?.drag && (down.moved || !down.pb))) sim.lag = stepSim(sim.speed === 'screen' ? sim.tdiv * 10 / 120 : (+sim.speed) * (fdt || 1 / 60));
         draw(); drawScope();
-        if (t - lastPanel > 250) { lastPanel = t; panelRefresh?.(); }
+        if (t - lastPanel > 250) { lastPanel = t; panelRefresh?.(); syncSer(); }
       } else if (showDots && res?.ok) draw();
     };
     raf = requestAnimationFrame(loop);
