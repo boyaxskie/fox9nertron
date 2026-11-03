@@ -7,6 +7,8 @@ import { pcbView } from './pcb.js';
 import { createRuntime, EXAMPLES as SKETCHES } from '../sketch.js';
 import { netlist, pinLabel } from '../pcb-core.js';
 import qrcode from '../qr.js';
+import { analyzeDialog } from './analyze.js';
+import { fft } from '../analysis.js';
 // what each LCD part shows right now: id → { lines, bl, on, powered, note }
 const LCDV = new Map();
 // what each OLED shows: id → { powered, d (the sketch's display object) | null, note }
@@ -47,9 +49,45 @@ export function schematicTab(root) {
   const VDIVS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
   const SAMPLES = 400;      // samples across one scope screen (10 divisions)
   const sim = { t: 0, state: new Map(), buf: [], paused: false, tdiv: +store.get('sch.tdiv', '0.005'), speed: store.get('sch.speed2', 'screen'), next: null,
-    v1: store.get('sch.v1', 'auto'), v2: store.get('sch.v2', 'auto'), p1: +store.get('sch.p1', '0') || 0, p2: +store.get('sch.p2', '0') || 0 };
+    v1: store.get('sch.v1', 'auto'), v2: store.get('sch.v2', 'auto'), fft: store.get('sch.fft', '0') === '1', p1: +store.get('sch.p1', '0') || 0, p2: +store.get('sch.p2', '0') || 0 };
   const dtOf = () => sim.tdiv * 10 / SAMPLES;
   const timeMode = () => running && S.isDynamic(c);
+  // ---------- meter averaging: DC = average, AC = true RMS of what is left (like a multimeter's DC / AC ranges) ----------
+  let acMode = store.get('sch.acmode', 'dc');          // wire tips + probe meter: 'dc' | 'ac' | 'both'
+  const meas = new Map();                               // key → { m1: mean, m2: mean of squares, n: samples }
+  // averaging time: 5 periods of the slowest repeating signal in the circuit (a 50 Hz inverter ≈ 0.1 s, a 50 kHz buck ≈ 0.1 ms)
+  function avgTau() {
+    let f = Infinity;
+    for (const p of c.parts) {
+      const q = p.props;
+      if (p.type === 'SIG' && q.f > 0) f = Math.min(f, q.f);
+      if (p.type === 'TL494') { const ft = S.tlFreq(p.id); if (ft > 0) f = Math.min(f, ft / 2); }
+      if (p.type === 'LM2596') f = Math.min(f, S.LM2596.f);
+      if (S.isBoard(p.type)) for (const x of Object.values(q.pins ?? {})) if (x.mode === 'pwm') f = Math.min(f, x.f ?? 1000);
+    }
+    return f === Infinity ? 0.05 : Math.max(2e-5, Math.min(0.5, 5 / f));
+  }
+  function track(key, v, a) {
+    if (v == null || !isFinite(v)) return;
+    let m = meas.get(key);
+    if (!m) { meas.set(key, m = { m1: v, m2: v * v, n: 0 }); }
+    else { m.m1 += a * (v - m.m1); m.m2 += a * (v * v - m.m2); }
+    m.n++; m.seen = sim.t;
+  }
+  function trackStep(r, dt, tau) {
+    if (!r.ok) return;
+    const a = Math.min(1, dt / tau);
+    if (probes.length) { const va = r.vAt(...probes[0]), vb = probes[1] ? r.vAt(...probes[1]) : 0; track('P', va == null || vb == null ? null : va - vb, a); }
+    if (sel?.kind === 'wire') { const w = c.wires[sel.i]; if (w) track('W' + sel.i, r.vAt(w.x1, w.y1), a); }
+    for (const p of c.parts) if (p.type === 'VM' || p.type === 'AM') { const x = r.parts.get(p.id); if (x) track('p' + p.id, p.type === 'VM' ? x.v : x.i, a); }
+  }
+  // reading for a key: { dc, ac } — while stopped / plain DC solve the AC part is 0
+  function rd(key, inst) {
+    const m = timeMode() ? meas.get(key) : null;
+    if (!m || m.n < 3) return { dc: inst, ac: 0, inst };
+    return { dc: m.m1, ac: Math.sqrt(Math.max(0, m.m2 - m.m1 * m.m1)), inst };
+  }
+  const acTxt = (x, u) => si(x, u) + ' AC';
   function solve() {
     if (!running) { res = { ok: false, stopped: true, error: STOPPED }; return; }
     res = timeMode() ? S.solveCircuit(c, { t: sim.t, dt: dtOf(), state: sim.state }) : S.solveCircuit(c);
@@ -131,7 +169,7 @@ export function schematicTab(root) {
     const q = KEYQ.get(kp.id); return q?.length ? q.shift() : null;
   }
   function runSketches() { for (const rt of sketches.values()) rt.step(sim.t); }
-  function resetSim() { restartSketches(); sim.prev = null; sim.t = 0; sim.buf = []; sim.next = null; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
+  function resetSim() { meas.clear(); restartSketches(); sim.prev = null; sim.t = 0; sim.buf = []; sim.next = null; let st = new Map(); try { const r = S.solveCircuit(c, null, { sigOff: true }); if (r.ok) st = r.next; } catch { } sim.state = st; }
   // run the circuit for `span` seconds of circuit time. The step is fine enough for the fastest signal (≥ 40 per period),
   // independent of the scope. The scope only takes samples every time/div × 10 ÷ 400.
   const MAX_STEPS = 600;
@@ -167,7 +205,7 @@ export function schematicTab(root) {
   function encPush(p) { encOf(p.id).push = true; if (!running) say('Knob pushed. Tap ▶ Run so the circuit (and the sketch) sees it.'); draw(); }
   function stepSim(span) {
     encParts = c.parts.filter(p => p.type === 'ENC');
-    const dt = simDt(), sd = dtOf(), scope = c.parts.find(p => p.type === 'SCOPE');
+    const dt = simDt(), sd = dtOf(), scope = c.parts.find(p => p.type === 'SCOPE'), tau = avgTau();
     let n = Math.max(1, Math.ceil(span / dt - 1e-9));
     let lag = n > MAX_STEPS; n = Math.min(n, MAX_STEPS);
     if (sim.next == null || sim.next < sim.t - sd) sim.next = sim.t;
@@ -181,6 +219,7 @@ export function schematicTab(root) {
       res = r;
       if (!r.ok) return lag;
       sim.state = r.next;
+      trackStep(r, dt, tau);
       // scope samples fall between two solver steps when the step is longer than a sample: draw the straight line between them
       // (no stair-steps). The circuit result itself is unchanged.
       const sc = scope && r.parts.get(scope.id), y1 = sc ? sc.ch1 : NaN, y2 = sc ? sc.ch2 : NaN, pv = sim.prev && sim.prev[0] < sim.t ? sim.prev : null;
@@ -203,17 +242,23 @@ export function schematicTab(root) {
     delete: btn('🗑 Delete', () => { if (mode === 'select' && deleteSel()) return; setMode('delete'); }),
     meter: btn('🔍 Meter', () => setMode('meter')),
   };
+  let meterBox = null;
   let probes = [], clip = null, placeRot = 0, lastPtr = null;        // multimeter: [red point, black point] in grid units
+  // DC / AC selector for the meter probes and the wire tips (like the dial on a real multimeter)
+  const AC_NEXT = { dc: 'ac', ac: 'both', both: 'dc' }, AC_SAY = { dc: 'Meter + wire tips on DC ⎓ (average).', ac: 'Meter + wire tips on AC ~ (true RMS).', both: 'Meter + wire tips show DC and AC.' };
+  function setAc(m) { acMode = m; store.set('sch.acmode', acMode); syncTop2(); if (sel?.kind === 'wire') renderPanel(); say(AC_SAY[m] + (running ? '' : ' Tap ▶ Run: AC needs the time simulation.')); draw(); }
+  const acBtn = btn('', () => setAc(AC_NEXT[acMode] ?? 'dc'));
+  acBtn.title = 'Meter / wire tip: DC ⎓ (average) → AC ~ (true RMS) → both';
   const voltsBtn = btn('', () => { showVolts = !showVolts; store.set('sch.volts', showVolts ? '1' : '0'); syncTop(); draw(); });
   const dotsBtn = btn('', () => { showDots = !showDots; store.set('sch.dots', showDots ? '1' : '0'); syncTop(); draw(); });
   const toggleRun = () => { running = !running; store.set('sch.run', running ? '1' : '0'); syncTop(); commit(false); say(running ? 'Simulation running.' : 'Simulation stopped. Edit freely; tap ▶ Run to see the results.'); };
   const runBtn = btn('', toggleRun, 'run');
   const floatBtn = btn('🪟 Float', () => setFloat(!floating));
   const top = el('div', { class: 'sch-tools' },
-    runBtn, modeBtns.select, modeBtns.wire, modeBtns.delete, modeBtns.meter,
+    runBtn, modeBtns.select, modeBtns.wire, modeBtns.delete, modeBtns.meter, acBtn,
     btn('↻', () => rotateSel(), 'icon'), btn('↶', () => undo(), 'icon'), btn('↷', () => redo(), 'icon'),
     btn('Fit', () => { fit(); draw(); }), voltsBtn, dotsBtn, floatBtn,
-    btn('Projects', () => projects()), btn('📲 Share', () => share()), btn('Examples', () => examples()), btn('🟫 PCB', () => setView('pcb'), 'pcbbtn'));
+    btn('Projects', () => projects()), btn('📲 Share', () => share()), btn('Examples', () => examples()), btn('🔬 Analyze', () => analyzeDialog(anApi)), btn('🟫 PCB', () => setView('pcb'), 'pcbbtn'));
   const tray = el('div', { class: 'sch-tray' });
   for (const t of S.PALETTE) {
     const cv = el('canvas', { width: 96, height: 56, class: 'ico' });
@@ -307,6 +352,7 @@ export function schematicTab(root) {
   const pauseBtn = el('button', { class: 'sb', type: 'button', text: '⏸ Pause', onclick: () => { sim.paused = !sim.paused; pauseBtn.textContent = sim.paused ? '▶ Resume' : '⏸ Pause'; } });
   const resetBtn = el('button', { class: 'sb', type: 'button', text: '⟲ t = 0', onclick: () => { resetSim(); solve(); draw(); say('Time reset: capacitors empty, coils without current.'); } });
   const autoBtn = el('button', { class: 'sb', type: 'button', text: 'Auto time', onclick: () => autoTime() });
+  const fftBtn = el('button', { class: 'sb' + (sim.fft ? ' on' : ''), type: 'button', text: '〽 FFT', title: 'Spectrum: which frequencies are in the signal (noise, hum, harmonics)', onclick: () => { sim.fft = !sim.fft; store.set('sch.fft', sim.fft ? '1' : '0'); fftBtn.classList.toggle('on', sim.fft); drawScope(); say(sim.fft ? 'FFT on: the scope shows the spectrum. Longer Time/div = finer frequency steps.' : 'FFT off: normal waveforms.'); } });
   const tInfo = el('div', { class: 'scope-info' });
   // vertical position of each trace, in divisions (+ = up). Same speed + same amplitude? Move one up to see both.
   const posLbl = [el('span', { class: 'pos-v' }), el('span', { class: 'pos-v' })];
@@ -316,7 +362,7 @@ export function schematicTab(root) {
     btn('▲', () => movePos(k, 0.5), 'icon'), btn('▼', () => movePos(k, -0.5), 'icon'), posLbl[k], btn('0', () => movePos(k, 0), 'icon'));
   syncPos();
   const scopeBox = el('div', { class: 'scope-box' }, el('div', { class: 'scope-head' }, el('b', { text: '📈 Oscilloscope' }), tInfo),
-    scv, el('div', { class: 'scope-ctl' }, pauseBtn, resetBtn, autoBtn, tSel, spSel, v1Sel, v2Sel), el('div', { class: 'scope-ctl' }, posCtl(0, '#FFE16B'), posCtl(1, '#4FC3F7')));
+    scv, el('div', { class: 'scope-ctl' }, pauseBtn, resetBtn, autoBtn, fftBtn, tSel, spSel, v1Sel, v2Sel), el('div', { class: 'scope-ctl' }, posCtl(0, '#FFE16B'), posCtl(1, '#4FC3F7')));
   scopeBox.hidden = true;
   // nudge arrows: move the selected part (wires follow), wire, or label one step
   let nudgeWhat = 'part';
@@ -364,7 +410,7 @@ export function schematicTab(root) {
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { LCD: 'LCD I2C', OLED: 'OLED I2C', ENC: 'Encoder', SR595: '74HC595', TL494: 'TL494 PWM', LM2596: 'LM2596', RMOD: 'Relay module', SEG7: '7-segment', DHT: 'DHT22', HCSR04: 'HC-SR04', LDR: 'LDR', PIR: 'PIR', KEYPAD: 'Keypad', BUZZER: 'Buzzer', LOCK: 'Door lock', XFMR: 'Transformer', R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { LCD: 'LCD I2C', OLED: 'OLED I2C', ENC: 'Encoder', SR595: '74HC595', TL494: 'TL494 PWM', LM2596: 'LM2596', IR2104: 'IR2104', RMOD: 'Relay module', SEG7: '7-segment', DHT: 'DHT22', HCSR04: 'HC-SR04', LDR: 'LDR', PIR: 'PIR', KEYPAD: 'Keypad', BUZZER: 'Buzzer', LOCK: 'Door lock', XFMR: 'Transformer', R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -387,7 +433,7 @@ export function schematicTab(root) {
   }
   function say(t) { status.textContent = t; }
   function syncTop() { for (const b of [runBtn, pRun]) { b.textContent = running ? '■ Stop' : '▶ Run'; b.classList.toggle('on', running); } syncTop2(); }
-  function syncTop2() { voltsBtn.textContent = showVolts ? 'Volts ●' : 'Volts ○'; voltsBtn.classList.toggle('on', showVolts); dotsBtn.textContent = showDots ? 'Flow ●' : 'Flow ○'; dotsBtn.classList.toggle('on', showDots); }
+  function syncTop2() { acBtn.textContent = { dc: '⎓ DC', ac: '~ AC', both: '⎓ DC + ~ AC' }[acMode] ?? '⎓ DC'; acBtn.classList.toggle('on', acMode !== 'dc'); voltsBtn.textContent = showVolts ? 'Volts ●' : 'Volts ○'; voltsBtn.classList.toggle('on', showVolts); dotsBtn.textContent = showDots ? 'Flow ●' : 'Flow ○'; dotsBtn.classList.toggle('on', showDots); }
 
   function commit(push = true) {
     const lib = S.usedCustom(c); if (Object.keys(lib).length) c.lib = lib; else delete c.lib;
@@ -542,10 +588,13 @@ export function schematicTab(root) {
     });
     if (!res?.ok) return;
     const va = res.vAt(...probes[0]), vb = probes[1] ? res.vAt(...probes[1]) : 0;
-    const dv = va == null || vb == null ? null : va - vb, txt = dv == null ? '— —' : Math.abs(dv) < 5e-4 ? '0.000 V' : si(dv, 'V', 4);   // a real DMM shows 0.000 for µV
-    const sub = probes[1] ? 'DC V  (red − black)' : 'DC V  (red to ground)';
+    const dv0 = va == null || vb == null ? null : va - vb, m = dv0 == null ? null : rd('P', dv0), ac = acMode === 'ac';
+    const dv = m == null ? null : ac ? m.ac : m.dc, txt = dv == null ? '— —' : Math.abs(dv) < 5e-4 ? '0.000 V' : si(dv, 'V', 4);   // a real DMM shows 0.000 for µV
+    const sub = (ac ? 'V~ AC (RMS)' : 'V⎓ DC') + (acMode === 'both' && m ? `  ·  ~ ${si(m.ac, 'V')} AC` : '') + (probes[1] ? '  (red − black)' : '  (red to ground)') + (!running && acMode !== 'dc' ? '  · ▶ Run for AC' : '');
     ctx.save(); ctx.font = '800 22px ui-monospace, monospace';
-    const w = Math.max(150, ctx.measureText(txt).width + 30), h = 58, bx = W - w - 8, by = 8;
+    ctx.save(); ctx.font = '600 10px system-ui, sans-serif'; const sw = ctx.measureText(sub).width; ctx.restore();
+    const w = Math.max(150, ctx.measureText(txt).width + 30, sw + 20), h = 58, bx = W - w - 8, by = 8;
+    meterBox = [bx, by, w, h];
     ctx.globalAlpha = 0.95; ctx.fillStyle = '#1E2A1E'; ctx.strokeStyle = '#FFB020'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, w, h, 8) : ctx.rect(bx, by, w, h); ctx.fill(); ctx.stroke(); ctx.globalAlpha = 1;
     ctx.fillStyle = '#B6F09C'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + w - 12, by + 24);
@@ -624,6 +673,10 @@ export function schematicTab(root) {
     ctx.restore();
   }
 
+  function meterText(p, r) {
+    const u = p.type === 'VM' ? 'V' : 'A', x = rd('p' + p.id, p.type === 'VM' ? r.v : r.i);
+    return (p.props.mode ?? 'dc') === 'ac' ? acTxt(x.ac, u) : si(x.dc, u);
+  }
   function drawLabel(p) {
     if (p.type === 'GND') return;
     const r = res?.ok ? res.parts.get(p.id) : null;
@@ -642,7 +695,7 @@ export function schematicTab(root) {
     const val = valueText(p);
     ctx.fillStyle = C.text;
     const lines = [p.name + (val ? '  ' + val : '')];
-    if (r && (p.type === 'VM' || p.type === 'AM')) lines.push(p.type === 'VM' ? si(r.v, 'V') : si(r.i, 'A'));
+    if (r && (p.type === 'VM' || p.type === 'AM')) lines.push(meterText(p, r));
     // hit box (screen px) so the label can be dragged
     const tw = Math.max(...lines.map(t => ctx.measureText(t).width)) + 6;
     const bx0 = align === 'left' ? x - 3 : align === 'right' ? x - tw + 3 : x - tw / 2;
@@ -690,6 +743,7 @@ export function schematicTab(root) {
       case 'SR595': return q.model ?? '74HC595';
       case 'TL494': return q.model ?? 'TL494C';
       case 'LM2596': return (q.model ?? 'LM2596S-ADJ').replace('LM2596S-', '');
+      case 'IR2104': return 'gate driver';
       case 'RMOD': return q.trig === 'high' ? 'HIGH trig.' : '';
       case 'SEG7': return q.common === 'anode' ? 'common anode' : 'common cathode';
       case 'SERVO': return q.model;
@@ -748,6 +802,7 @@ export function schematicTab(root) {
     const d1 = scale(sim.v1, 1), d2 = scale(sim.v2, 2);
     const pinsSc = S.pinsOf(scope), wired = (k) => { const kk = S.key(...pinsSc[k]); return c.wires.some(w => S.key(w.x1, w.y1) === kk || S.key(w.x2, w.y2) === kk) || c.parts.some(q => q !== scope && S.pinsOf(q).some(pp => S.key(...pp) === kk)); };
     const on1 = wired(0), on2 = wired(1);
+    if (sim.fft) { drawFft(x, w, h, b, on1, on2); return; }
     const clampY = (py) => Math.max(-5, Math.min(h + 5, py));
     const plot = (k, vdiv, col) => {
       const off = k === 1 ? sim.p1 : sim.p2, y0 = h / 2 - off * (h / 8);
@@ -769,6 +824,37 @@ export function schematicTab(root) {
     x.fillStyle = '#FFE16B'; x.fillText(on1 ? `CH1 ${fmtV(d1)} ${meas(1)}` : 'CH1 not connected', 6, 14);
     x.fillStyle = '#4FC3F7'; x.fillText(on2 ? `CH2 ${fmtV(d2)} ${meas(2)}` : 'CH2 not connected', 6, h - 7);
   }
+
+  // spectrum of the last samples (up to 3 screens): dBV, peaks, THD
+  function drawFft(x, w, h, b, on1, on2) {
+    const dt = dtOf(), sp = [on1 ? fft(b.map(s => s[1]), dt) : null, on2 ? fft(b.map(s => s[2]), dt) : null];
+    const ok = sp.filter(Boolean);
+    x.font = `600 ${w < 420 ? 10 : 11}px ui-monospace, monospace`;
+    if (!ok.length) { x.fillStyle = '#9AD7A8'; x.textAlign = 'center'; x.fillText(b.length < 64 ? 'Collecting samples…' : 'Wire CH1 / CH2 to see the spectrum', w / 2, h / 2); return; }
+    const f0 = Math.max(...ok.map(s => s.peaks[0]?.f ?? 0)), fmax = ok[0].fmax, fTop = f0 > 0 ? Math.min(fmax, Math.max(f0 * 12, fmax / 50)) : fmax;
+    const db = (a) => 20 * Math.log10(Math.max(a, 1e-6)), top = Math.ceil(Math.max(...ok.map(s => db(s.peaks[0]?.amp ?? 1e-3))) / 20) * 20 + 10, bot = top - 80;
+    const X = (f) => f / fTop * w, Y = (d) => (top - d) / (top - bot) * h;
+    x.fillStyle = 'rgba(154,215,168,0.7)'; x.textAlign = 'right';
+    for (let d = top - 20; d > bot; d -= 20) x.fillText(d + ' dBV', w - 4, Y(d) - 3);
+    x.textAlign = 'center'; for (let i = 1; i < 10; i++) x.fillText(si(fTop * i / 10, 'Hz', 2), i * w / 10, h - 20);
+    const draw1 = (s, col) => { x.strokeStyle = col; x.lineWidth = 1.6; x.beginPath(); for (let k = 0; k < s.mag.length && k * s.df <= fTop; k++) { const px = X(k * s.df), py = Math.min(h, Y(db(s.mag[k]))); k ? x.lineTo(px, py) : x.moveTo(px, py); } x.stroke(); };
+    if (sp[1]) draw1(sp[1], '#4FC3F7'); if (sp[0]) draw1(sp[0], '#FFE16B');
+    const info = (s) => s ? `${s.peaks.slice(0, 3).map(p => si(p.f, 'Hz', 3) + ' ' + si(p.amp, 'V', 3)).join(' · ') || 'flat (DC only)'}${s.thd != null && s.peaks.length ? ' · THD ' + (s.thd * 100).toFixed(1) + ' %' : ''}` : null;
+    x.textAlign = 'left';
+    x.fillStyle = '#FFE16B'; x.fillText(on1 ? 'CH1 FFT ' + info(sp[0]) : 'CH1 not connected', 6, 14);
+    x.fillStyle = '#4FC3F7'; x.fillText(on2 ? 'CH2 FFT ' + info(sp[1]) : 'CH2 not connected', 6, h - 7);
+    x.fillStyle = 'rgba(154,215,168,0.6)'; x.textAlign = 'right'; x.fillText(`step ${si(ok[0].df, 'Hz', 3)}`, w - 4, 14);
+  }
+  // 🔬 Analyze dialog: what it may read and do in the schematic
+  const anApi = {
+    getC: () => c, getRes: () => res, say, selId: () => (sel?.kind === 'part' ? sel.id : null),
+    shareFile: (n, t, m) => shareFile(n, t, m),
+    load(j, msg) {
+      if (c.parts.length) { const a = projStore.all(), d0 = new Date(), nm = `Before import ${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, '0')}-${String(d0.getDate()).padStart(2, '0')} ${String(d0.getHours()).padStart(2, '0')}:${String(d0.getMinutes()).padStart(2, '0')}`; a[nm] = { json: JSON.stringify(c), t: Date.now() }; projStore.save(a); msg += ` Your previous circuit is in Projects as "${nm}".`; }
+      if (view2 === 'pcb') setView('sch');
+      loadCircuit(j, msg);
+    },
+  };
 
   // ---------- input ----------
   const ptrs = new Map();
@@ -969,6 +1055,7 @@ export function schematicTab(root) {
       say('Nothing here. Tap a part or a wire.'); return;
     }
     if (mode === 'meter') {
+      if (meterBox && probes.length) { const X = sx(x), Y = sy(y), [bx, by, bw, bh] = meterBox; if (X >= bx && X <= bx + bw && Y >= by && Y <= by + bh) { setAc(AC_NEXT[acMode] ?? 'dc'); return; } }
       const pt = snapPoint(x, y);
       if (!res?.ok || res.vAt(pt[0], pt[1]) == null) { say('Nothing connected here. Tap a wire, a pin or a junction.'); return; }
       probes = probes.length >= 2 || probes.length === 0 ? [pt] : [probes[0], pt];
@@ -1297,9 +1384,13 @@ export function schematicTab(root) {
     if (sel?.kind === 'wire') {
       const w = c.wires[sel.i]; if (!w) { sel = null; return renderPanel(); }
       const pcs = res.ok ? res.wires.filter(x => x.wi === sel.i) : [];
-      const v = pcs.length ? pcs[0].va : null, i = pcs.length ? Math.max(...pcs.map(x => Math.abs(x.i))) : 0;
+      const v = pcs.length ? pcs[0].va : null, i = pcs.length ? Math.max(...pcs.map(x => Math.abs(x.i))) : 0, x = rd('W' + sel.i, v);
+      const ms = el('select', { class: 'sel' }, [['dc', 'DC ⎓ (average)'], ['ac', 'AC ~ (true RMS)'], ['both', 'DC + AC']].map(([k, t]) => el('option', { value: k, text: t })));
+      ms.value = acMode; ms.addEventListener('change', () => setAc(ms.value));
+      const dcRow = ['Voltage to ground (DC)', v == null ? '—' : si(x.dc, 'V'), acMode !== 'ac'], acRow = ['Voltage to ground (AC)', v == null ? '—' : acTxt(x.ac, 'V'), acMode !== 'dc'];
       panel.append(el('div', { class: 'sp-head' }, el('b', { text: 'Wire' }), el('span', { class: 'muted', text: '0 Ω' })),
-        readings([['Voltage to ground', v == null ? '—' : si(v, 'V'), true], ['Current', si(i, 'A'), true]], [], []),
+        el('label', { class: 'field' }, el('span', { class: 'lab', text: 'Tip shows' }), ms),
+        readings([dcRow, acRow, ['Right now', v == null ? '—' : si(v, 'V')], ['Current', si(i, 'A'), true]], [], []),
         el('div', { class: 'row wrap' },
           ...(w.x1 !== w.x2 && w.y1 !== w.y2 ? [el('button', { class: 'btn primary', type: 'button', text: '⌐ Straighten (across first)', onclick: () => { straighten(sel.i, false); sel = null; commit(); say('Crooked wire turned into an L.'); } }),
             el('button', { class: 'btn', type: 'button', text: '⌙ Straighten (down first)', onclick: () => { straighten(sel.i, true); sel = null; commit(); say('Crooked wire turned into an L.'); } })] : []),
@@ -1398,6 +1489,7 @@ export function schematicTab(root) {
       case 'SIG': f.append(choice('Wave', q.wave, [['sine', 'Sine'], ['square', 'Square (±)'], ['triangle', 'Triangle'], ['saw', 'Sawtooth'], ['pwm', 'PWM (0 to amplitude)']], v => { q.wave = v; }),
         field('Frequency', plain(q.f), 'Hz', v => { q.f = Math.max(v, 1e-3); }), field('Amplitude (peak)', plain(q.amp), 'V', v => { q.amp = v; }),
         field('DC offset', plain(q.off), 'V', v => { q.off = v; }), field('Duty (PWM)', plain(q.duty), '%', v => { q.duty = Math.min(100, v); })); break;
+      case 'VM': case 'AM': f.append(choice('Measures', q.mode ?? 'dc', [['dc', 'DC ⎓ (average)'], ['ac', 'AC ~ (true RMS)']], v => { q.mode = v; })); break;
       case 'SCOPE': f.append(note('CH1 (yellow) and CH2 (blue) measure against the bottom pin (COM). Usually wire COM to ground. Settings are under the scope screen.'),
         el('button', { class: 'btn', type: 'button', text: 'Auto time/div', onclick: () => autoTime() })); break;
       case 'ZD': {
@@ -1448,6 +1540,8 @@ export function schematicTab(root) {
       }
       case 'LM2596': f.append(choice('Version', q.model ?? 'LM2596S-ADJ', Object.entries(S.LM2596.models).map(([k, v]) => [k, v ? `${k}: fixed ${v} V (FEEDBACK to the output)` : `${k}: adjustable, Vout = 1.23 × (1 + R2 ÷ R1)`]), v => { q.model = v; }),
         note('Pins (TO-263 / TO-220): 1 VIN (4.5–40 V) · 2 OUTPUT (switch) · 3 GND · 4 FEEDBACK · 5 ON/OFF (GND = run, > 1.3 V = off). Needs outside: Schottky catch diode from OUTPUT to GND (cathode to OUTPUT), inductor (33 µH at 3 A), 220 µF in and out. 150 kHz, 3 A, current limit ≈ 4.5 A.')); break;
+      case 'IR2104': f.append(note('IR2104 half-bridge MOSFET driver (also IR2104S, IRS2104). Pins: 1 VCC (10–20 V) · 2 IN · 3 SD (LOW = both outputs off) · 4 COM (GND) · 5 LO (low-side gate) · 6 VS (switch node = high-side source) · 7 HO (high-side gate) · 8 VB (bootstrap +).'),
+        note('IN HIGH → HO on, LO off. IN LOW → LO on, HO off. Built-in dead time (≈ 0.5 µs) so the two MOSFETs never conduct together. HO needs the bootstrap: diode from VCC to VB + 1 µF from VB to VS; it refills every time LO is on, so the duty cannot reach 100 %.')); break;
       case 'TL494': f.append(note('TL494 (also KA7500, KIA494): the PWM brain of PC power supplies, inverters and DC-DC converters. Pins: 1 1IN+ · 2 1IN− · 3 FEEDBACK · 4 DTC · 5 CT · 6 RT · 7 GND · 8 C1 · 9 E1 · 10 E2 · 11 C2 · 12 VCC (7–40 V) · 13 OUTPUT CTRL · 14 REF (5 V) · 15 2IN− · 16 2IN+.'),
         note('Frequency: f = 1 ÷ (RT × CT) (RT pin 6, CT pin 5, both to GND). Pin 13 to GND = both outputs together; pin 13 to REF = push-pull (Q1 / Q2 take turns, each at f ÷ 2). DTC (pin 4) sets the dead time: 0 V = max pulse, ≈ 3 V = off. Error amp not used: IN+ to GND, IN− to REF.')); break;
       case 'T555': f.append(choice('Type', q.model, Object.entries(S.TIMERS).map(([k, m]) => [k, `${k}: ${m.note}`]), v => { q.model = v; }),
@@ -1578,6 +1672,17 @@ export function schematicTab(root) {
         if (r.lossA > 2.5) warn.push(['warn', `${si(r.lossA, 'W')} in the chip: needs a heatsink / copper area (TO-263 ≈ 2–3 W without).`]);
         break;
       }
+      case 'IR2104': {
+        const D = S.IR2104;
+        vals.push(['Outputs', r.dead ? 'dead time (both off)' : `HO ${r.ho ? 'ON' : 'off'} · LO ${r.lo ? 'ON' : 'off'}`, true], ['VCC', si(r.vcc, 'V'), true], ['Bootstrap VB − VS', si(r.vbs, 'V'), true],
+          ['IN', `${si(r.vin, 'V')} (${r.vin > D.vih ? 'HIGH' : 'LOW'})`], ['SD', `${si(r.vsd, 'V')} (${r.vsd > D.vih ? 'run' : 'SHUT DOWN'})`], ['Gate current HO / LO', `${si(c0(Math.abs(r.iho)), 'A')} / ${si(c0(Math.abs(r.ilo)), 'A')}`]);
+        L.push(`HO swings between VS and VB, so the high-side gate gets ≈ VCC − 0.7 V above the switch node. LO swings between COM and VCC.`, `Inputs are logic level: HIGH above ${D.vih} V (3.3 V and 5 V both work).`);
+        if (r.vcc < D.uv) warn.push(['bad', `VCC ${si(r.vcc, 'V')}: under ${D.uv} V the driver keeps both outputs off (UVLO). Use 12 V.`]);
+        else if (r.vbs < D.uvb) warn.push(['warn', `Bootstrap only ${si(r.vbs, 'V')}: HO stays off. Check the bootstrap diode + cap, and that LO turns on sometimes (duty < 100 %).`]);
+        if (r.vcc > D.vmax) warn.push(['bad', `VCC over ${D.vmax} V: the IR2104 can be damaged.`]);
+        if (r.vsd <= D.vih) warn.push(['warn', 'SD is LOW: both MOSFETs are held off.']);
+        break;
+      }
       case 'TL494': {
         const T = S.TL494, pc = (x) => (x * 100).toFixed(1) + ' %', out = r.f ? (r.pp ? r.f / 2 : r.f) : null;
         vals.push(['Outputs', `Q1 ${r.q[0] ? 'ON' : 'off'} · Q2 ${r.q[1] ? 'ON' : 'off'}`, true], ['Oscillator', r.f ? si(r.f, 'Hz') : 'measuring… (Run)', true],
@@ -1659,8 +1764,14 @@ export function schematicTab(root) {
         if (b > 1.2) warn.push(['bad', 'Over its rated voltage: it burns out quickly.']);
         break;
       }
-      case 'VM': vals.push(['Reads', si(Vab, 'V'), true]); L.push('Voltmeter: + side (left pin) minus − side. 10 MΩ inside, like a real multimeter.'); break;
-      case 'AM': vals.push(['Reads', si(r.i, 'A'), true]); L.push('Ammeter: current flowing in at the left pin. Put it IN the wire (in series), never across a battery.'); break;
+      case 'VM': case 'AM': {
+        const u = p.type === 'VM' ? 'V' : 'A', x = rd('p' + p.id, p.type === 'VM' ? r.v : r.i), ac = (q.mode ?? 'dc') === 'ac';
+        vals.push(['Reads (' + (ac ? 'AC' : 'DC') + ')', ac ? acTxt(x.ac, u) : si(x.dc, u), true], [ac ? 'DC part (average)' : 'AC part (RMS)', ac ? si(x.dc, u) : acTxt(x.ac, u)], ['Right now', si(x.inst, u)]);
+        L.push(p.type === 'VM' ? 'Voltmeter: + side (left pin) minus − side. 10 MΩ inside, like a real multimeter.' : 'Ammeter: current flowing in at the left pin. Put it IN the wire (in series), never across a battery.',
+          'DC = the average. AC = true RMS of what changes around that average (a 230 V mains wave reads 230 V AC, 0 V DC). Total RMS = √(DC² + AC²).');
+        if (!timeMode()) L.push('Stopped or plain DC circuit: AC reads 0. Run a circuit with a signal / PWM to see AC.');
+        break;
+      }
       case 'C':
         vals.push(['Voltage', si(Vab, 'V'), true], ['Current', si(r.i, 'A'), true], ['Energy', si(r.energy, 'J')]);
         L.push(`Charge Q = C × V = ${si(q.c * Vab, 'C')}`, 'Current only flows while the voltage changes: i = C × dV/dt.');
@@ -1896,7 +2007,7 @@ export function schematicTab(root) {
   globalThis.__schDbg = { c: () => c, res: () => res, sim, sketches };     // for automated tests
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; probes = []; if (S.isDynamic(c)) { autoTimeQuiet(); autoSpeed(); } if (!running) msg += ' Tap ▶ Run to simulate.'; hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['oled', '💻 ESP32 + OLED 128×64 SSD1306: text, bar + live graph of the pot (code runs)'], ['encoder', '🎛 Rotary encoder menu: ESP32 interrupt + OLED + LED (turn + push the knob)'], ['sr595sig', '📈 74HC595 by hand: signal generators feed SER (data) + SRCLK (clock), 8 LEDs'], ['relay10', '🔌 10 relay modules on 3 wires: ESP32 + two 74HC595 in a chain (type commands in Serial)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM'], ['tl494pwm', '📈 TL494 PWM: 10 kHz lamp dimmer with a MOSFET (turn DUTY)'], ['tl494inv', '📈 TL494 push-pull inverter 12 V → 220 V AC 50 Hz (turn POWER)'], ['bms48', '🔋 48 V protector: 2 × 24 V LiFePO4, whole-pack low / high cut-off (relay)'], ['bms48b', '🔋 48 V BMS: 2 × 24 V LiFePO4, each battery watched + balancing'], ['lm2596', '📈 LM2596 buck module: 24 V → 5 V 3 A (turn SET, flip BIG LOAD / RUN)']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['oled', '💻 ESP32 + OLED 128×64 SSD1306: text, bar + live graph of the pot (code runs)'], ['encoder', '🎛 Rotary encoder menu: ESP32 interrupt + OLED + LED (turn + push the knob)'], ['sr595sig', '📈 74HC595 by hand: signal generators feed SER (data) + SRCLK (clock), 8 LEDs'], ['relay10', '🔌 10 relay modules on 3 wires: ESP32 + two 74HC595 in a chain (type commands in Serial)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM'], ['tl494pwm', '📈 TL494 PWM: 10 kHz lamp dimmer with a MOSFET (turn DUTY)'], ['tl494inv', '📈 TL494 push-pull inverter 12 V → 220 V AC 50 Hz (turn POWER)'], ['bms48', '🔋 48 V protector: 2 × 24 V LiFePO4, whole-pack low / high cut-off (relay)'], ['bms48b', '🔋 48 V BMS: 2 × 24 V LiFePO4, each battery watched + balancing'], ['lm2596', '📈 LM2596 buck module: 24 V → 5 V 3 A (turn SET, flip BIG LOAD / RUN)'], ['buck30', '📈 30 A synchronous buck 24 V → 12 V: TL494 + IR2104 + 2 × IRFB4110 (POWER, then MAIN)']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -2045,6 +2156,15 @@ function symbol(ctx, p, r, g) {
       ctx.fillStyle = q.motion ? '#FFF59D' : '#ECEFF1'; ctx.beginPath(); ctx.arc(0.2, 0.1, 1.45, 0, 7); ctx.fill(); ctx.stroke();
       ['+', 'O', '−'].forEach((n, k) => { L(-3, -1 + k, -2.3, -1 + k); T(n, -2.7, -1.35 + k, 0.4, C.dim); });
       if (q.motion) T('🚶', 0.2, 0.15, 1.1, '#000');
+      break;
+    }
+    case 'IR2104': {
+      ctx.fillStyle = '#1E1E24'; ctx.fillRect(-3, -4, 6, 8); ctx.strokeStyle = r?.vcok === false || (r && r.vcc < 8.6) ? C.part : r ? '#3DDC84' : C.part; ctx.strokeRect(-3, -4, 6, 8); ctx.strokeStyle = C.part;
+      for (const y of [-3, -1, 1, 3]) L(-4, y, -3, y); for (const y of [-2, 0, 4]) L(3, y, 4, y); L(2, -5, 2, -4);
+      ctx.beginPath(); ctx.arc(0, -4, 0.45, 0, Math.PI); ctx.stroke();
+      if (p.id == null) T('IR2104', 0, 1.6, 0.62, C.part); else T('2104', 0, 1.6, 0.66, C.part);
+      for (const [t, x, y] of [['VCC', -2.05, -3], ['IN', -2.3, -1], ['SD', -2.3, 1], ['COM', -2.05, 3], ['HO', 2.3, -2], ['VS', 2.3, 0], ['LO', 2.3, 4], ['VB', 2, -3.4]]) T(t, x, y, 0.42, C.dim);
+      if (r) { T(r.dead ? '—' : r.ho ? 'HI' : r.lo ? 'LO' : 'off', 0, -1.5, 0.5, r.ho ? '#3DDC84' : r.lo ? '#FFC857' : '#FF6B6B'); }
       break;
     }
     case 'LM2596': {
@@ -2267,7 +2387,7 @@ function symbol(ctx, p, r, g) {
     case 'REG': {
       const m = S.REGS[q.model] ?? S.REGS['7805'];
       L(-3, 0, -2, 0); L(2, 0, 3, 0); L(0, 2, 0, 1.1);
-      ctx.fillStyle = '#161C22'; ctx.fillRect(-2, -1.1, 4, 2.2); ctx.strokeStyle = r?.state && r.state !== 'reg' ? '#FF6B6B' : C.part; ctx.strokeRect(-2, -1.1, 4, 2.2);
+      ctx.fillStyle = '#161C22'; ctx.fillRect(-2, -1.1, 4, 2.2); ctx.strokeStyle = r?.state === 'drop' || r?.state === 'lim' ? '#FF6B6B' : C.part; ctx.strokeRect(-2, -1.1, 4, 2.2);   // 'off' = output held up from outside, not a fault
       T(q.model.replace('AMS', ''), 0, -0.2, q.model.length > 6 ? 0.5 : 0.62, C.part);
       T('IN', -1.45, 0.55, 0.42, C.dim); T('OUT', 1.35, 0.55, 0.42, C.dim); T(m.adj ? 'ADJ' : 'GND', 0, 0.7, 0.42, C.dim);
       break;
@@ -2344,7 +2464,7 @@ function symbol(ctx, p, r, g) {
       T('NC', -0.75, -1.85, 0.4, C.dim); T('NO', 1.45, -1.85, 0.4, C.dim); T('COM', 0.75, 1.6, 0.4, C.dim);
       break;
     }
-    case 'VM': case 'AM': L(-2, 0, -1, 0); L(1, 0, 2, 0); ctx.beginPath(); ctx.arc(0, 0, 1, 0, 7); ctx.stroke(); T(p.type === 'VM' ? 'V' : 'A', 0, 0.05, 1.0, C.sel); T('+', -1.45, -0.55, 0.7, '#3DDC84'); break;
+    case 'VM': case 'AM': L(-2, 0, -1, 0); L(1, 0, 2, 0); ctx.beginPath(); ctx.arc(0, 0, 1, 0, 7); ctx.stroke(); T(p.type === 'VM' ? 'V' : 'A', 0, 0.05, 1.0, C.sel); T('+', -1.45, -0.55, 0.7, '#3DDC84'); T(q.mode === 'ac' ? '~' : '⎓', 1.35, -0.8, 0.75, C.dim); break;
   }
 }
 
@@ -2357,6 +2477,6 @@ function arrowHead(ctx, x1, y1, x2, y2, f) {
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, OLED: 6, ENC: 7, SR595: 4.5, TL494: 4, LM2596: 8, RMOD: 7, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10, KEYPAD: 5.5, BUZZER: 14, LOCK: 14 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, OLED: 6, ENC: 7, SR595: 4.5, TL494: 4, LM2596: 8, IR2104: 6, RMOD: 7, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10, KEYPAD: 5.5, BUZZER: 14, LOCK: 14 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

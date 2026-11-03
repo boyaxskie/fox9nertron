@@ -317,3 +317,18 @@ main.wide { max-width: none; }
 .relay-pick { position: relative; font-weight: 700; padding: 8px 0; }
 .relay-pick.on { background: #1565C0; color: #fff; border-color: #42A5F5; }
 .relay-pick.live::after { content: ''; position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: #FF1744; box-shadow: 0 0 6px #FF1744; }
+
+/* 🔬 Analyze dialog */
+.an-dlg { width: min(760px, calc(100% - 24px)); }
+.an-seg { margin-bottom: 4px; }
+.an-body { padding: 4px 20px 8px; display: flex; flex-direction: column; gap: 12px; max-height: calc(100vh - 210px); overflow-y: auto; }
+.an-body .fields { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.an-cv { width: 100%; height: 260px; border-radius: 10px; display: block; }
+.an-cv.an-hist { height: 150px; }
+.an-prog { flex: 1; min-width: 120px; height: 10px; accent-color: var(--accent); }
+.an-ta { width: 100%; min-height: 170px; box-sizing: border-box; background: var(--bg); color: var(--text); border: 1px solid var(--line2); border-radius: 8px; padding: 10px; font: 13px var(--mono); resize: vertical; }
+.an-ta:focus { border-color: var(--accent); outline: none; }
+.an-out { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.an-out tr.bad td { color: var(--bad); }
+.an-out tr.warn td { color: var(--warn); }
+.an-out details summary { cursor: pointer; color: var(--dim); }
