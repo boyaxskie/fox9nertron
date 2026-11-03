@@ -31,9 +31,11 @@ export function partValue(p) {
     case 'SR595': return q.model ?? '74HC595';
     case 'LM2596': return `${(q.model ?? 'LM2596S-ADJ').replace('LM2596S', 'LM2596T')} (TO-220-5)`;
     case 'TL494': return `${q.model ?? 'TL494C'} (DIP-16, use a socket)`;
+    case 'IR2104': return 'IR2104 (DIP-8, use a socket)';
     case 'RMOD': return `relay module 5V 1ch (${q.trig === 'high' ? 'HIGH' : 'LOW'} trigger)`;
     case 'ENC': return 'rotary encoder KY-040 (5-pin header)';
     case 'OLED': return 'OLED 0.96in SSD1306 I2C (4-pin header)';
+    case 'ADS1115': return 'ADS1115 16-bit ADC module (10-pin header)';
     case 'LCD': return 'LCD 16x2 + I2C backpack (4-pin header)';
     case 'ISRC': return 'current source';
     default: return q.model ?? p.type;

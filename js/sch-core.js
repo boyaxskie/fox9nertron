@@ -34,6 +34,7 @@ export const FETS = {
   'IRFZ44N': { pol: 'n', vth: 3, rdson: 0.0175, vfull: 10, imax: 49, vmax: 55, pmax: 2, logic: false, note: 'N, needs 10 V gate, 49 A' },
   '2N7000': { pol: 'n', vth: 2.1, rdson: 1.8, vfull: 10, imax: 0.2, vmax: 60, pmax: 0.4, logic: false, note: 'N, small 200 mA' },
   'AO3401': { pol: 'p', vth: 0.9, rdson: 0.05, vfull: 4.5, imax: 4, vmax: 30, pmax: 1.4, logic: true, note: 'P, SOT-23, 4 A' },
+  'IRFB4110': { pol: 'n', vth: 3, rdson: 0.0037, vfull: 10, imax: 120, vmax: 100, pmax: 3, logic: false, note: 'N, 100 V, 3.7 mΩ: 30 A+ bucks, inverters (heatsink)' },
   'IRFBC40': { pol: 'n', vth: 3, rdson: 1.2, vfull: 10, imax: 6.2, vmax: 600, pmax: 2, logic: false, note: 'N, 600 V, 6 A: off-line SMPS / flyback (220 V)' },
   'IRF840': { pol: 'n', vth: 3, rdson: 0.85, vfull: 10, imax: 8, vmax: 500, pmax: 2, logic: false, note: 'N, 500 V, 8 A: SMPS, inverters' },
   'IRF9540N': { pol: 'p', vth: 3, rdson: 0.117, vfull: 10, imax: 23, vmax: 100, pmax: 2, logic: false, note: 'P, needs 10 V gate, 23 A' },
@@ -60,12 +61,15 @@ export const TIMERS = {
 };
 // TL494 PWM controller (TI SLVS074): ramp 0 → 3 V on CT, charged by 3 V ÷ RT → f = 1 ÷ (RT × CT).
 // dead-time comparator offset 0.11 V, PWM comparator offset 0.7 V, 5 V reference, 7–40 V supply, outputs 200 mA (Vce sat ≈ 1.1 V)
-export const TL494 = { peak: 3, dtcOff: 0.11, pwmOff: 0.7, vmin: 7, vmax: 40, iout: 0.2, iref: 0.01, vsat: 1.1, rsat: 1, ea: { a: 56000, dh: 1.5, dl: 0 } };
+export const TL494 = { peak: 3, dtcOff: 0.11, pwmOff: 0.7, vmin: 7, vmax: 40, iout: 0.2, iref: 0.01, vsat: 1.1, rsat: 1, ea: { a: 56000, dh: 1.5, gbw: 800e3 } };
 const TL_F = new Map();
 // LM2596 3 A buck regulator (TI SNVS124): 150 kHz, feedback 1.23 V (ADJ) or fixed 3.3 / 5 / 12 V, input 4.5–40 V,
 // switch drop ≈ 1.16 V at 3 A, current limit ≈ 4.5 A (cycle by cycle), ON/OFF pin HIGH (> 1.3 V) = off
 export const LM2596 = { f: 150e3, vref: 1.23, vmin: 4.5, vmax: 40, ilim: 4.5, iout: 3, vsat: 0.6, rsat: 0.18, von: 1.3, fc: 100,
   models: { 'LM2596S-ADJ': 0, 'LM2596S-3.3': 3.3, 'LM2596S-5.0': 5, 'LM2596S-12': 12 } };          // TL494 id → oscillator frequency seen in the last run (sets the time step)
+// IR2104 half-bridge driver: IN HIGH → HO on (high-side gate = VB), IN LOW → LO on; ≈ 0.5 µs dead time (one step here) between them.
+// SD LOW = both off. VCC under 8.6 V or bootstrap (VB − VS) under 8 V → outputs off (UVLO). Peak drive ≈ 0.2 A (≈ 10 Ω here).
+export const IR2104 = { uv: 8.6, uvb: 8, vih: 2.5, ron: 10, iq: 0.0016, vmax: 20 };
 // motors
 export const SERVOS = {
   SG90: { vmin: 4.0, vmax: 6.0, idle: 0.01, run: 0.25, stall: 0.65, speed: 600, note: 'micro servo 9 g, 1.8 kg·cm' },          // speed in °/s (0.1 s / 60°)
@@ -218,8 +222,12 @@ export const TYPES = {
   TL494: { label: 'TL494 PWM controller (SMPS, inverters)', prefix: 'U', pins: [[-5, -4], [-5, -5], [-5, -2], [-5, 4], [-3, 7], [-1, 7], [1, 7], [5, -5], [5, -2], [5, 0], [5, -4], [2, -7], [3, 7], [-2, -7], [-5, 2], [-5, 0]], box: [-5, -7, 5, 7], props: { model: 'TL494C' } },
   // LM2596 buck regulator, index = pin − 1: 1 VIN, 2 OUTPUT (switch), 3 GND, 4 FEEDBACK, 5 ON/OFF
   LM2596: { label: 'LM2596 buck regulator 3 A (150 kHz)', prefix: 'U', pins: [[-4, -1], [4, -1], [0, 3], [4, 1], [-4, 1]], box: [-4, -2.2, 4, 3], props: { model: 'LM2596S-ADJ' } },
+  // IR2104 half-bridge gate driver, index = pin − 1: 1 VCC, 2 IN, 3 SD, 4 COM, 5 LO, 6 VS, 7 HO, 8 VB
+  IR2104: { label: 'IR2104 half-bridge MOSFET driver', prefix: 'U', pins: [[-4, -3], [-4, -1], [-4, 1], [-4, 3], [4, 4], [4, 0], [4, -2], [2, -5]], box: [-4, -5, 4, 5], props: { model: 'IR2104' } },
   // 1-channel 5 V relay module (opto / transistor + LED on board): VCC, GND, IN | COM, NO, NC
   RMOD: { label: 'Relay module 5 V (1 channel)', prefix: 'K', pins: [[-3, -1], [-3, 0], [-3, 1], [3, 0], [3, -1], [3, 1]], box: [-3, -2, 3, 2], props: { trig: 'low' } },
+  // ADS1115 16-bit ADC module, index = header order VDD, GND, SCL, SDA, ADDR, ALRT, A0, A1, A2, A3 (drawn: bus pins top, power bottom, inputs right)
+  ADS1115: { label: 'ADS1115 16-bit ADC (I2C, 4 inputs)', prefix: 'U', pins: [[-4, 1], [-4, 2], [-4, -3], [-4, -2], [-4, 0], [-4, -1], [4, -2], [4, -1], [4, 0], [4, 1]], box: [-4, -3.7, 4, 2.7], props: {} },
   LCD: { label: 'LCD 16×2 (I2C backpack)', prefix: 'LCD', pins: [[-7, 2], [-7, 1], [-7, 0], [-7, -1]], box: [-7, -2.3, 7, 2.8], props: { addr: 0x27 } },
   SEG7: { label: '7-segment display', prefix: 'DS', pins: [[-3, -4], [-3, -3], [-3, -2], [-3, -1], [-3, 0], [-3, 1], [-3, 2], [-3, 3], [-3, 4]], box: [-3, -4.7, 2.6, 4.7], props: { common: 'cathode', color: 'red' } },
   // sensors: a slider in the panel sets what they "feel"; sketches read them (DHT library, pulseIn) or the voltage does the job (LDR, PIR)
@@ -234,7 +242,7 @@ export const TYPES = {
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'TL494', 'LM2596', 'SR595', 'ESP32', 'UNO', 'LCD', 'OLED', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'ENC', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'RMOD', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'TL494', 'LM2596', 'IR2104', 'SR595', 'ESP32', 'UNO', 'LCD', 'OLED', 'ADS1115', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'ENC', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'RMOD', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
 export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER', 'ENC', 'TL494', 'LM2596']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
@@ -326,11 +334,11 @@ export const ldrOhms = (lux) => Math.max(100, Math.min(1e6, 15000 * Math.pow(Mat
 
 // ---------- faults (Troubleshoot mode): break a part on purpose and measure it like on the bench ----------
 // open = no connection between any pins · short = the two pins below welded together (others float) · weak = drifted value
-export const FAULT_SHORT = { NPN: [1, 2], PNP: [1, 2], NMOS: [1, 2], PMOS: [1, 2], OPAMP: [3, 4], T555: [7, 0], TL494: [11, 6], LM2596: [0, 1], REG: [0, 1], RELAY: [2, 4], OPTO: [2, 3], XFMR: [0, 1] };
-const FAULTABLE = new Set(['R', 'POT', 'C', 'L', 'D', 'LED', 'ZD', 'LAMP', 'SW', 'PB', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'REG', 'T555', 'TL494', 'LM2596', 'RELAY', 'OPTO', 'XFMR', 'BAT']);
+export const FAULT_SHORT = { NPN: [1, 2], PNP: [1, 2], NMOS: [1, 2], PMOS: [1, 2], OPAMP: [3, 4], T555: [7, 0], TL494: [11, 6], LM2596: [0, 1], IR2104: [0, 3], REG: [0, 1], RELAY: [2, 4], OPTO: [2, 3], XFMR: [0, 1] };
+const FAULTABLE = new Set(['R', 'POT', 'C', 'L', 'D', 'LED', 'ZD', 'LAMP', 'SW', 'PB', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'REG', 'T555', 'TL494', 'LM2596', 'IR2104', 'RELAY', 'OPTO', 'XFMR', 'BAT']);
 export function faultOptions(type) {
   if (!FAULTABLE.has(type)) return [];
-  const shortTxt = { NPN: 'shorted C–E (blown)', PNP: 'shorted C–E (blown)', NMOS: 'shorted D–S (blown)', PMOS: 'shorted D–S (blown)', OPAMP: 'shorted supply (dead chip)', T555: 'shorted VCC–GND (dead chip)', TL494: 'shorted VCC–GND (dead chip)', LM2596: 'shorted VIN–OUT (switch blown: VIN goes straight out)', REG: 'shorted IN–OUT (blown)',
+  const shortTxt = { NPN: 'shorted C–E (blown)', PNP: 'shorted C–E (blown)', NMOS: 'shorted D–S (blown)', PMOS: 'shorted D–S (blown)', OPAMP: 'shorted supply (dead chip)', T555: 'shorted VCC–GND (dead chip)', TL494: 'shorted VCC–GND (dead chip)', LM2596: 'shorted VIN–OUT (switch blown: VIN goes straight out)', IR2104: 'shorted VCC–COM (dead chip)', REG: 'shorted IN–OUT (blown)',
     RELAY: 'contacts welded (always ON)', OPTO: 'shorted output (always ON)', XFMR: 'shorted primary turns', SW: 'stuck closed', PB: 'stuck pressed', BAT: 'shorted cell' }[type] ?? 'shorted';
   const openTxt = { R: 'open (burnt)', C: 'open (broken lead)', L: 'open (broken wire)', LAMP: 'open (filament gone)', SW: 'stuck open', PB: 'never closes', BAT: 'dead / disconnected', XFMR: 'open winding', RELAY: 'dead (coil + contacts open)', POT: 'open (worn track)' }[type] ?? 'open (dead)';
   const o = [['ok', 'OK (working)'], ['open', openTxt], ['short', shortTxt]];
@@ -384,7 +392,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
     else if (mc) { const gi = BOARDS[mc.type].pins.findIndex(q => q.k === 'gnd'); const [x, y] = pinsOf(mc)[gi]; gkeys.add(key(x, y)); autoGround = mc.name + ' GND'; }
   }
   pieces.forEach((w, k) => R(node(w.x1, w.y1), node(w.x2, w.y2), R_WIRE, null, 'wire' + k));
-  const diodes = [], trans = [], fets = [], zeners = [], amps = [], regs = [], relays = [], timers = [], tls = [], lms = [];
+  const diodes = [], trans = [], fets = [], zeners = [], amps = [], regs = [], relays = [], timers = [], tls = [], lms = [], drv = [];
   for (const p of c.parts) {
     if (p.type === 'GND') continue;
     const pins = pinsOf(p).map(([x, y]) => node(x, y));
@@ -481,6 +489,13 @@ export function solveCircuit(c, sim = null, opts = {}) {
         // pins GND, VCC, SCL, SDA. ≈ 20 mA (3.3 V regulator on the module), 10 kΩ I2C pull-ups to VCC
         const [Gp, Vp, SCL, SDA] = pins;
         R(Vp, Gp, 220, p, 'main'); R(SDA, Vp, 10000, p, 'sda'); R(SCL, Vp, 10000, p, 'scl');
+        break;
+      }
+      case 'ADS1115': {
+        // ≈ 150 µA supply, 10 kΩ pull-ups on SDA / SCL / ALRT and a 10 kΩ pull-down on ADDR (module), inputs ≈ 10 MΩ
+        const [Vp, Gp, SCL, SDA, ADDR, ALRT] = pins;
+        R(Vp, Gp, 22000, p, 'main'); R(SDA, Vp, 10000, p, 'sda'); R(SCL, Vp, 10000, p, 'scl'); R(ALRT, Vp, 10000, p, 'alrt'); R(ADDR, Gp, 10000, p, 'addr');
+        for (let k = 0; k < 4; k++) R(pins[6 + k], Gp, 10e6, p, 'a' + k);
         break;
       }
       case 'LCD': {
@@ -603,14 +618,11 @@ export function solveCircuit(c, sim = null, opts = {}) {
         if (sim) els.push({ kind: 'F', a: VCC, b: CT, ctrl: vrt, val: -1, owner: p, role: 'ich' });   // CT charged with the same current that flows out of RT
         if (sim && prev.dis) { const nd = inner(); V(nd, G, prev.v0 ?? 0, p, 'disv'); R(nd, CT, 1e-3, p, 'dis'); }   // reset step: CT jumps back to the start of the ramp
         R(DTC, G, 1e8, p, 'dtc'); R(OC, G, 1e8, p, 'oc'); R(FB, G, 10000, p, 'fbpd');                 // FB: pulled down inside (≈ 0.3 mA at 3 V)
-        const ea = [[I1p, I1n], [I2p, I2n]].map(([ip, inn], k) => {
-          const n = inner(), eo = inner();
-          R(n, eo, 20, p, 'ear' + k);
-          const a = { p, m: T.ea, ip, in: inn, out: eo, vp: VCC, vn: G, n, state: prev.es?.[k] ?? 'low' }; amps.push(a);
-          const d = { p, a: eo, b: FB, vf: 0.01, rs: 1, on: prev.ds?.[k] ?? false, n: inner(), role: 'ead' + k }; diodes.push(d);   // the two error amps are OR-ed onto FB
-          return { a, d };
-        });
-        tls.push({ p, G, VCC, CT, DTC, FB, OC, REF, vref, vrt, ea, dis: !!prev.dis, ff: prev.ff ?? 0, pp: false, en: false,
+        // error amps: real ones have ≈ 0.8 MHz bandwidth, so each output moves at most a little per step: integrate it from the inputs
+        // of the last step (no on/off states that could ping-pong). The two outputs are OR-ed onto FB (the higher one drives it).
+        const ev = prev.ev ?? [0, 0], efb = Math.max(ev[0], ev[1]), ea = [[I1p, I1n], [I2p, I2n]].map(([ip, inn]) => ({ ip, in: inn }));
+        if (efb > 0.05) { const nf = inner(); V(nf, G, efb, p, 'eav'); R(nf, FB, 20, p, 'ear'); }
+        tls.push({ p, G, VCC, CT, DTC, FB, OC, REF, vref, vrt, ea, ev, dis: !!prev.dis, ff: prev.ff ?? 0, pp: false, en: false,
           outs: [{ c: C1, e: E1, n: inner(), on: !!prev.o?.[0] }, { c: C2, e: E2, n: inner(), on: !!prev.o?.[1] }] });
         break;
       }
@@ -629,6 +641,16 @@ export function solveCircuit(c, sim = null, opts = {}) {
           want = !!prev.en && Math.floor(ph * N) < nOn && prev.oc !== cyc;
         }
         lms.push({ p, VI, VO, G, FB, ON, n: inner(), on: want && !!prev.on, want, cyc, nOn, acc, fixed });
+        break;
+      }
+      case 'IR2104': {
+        const prev = st.get(p.id) ?? {}, [VC, IN, SD, COM, LO, VS, HO, VB] = pins;
+        R(VC, COM, 12 / IR2104.iq, p, 'main'); R(VB, VS, 300000, p, 'vbs');
+        R(IN, COM, 1e6, p, 'in'); R(SD, COM, 1e6, p, 'sd');
+        // the driver reacts to what its inputs were at the end of the previous step (≈ 0.5 µs propagation delay); right after IN
+        // changes both outputs stay off for that one step (dead time). Deciding before the step keeps the power stage from ping-ponging.
+        const dead = sim ? !!prev.in !== !!prev.in2 : false, ok = !!prev.sd && !!prev.vcok && !dead;
+        drv.push({ p, VC, IN, SD, COM, LO, VS, HO, VB, inn: !!prev.in, dead, ho: ok && !!prev.in && !!prev.vbok, lo: ok && !prev.in, prev });
         break;
       }
       case 'RELAY': {
@@ -699,6 +721,11 @@ export function solveCircuit(c, sim = null, opts = {}) {
       if (t.q) all.push({ kind: 'V', a: t.VCC, b: t.no, val: t.m.dh, owner: t.p, role: 'o' }); else all.push({ kind: 'V', a: t.no, b: t.G, val: 0.1, owner: t.p, role: 'o' });
       all.push({ kind: 'R', a: t.DIS, b: t.G, val: t.q ? R_OPEN : 10, owner: t.p, role: 'dis' });
     }
+    for (const d of drv) {
+      const r0 = IR2104.ron;
+      all.push(d.ho ? { kind: 'R', a: d.VB, b: d.HO, val: r0, owner: d.p, role: 'ho' } : { kind: 'R', a: d.HO, b: d.VS, val: r0, owner: d.p, role: 'ho' });
+      all.push(d.lo ? { kind: 'R', a: d.VC, b: d.LO, val: r0, owner: d.p, role: 'lo' } : { kind: 'R', a: d.LO, b: d.COM, val: r0, owner: d.p, role: 'lo' });
+    }
     for (const u of lms) {
       if (u.on) { all.push({ kind: 'V', a: u.VI, b: u.n, val: LM2596.vsat, owner: u.p, role: 'sw' }); all.push({ kind: 'R', a: u.n, b: u.VO, val: LM2596.rsat, owner: u.p, role: 'swr' }); }
       else all.push({ kind: 'R', a: u.VI, b: u.VO, val: 1e9, owner: u.p, role: 'sw' });
@@ -745,12 +772,15 @@ export function solveCircuit(c, sim = null, opts = {}) {
       const vc = f.sign * (V_[f.g] - V_[f.s]), vds = V_[f.hi] - V_[f.lo], m = f.m, ch = findEl(res.els, f.p, 'ch');
       if (Math.abs(vc - f.vc) > 1e-7 * Math.max(1, Math.abs(vc))) { f.vc = vc; changed = true; }
       const isat = fetK(m) * Math.max(0, f.vc - m.vth) ** 2;
+      // fresh = switched on in the previous iteration: other parts (e.g. a body diode still "on") get one iteration to follow
+      // before a huge momentary current may push it into saturation; avalanche only once the rest has had time to settle
       let ns = f.state;
       if (f.state === 'brk') { if (ch.i < 0) ns = 'off'; }
-      else if (f.vc <= m.vth) ns = vds > f.vbr ? 'brk' : 'off';
-      else if (f.state === 'off') ns = 'ohm';
-      else if (f.state === 'ohm' && ch.i > isat) ns = 'sat';
+      else if (f.vc <= m.vth) ns = vds > f.vbr && it > 40 ? 'brk' : 'off';
+      else if (f.state === 'off') { ns = 'ohm'; f.fresh = true; }
+      else if (f.state === 'ohm' && ch.i > isat && !f.fresh) ns = 'sat';
       else if (f.state === 'sat' && vds < isat * fetRds(m, f.vc)) ns = 'ohm';
+      if (ns === f.state && f.state === 'ohm') f.fresh = false;
       if (ns !== f.state) { f.state = ns; changed = true; }
     }
     for (const z of zeners) {
@@ -910,6 +940,13 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vsda: res.v[pins[3]] - res.v[pins[0]], vscl: res.v[pins[2]] - res.v[pins[0]], dots: [[1, 0, m.i]] });
       continue;
     }
+    if (p.type === 'ADS1115') {
+      // address from what ADDR is tied to: GND 0x48 (or open: pull-down), VDD 0x49, SDA 0x4A, SCL 0x4B
+      const m = mine.find(e => e.role === 'main'), g = res.v[pins[1]], v = res.v[pins[0]] - g, ad = pins[4];
+      const addr = ad === pins[0] ? 0x49 : ad === pins[3] ? 0x4A : ad === pins[2] ? 0x4B : 0x48;
+      parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, addr, ain: [0, 1, 2, 3].map(k => res.v[pins[6 + k]] - g), vsda: res.v[pins[3]] - g, vscl: res.v[pins[2]] - g, dots: [[0, 1, m.i]] });
+      continue;
+    }
     if (p.type === 'LCD') {
       const m = mine.find(e => e.role === 'main'), v = res.v[pins[1]] - res.v[pins[0]];
       parts.set(p.id, { va, vb, v, i: m.i, p: v * m.i, vsda: res.v[pins[2]] - res.v[pins[0]], vscl: res.v[pins[3]] - res.v[pins[0]], dots: [[1, 0, m.i]] });
@@ -1016,6 +1053,13 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, q: t.q, vcc, vout: res.v[t.OUT] - vg, iout: ro.i, vtrig: res.v[t.TR] - vg, vthr: res.v[t.TH] - vg, vlo: res.v[t.n13] - vg, vhi: res.v[t.CV] - vg, idis: t.q ? 0 : dis.i, v: res.v[t.OUT] - vg, i: ro.i, p: pw, dots: [] });
       continue;
     }
+    if (p.type === 'IR2104') {
+      const d = drv.find(x => x.p === p), vg = res.v[d.COM], g = (role) => mine.find(e => e.role === role);
+      const vcc = res.v[d.VC] - vg, vbs = res.v[d.VB] - res.v[d.VS], vin = res.v[d.IN] - vg, vsd = res.v[d.SD] - vg, D = IR2104;
+      parts.set(p.id, { va, vb, v: vcc, i: g('main').i, p: vcc * g('main').i, vcc, vbs, vin, vsd, ho: d.ho, lo: d.lo, dead: d.dead, iho: g('ho').i, ilo: g('lo').i,
+        nin: vin > D.vih, in2: d.inn, sd: vsd > D.vih, vcok: vcc >= D.uv, vbok: vbs >= D.uvb, dots: [] });
+      continue;
+    }
     if (p.type === 'LM2596') {
       const L = LM2596, u = lms.find(x => x.p === p), prev = st.get(p.id) ?? {}, g = (role) => mine.find(e => e.role === role);
       const vg = res.v[u.G], vin = res.v[u.VI] - vg, vsw = res.v[u.VO] - vg, vfb = res.v[u.FB] - vg, von = res.v[u.ON] - vg;
@@ -1058,7 +1102,11 @@ export function solveCircuit(c, sim = null, opts = {}) {
       const duty = per ? w.map(x => Math.min(1, t.pp ? (x[0] + x[1]) / (2 * per) : x[0] / per)) : null;
       const pw = vcc * g('main').i + ic.reduce((s2, x) => s2 + Math.abs(x) * (T.vsat + Math.abs(x) * T.rsat), 0) + Math.max(0, iref) * Math.max(0, vcc - 5);
       parts.set(p.id, { va, vb, v: vcc, i: g('main').i, p: pw, vcc, vref: res.v[t.REF] - vg, iref, vct, peak, vdtc: res.v[t.DTC] - vg, vfb: res.v[t.FB] - vg, irt,
-        q: t.outs.map(o => o.on), ic, pp: t.pp, f: per ? 1 / per : null, per, duty, dis, v0, ff, tl, acc, w, es: t.ea.map(x => x.a.state), ds: t.ea.map(x => x.d.on), on: vcc >= T.vmin, dots: [] });
+        q: t.outs.map(o => o.on), ic, pp: t.pp, f: per ? 1 / per : null, per, duty, dis, v0, ff, tl, acc, w, ev: t.ea.map((x, k) => {
+          const d = res.v[x.ip] - res.v[x.in], top = Math.max(0, vcc - T.ea.dh), w = 2 * Math.PI * T.ea.gbw;
+          const v = sim ? t.ev[k] + sim.dt * w * (d - t.ev[k] / T.ea.a) : T.ea.a * d;
+          return Math.min(top, Math.max(0, v));
+        }), on: vcc >= T.vmin, dots: [] });
       continue;
     }
     if (p.type === 'RELAY') {
@@ -1093,8 +1141,9 @@ export function solveCircuit(c, sim = null, opts = {}) {
     else if (p.type === 'REG') next.set(p.id, { rs: r.state });
     else if (p.type === 'RELAY') next.set(p.id, { i: r.icoil, on: r.on });
     else if (p.type === 'T555') next.set(p.id, { q: r.q });
+    else if (p.type === 'IR2104') next.set(p.id, { in: r.nin, in2: r.in2, sd: r.sd, vcok: r.vcok, vbok: r.vbok });
     else if (p.type === 'LM2596') next.set(p.id, { duty: r.duty, on: r.on, en: r.en, swA: r.swA, fbA: r.fbA, inA: r.inA, lossA: r.lossA, oc: r.oc, ocN: r.ocN, cyc: r.cyc, nOn: r.nOn, acc: r.acc });
-    else if (p.type === 'TL494') next.set(p.id, { vref: tls.find(x => x.p === p).vref.val, dis: r.dis, v0: r.v0, ff: r.ff, tl: r.tl, per: r.per, acc: r.acc, w: r.w, o: r.q, es: r.es, ds: r.ds, vct: r.vct });
+    else if (p.type === 'TL494') next.set(p.id, { vref: tls.find(x => x.p === p).vref.val, dis: r.dis, v0: r.v0, ff: r.ff, tl: r.tl, per: r.per, acc: r.acc, w: r.w, o: r.q, ev: r.ev, vct: r.vct });
     else if (p.type === 'SR595') next.set(p.id, { sr: r.sr, q: r.q, sh: r.sh, stc: r.stc, ser: r.ser, en: r.en, pw: r.pw });
     else if (p.type === 'RMOD') next.set(p.id, { on: r.on });
     else if (p.type === 'SEG7') next.set(p.id, { segOn: r.segOn });
@@ -1166,6 +1215,7 @@ function gauss(A0, z0) {
 
 // ---------- examples ----------
 const SKETCH_EX = {
+  ads1115: '// 0-25 V voltage sensor: divider R1 68k / R2 10k -> ADS1115 A0 (16-bit), ESP32 reads it over I2C, LCD shows it\n#include <Wire.h>\n#include <Adafruit_ADS1X15.h>\n#include <LiquidCrystal_I2C.h>\n\nAdafruit_ADS1115 ads;                 // ADDR open = 0x48 (pull-down on the module)\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // both on SDA = GPIO21, SCL = GPIO22\n\nconst float R1 = 68000.0;             // top resistor: from the voltage you measure to A0\nconst float R2 = 10000.0;             // bottom resistor: A0 to GND\nconst float RATIO = (R1 + R2) / R2;   // 7.8: 25 V in -> 3.2 V on A0 (below VDD 3.3 V)\nconst float CAL = 1.000;              // fine trim: real volts / shown volts (measure once with a good meter)\n\nvoid setup() {\n  Serial.begin(115200);\n  lcd.init();\n  lcd.backlight();\n  if (!ads.begin(0x48)) {\n    Serial.println(\"ADS1115 not found! Check VDD, GND, SDA, SCL.\");\n    lcd.print(\"ADS1115 missing\");\n    while (true) {\n      delay(100);\n    }\n  }\n  ads.setGain(GAIN_ONE);              // +-4.096 V full scale, 1 bit = 0.125 mV on A0\n  lcd.print(\"Voltage sensor\");\n}\n\nvoid loop() {\n  // average 8 readings: less noise on a real board\n  long sum = 0;\n  for (int i = 0; i < 8; i++) sum += ads.readADC_SingleEnded(0);\n  int16_t raw = sum / 8;\n\n  float vA0 = ads.computeVolts(raw);    // volts on the A0 pin\n  float vin = vA0 * RATIO * CAL;        // volts before the divider\n\n  Serial.print(\"raw \");\n  Serial.print(raw);\n  Serial.print(\"  A0 \");\n  Serial.print(vA0, 4);\n  Serial.print(\" V  input \");\n  Serial.print(vin, 3);\n  Serial.println(\" V\");\n\n  lcd.setCursor(0, 0);\n  lcd.print(\"A0  \");\n  lcd.print(vA0, 4);\n  lcd.print(\" V     \");\n  lcd.setCursor(0, 1);\n  lcd.print(\"VIN \");\n  lcd.print(vin, 2);\n  lcd.print(\" V     \");\n  delay(250);\n}\n',
   relay10: '// 10 relay modules on 3 wires: two 74HC595 shift registers in a chain (cascade)\n// Serial Monitor commands (type below, press Send):\n//   3          toggle relay 3\n//   on 3 / off 3\n//   on 1,3,5   off 2,4   (pick several)\n//   all on / all off\n//   1000000001 binary, one digit per relay (relay 1 first), 1 = ON\n//   time 5     reset time: each relay switches itself OFF 5 s after it went ON (time 0 = stays ON)\n\nconst int DATA  = 19;   // 74HC595 pin 14 SER   (only to the 1st chip)\nconst int CLOCK = 18;   // 74HC595 pin 11 SRCLK (both chips)\nconst int LATCH = 5;    // 74HC595 pin 12 RCLK  (both chips)\nconst int OE    = 4;    // 74HC595 pin 13 OE    (both chips): HIGH = all outputs off\nconst int NRELAYS = 10;\nconst bool ACTIVE_LOW = true;   // most relay modules switch ON when IN is LOW\n\nunsigned int relays = 0;     // bit 0 = relay 1 ... bit 9 = relay 10\nunsigned int before = 0;     // what writeRelays() sent last time\nunsigned long onSince[10];   // millis() when each relay went ON\nunsigned long resetMs = 0;   // reset time in ms (0 = relays stay ON)\n\nvoid writeRelays() {\n  for (int i = 0; i < NRELAYS; i++)\n    if (((relays >> i) & 1) && !((before >> i) & 1)) onSince[i] = millis();   // just went ON: start its timer\n  before = relays;\n  unsigned int out = relays;\n  if (ACTIVE_LOW) out = ~relays;              // flip: ON = LOW\n  digitalWrite(LATCH, LOW);\n  shiftOut(DATA, CLOCK, MSBFIRST, (out >> 8) & 0xFF);   // the LAST chip\'s byte goes first\n  shiftOut(DATA, CLOCK, MSBFIRST, out & 0xFF);          // the 1st chip\'s byte\n  digitalWrite(LATCH, HIGH);                             // all outputs change at the same moment\n}\n\n// "1,3,5" → switch those relays on or off\nvoid setList(String list, bool on) {\n  list += ",";\n  int start = 0;\n  for (int i = 0; i < list.length(); i++) {\n    if (list.charAt(i) == \',\') {\n      int n = list.substring(start, i).toInt();\n      if (n >= 1 && n <= NRELAYS) {\n        if (on) relays |= (1 << (n - 1));\n        else relays &= ~(1 << (n - 1));\n      }\n      start = i + 1;\n    }\n  }\n}\n\nvoid printRelays() {\n  Serial.print("Relays 1-10: ");\n  for (int i = 0; i < NRELAYS; i++) Serial.print((relays >> i) & 1);\n  Serial.println();\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(DATA, OUTPUT);\n  pinMode(CLOCK, OUTPUT);\n  pinMode(LATCH, OUTPUT);\n  pinMode(OE, OUTPUT);\n  digitalWrite(OE, HIGH);           // outputs off while we load "all OFF"\n  writeRelays();                    // all OFF first\n  digitalWrite(OE, LOW);            // now the chips drive the relays\n\n  // test: click each relay once, 1 to 10\n  for (int i = 0; i < NRELAYS; i++) {\n    relays = 1 << i;\n    writeRelays();\n    delay(250);\n  }\n  relays = 0;\n  writeRelays();\n  Serial.println("Ready. Type 3, on 1,3,5, off 2, all on, all off, 1000000001 or time 5");\n}\n\nvoid loop() {\n  if (Serial.available()) {\n    String cmd = Serial.readStringUntil(\'\\n\');\n    cmd.trim();\n    cmd.toLowerCase();\n\n    if (cmd == "all on") relays = (1 << NRELAYS) - 1;\n    else if (cmd == "all off") relays = 0;\n    else if (cmd.startsWith("time ")) {\n      resetMs = cmd.substring(5).toFloat() * 1000;\n      Serial.print("Reset time: ");\n      if (resetMs == 0) Serial.println("off");\n      else {\n        Serial.print(resetMs / 1000.0, 1);\n        Serial.println(" s");\n      }\n    }\n    else if (cmd.startsWith("on ")) setList(cmd.substring(3), true);\n    else if (cmd.startsWith("off ")) setList(cmd.substring(4), false);\n    else if (cmd.length() == NRELAYS && cmd.indexOf(\'2\') < 0) {   // binary\n      relays = 0;\n      for (int i = 0; i < NRELAYS; i++) if (cmd.charAt(i) == \'1\') relays |= (1 << i);\n    } else {\n      int n = cmd.toInt();\n      if (n >= 1 && n <= NRELAYS) relays ^= (1 << (n - 1));   // toggle\n      else Serial.println("?? " + cmd);\n    }\n    writeRelays();\n    printRelays();\n  }\n\n  // reset time: switch OFF every relay that has been ON long enough\n  if (resetMs > 0) {\n    unsigned int was = relays;\n    for (int i = 0; i < NRELAYS; i++)\n      if (((relays >> i) & 1) && millis() - onSince[i] >= resetMs) relays &= ~(1 << i);\n    if (relays != was) {\n      writeRelays();\n      printRelays();\n    }\n  }\n}\n',
   encoder: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\nAdafruit_SSD1306 display(128, 64, &Wire, -1);   // SDA = GPIO21, SCL = GPIO22\n\nconst int CLK = 32;   // encoder CLK (A)\nconst int DT  = 33;   // encoder DT (B)\nconst int SW  = 25;   // encoder push button\nconst int LED = 23;\n\nvolatile int steps = 0;   // changed by the interrupt, read by loop()\n\n// runs by itself the instant CLK falls (one click of the knob)\nvoid IRAM_ATTR readEncoder() {\n  if (digitalRead(DT) == HIGH) steps++;   // CLK fell first: clockwise\n  else steps--;                           // DT fell first: counter-clockwise\n}\n\nconst String items[4] = {"LED", "Blink", "Speed", "About"};\nint sel = 0;            // selected line\nbool editing = false;   // pushed on Speed: the knob changes the number\nbool ledOn = true;\nbool blinking = false;\nint speed = 2;          // blinks per second\nbool about = false;\nbool wasPressed = false;\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(CLK, INPUT);          // the KY-040 has its own 10k pull-ups on CLK and DT\n  pinMode(DT, INPUT);\n  pinMode(SW, INPUT_PULLUP);    // SW has none: use the internal one\n  pinMode(LED, OUTPUT);\n  attachInterrupt(digitalPinToInterrupt(CLK), readEncoder, FALLING);\n  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);\n  delay(100);                   // let the pull-ups settle before the first read\n}\n\nvoid loop() {\n  // 1. knob turns since last time (stop interrupts for a moment while we copy)\n  noInterrupts();\n  int s = steps;\n  steps = 0;\n  interrupts();\n  if (s != 0) {\n    if (editing) speed = constrain(speed + s, 1, 10);\n    else sel = (sel + s + 40) % 4;\n    Serial.print("turn ");\n    Serial.println(s);\n  }\n\n  // 2. push button: act once per press\n  bool pressed = digitalRead(SW) == LOW;\n  if (pressed && !wasPressed) {\n    if (about) about = false;\n    else if (editing) editing = false;\n    else if (sel == 0) ledOn = !ledOn;\n    else if (sel == 1) blinking = !blinking;\n    else if (sel == 2) editing = true;\n    else about = true;\n    Serial.println("push");\n  }\n  wasPressed = pressed;\n\n  // 3. the LED\n  bool on = ledOn && (!blinking || int(millis() * speed / 500) % 2 == 0);\n  digitalWrite(LED, on ? HIGH : LOW);\n\n  // 4. the screen\n  display.clearDisplay();\n  display.setTextColor(SSD1306_WHITE);\n  if (about) {\n    display.setTextSize(2);\n    display.setCursor(0, 0);\n    display.println("Fox9ner");\n    display.setTextSize(1);\n    display.setCursor(0, 24);\n    display.println("Rotary encoder menu");\n    display.println("with interrupts.");\n    display.println("");\n    display.println("Push to go back.");\n  } else {\n    display.setTextSize(1);\n    display.setCursor(0, 0);\n    display.print(editing ? "Turn: speed, push: OK" : "MENU  turn + push");\n    for (int i = 0; i < 4; i++) {\n      int y = 18 + i * 11;\n      if (i == sel) {\n        display.fillRect(0, y - 2, 128, 11, SSD1306_WHITE);\n        display.setTextColor(SSD1306_BLACK);\n      } else {\n        display.setTextColor(SSD1306_WHITE);\n      }\n      display.setCursor(4, y);\n      display.print(items[i]);\n      display.setCursor(84, y);\n      if (i == 0) display.print(ledOn ? "ON" : "OFF");\n      if (i == 1) display.print(blinking ? "ON" : "OFF");\n      if (i == 2) {\n        display.print(speed);\n        display.print(editing ? " /s <" : " /s");\n      }\n    }\n  }\n  display.display();\n  delay(20);\n}\n',
   oled: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\n#define SCREEN_WIDTH 128\n#define SCREEN_HEIGHT 64\nAdafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);   // SDA = GPIO21, SCL = GPIO22\n\nint graph[128];   // last 128 readings for the moving graph\n\nvoid setup() {\n  Serial.begin(115200);\n  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {\n    Serial.println("OLED not found");\n    for (;;);\n  }\n  for (int i = 0; i < 128; i++) graph[i] = 63;\n  display.clearDisplay();\n  display.setTextSize(2);\n  display.setTextColor(SSD1306_WHITE);\n  display.setCursor(4, 24);\n  display.println("Hello migo");\n  display.display();\n  delay(1500);\n}\n\nvoid loop() {\n  float v = analogRead(34) * 3.3 / 4095;\n\n  for (int i = 0; i < 127; i++) graph[i] = graph[i + 1];\n  graph[127] = 63 - int(v / 3.3 * 28);\n\n  display.clearDisplay();\n  display.setTextSize(1);\n  display.setCursor(0, 0);\n  display.print("Pot voltage");\n  display.setTextSize(2);\n  display.setCursor(0, 14);\n  display.print(v, 2);\n  display.print(" V");\n  display.drawRect(84, 16, 44, 10, SSD1306_WHITE);\n  display.fillRect(86, 18, int(v / 3.3 * 40), 6, SSD1306_WHITE);\n  display.drawFastHLine(0, 34, 128, SSD1306_WHITE);\n  for (int x = 1; x < 128; x++) display.drawLine(x - 1, graph[x - 1], x, graph[x], SSD1306_WHITE);\n  display.display();\n  delay(100);\n}\n',
@@ -1556,6 +1606,85 @@ export function example(name) {
     W(41, -1, 41, 1); W(43, 3, 43, 5); W(43, 5, 41, 5); W(41, 5, 41, 7); W(18, 1, 19, 1); W(19, 1, 19, 6); W(19, 6, 41, 6);
     // big load switch, scope (CH1 = Vout, CH2 = switch node)
     W(53, 3, 53, 4); W(57, -1, 57, 3); W(57, 3, 58, 3); W(23, -1, 23, 13); W(23, 13, 56, 13); W(56, 13, 56, 5); W(56, 5, 58, 5);
+  } else if (name === 'buck30') {
+    // 30 A synchronous buck 24 V → 12 V: TL494 (50 kHz PWM) → IR2104 half-bridge driver → 2× IRFB4110 (high side + low side) → L1 15 µH → COUT.
+    // f = 1 ÷ (RT × CT) = 1 ÷ (9.1 kΩ × 2.2 nF) = 49.95 kHz. Vout = 2.5 V × (1 + 38.3 k ÷ 10 k) = 12.08 V. Current limit = 40 mV ÷ 1 mΩ = 40 A.
+    // Start: POWER on (CIN charges through RPRE 0.68 Ω, peak 24 ÷ 0.7 ≈ 35 A), wait for V IN ≥ 23.3 V, then MAIN on (bypasses RPRE). Then BIG LOAD (30 A) or SHORT.
+    c.tdiv = 2e-5; c.speed = 0.001;            // 50 kHz: 1 ms of circuit time per second
+    const P = (t, x, y, rot, name, props, lbl) => { const p = addPart(c, t, x, y, rot); p.name = name; Object.assign(p.props, props); if (lbl) p.lbl = lbl; return p; };
+    // input: battery, precharge, bulk cap, 12 V rail
+    P('BAT', -30, -18, 1, 'VIN', { v: 24, rint: 0.02 }, [-8, 0]);
+    P('SW', -25, -20, 0, 'POWER', { on: false });
+    P('R', -17, -20, 0, 'RPRE', { r: 0.68, rating: 10 });
+    P('SW', -21, -24, 0, 'MAIN', { on: false });
+    P('C', -8, -18, 1, 'CIN', { c: 2200e-6, vmax: 35 });
+    P('VM', 44, -18, 1, 'V IN', {});
+    P('REG', 13, -11, 0, 'U3', { model: '7812' }, [-2.6, -5.4]);
+    P('C', 20, -13, 1, 'C12', { c: 47e-6, vmax: 25 });
+    P('R', 30, -13, 1, 'RB', { r: 10 }, [-3.65, -3]);
+    P('D', 30, -9, 1, 'DB', { model: '1N4148' }, [-9, 0]);
+    // controller
+    P('TL494', 8, 1, 0, 'U1', {});
+    P('C', 5, 10, 1, 'CT', { c: 2.2e-9, vmax: 50, polar: false }, [-3.5, 4.5]);
+    P('R', 7, 10, 1, 'RT', { r: 9100 });
+    P('R', -4, -10, 1, 'RD1', { r: 1000 });
+    P('R', -8, -8, 0, 'RD2', { r: 1000 }, [0, -2.9]);
+    P('R', -4, -6, 1, 'RIN', { r: 2700 });
+    P('C', -12, -1, 0, 'CF', { c: 22e-9, vmax: 16, polar: false }, [0, -0.9]);
+    P('R', -18, -1, 0, 'RF', { r: 47000 }, [0, -0.6]);
+    P('R', -8, 7, 1, 'RCL', { r: 47000 }, [-9, 0]);
+    P('C', -4, 9, 0, 'CCL', { c: 10e-9, vmax: 16, polar: false }, [-1.5, 0]);
+    P('R', -8, 15, 1, 'ROC1', { r: 124000 }, [-9, 0]);
+    P('R', -2, 15, 1, 'ROC2', { r: 1000 }, [-7, 3.5]);
+    P('R', 2, 18, 1, 'RSS', { r: 47000 });
+    P('C', 10, 18, 1, 'CSS', { c: 47e-9, vmax: 16, polar: false });
+    P('R', 20, 18, 1, 'RDT', { r: 470000 });
+    P('R', -26, 3, 1, 'ROCF', { r: 1000 });
+    P('C', -16, 3, 1, 'COCF', { c: 10e-9, vmax: 16, polar: false });
+    // driver + power stage
+    P('IR2104', 22, 0, 0, 'U2', {});
+    P('R', 14, 1, 1, 'RPD', { r: 10000 }, [-1.9, 4.6]);
+    P('C', 39, -3, 1, 'CB', { c: 1e-6, vmax: 25, polar: false });
+    P('NMOS', 35, -2, 0, 'Q1', { model: 'IRFB4110' });
+    P('NMOS', 35, 6, 0, 'Q2', { model: 'IRFB4110' }, [0, 1.5]);
+    P('L', 42, 2, 0, 'L1', { l: 15e-6, r: 0.002 });
+    // output, loads, current sense
+    P('R', 48, 4, 1, 'RESR', { r: 0.01 });
+    P('C', 48, 8, 1, 'COUT', { c: 2000e-6, vmax: 25 });
+    P('VM', 58, 4, 1, 'VOUT', {});
+    P('AM', 66, 2, 0, 'IOUT', {});
+    P('R', 72, 4, 1, 'LOAD', { r: 12, rating: 25 });
+    P('SW', 80, 4, 1, 'BIG LOAD', { on: false });
+    P('R', 80, 8, 1, 'R30', { r: 0.4, rating: 400 });
+    P('SW', 90, 4, 1, 'SHORT', { on: false });
+    P('R', 90, 8, 1, 'RSC', { r: 0.05, rating: 100 });
+    P('R', 98, 14, 1, 'RSENSE', { r: 0.001, rating: 3 });
+    P('R', 104, 4, 1, 'RS1', { r: 38300 });
+    P('R', 104, 8, 1, 'RS2', { r: 10000 });
+    for (const [x, y] of [[-30, -16], [-8, -16], [44, -16], [13, -9], [20, -11], [-10, -8], [5, 12], [7, 12], [9, 8], [11, 8], [-2, 17], [2, 20], [-16, 5], [14, 3], [16, 3], [36, 8], [48, 10], [58, 6], [98, 16], [104, 10]]) addPart(c, 'GND', x, y);
+    // power in: VIN → POWER → RPRE → VIN rail; MAIN bypasses RPRE
+    W(-30, -20, -27, -20); W(-23, -20, -19, -20); W(-30, -20, -30, -24); W(-30, -24, -23, -24); W(-19, -24, -12, -24); W(-12, -24, -12, -20); W(-15, -20, -12, -20); W(-12, -20, 44, -20);
+    W(10, -20, 10, -11); W(10, -11, 10, -6); W(36, -20, 36, -4);
+    // 12 V rail: U3 → C12, RB → DB (bootstrap), U2 VCC + SD, U1 C1
+    W(16, -11, 16, -15); W(16, -15, 30, -15); W(16, -11, 16, -4); W(16, -4, 16, -3); W(16, -3, 16, 1); W(16, 1, 18, 1); W(16, -3, 18, -3); W(13, -4, 16, -4); W(18, 3, 16, 3);
+    // PWM: U1 E1 → U2 IN (RPD pulls it low between pulses)
+    W(13, -1, 18, -1);
+    // gate drive + bootstrap
+    W(26, -2, 33, -2); W(26, 4, 28, 4); W(28, 4, 28, 6); W(28, 6, 33, 6);
+    W(26, 0, 27, 0); W(27, 0, 27, 2); W(27, 2, 36, 2); W(36, 0, 36, 2); W(36, 2, 36, 4); W(36, 2, 40, 2);
+    W(24, -7, 24, -5); W(24, -7, 39, -7); W(39, -7, 39, -5); W(39, -1, 39, 2);
+    // output rail + loads; RET → RSENSE → GND
+    W(44, 2, 64, 2); W(68, 2, 104, 2); W(72, 6, 72, 12); W(80, 10, 80, 12); W(90, 10, 90, 12); W(72, 12, 98, 12);
+    // REF: U1 REF → divider RD1/RD2 (2.5 V); down the far left to the current-limit divider and the soft start
+    W(6, -6, 6, -12); W(6, -12, -36, -12); W(-36, -12, -36, 28); W(-36, 28, 20, 28); W(-8, 17, -8, 28); W(10, 20, 10, 28); W(20, 20, 20, 28); W(-6, -8, -4, -8);
+    // voltage loop: INM, RF + CF from FB, SEN from RS1/RS2
+    W(3, -4, -20, -4); W(-20, -4, -20, -1); W(3, -1, -10, -1); W(-14, -1, -16, -1);
+    W(3, -3, -30, -3); W(-30, -3, -30, 32); W(-30, 32, 112, 32); W(112, 32, 112, 6); W(112, 6, 104, 6);
+    // current loop: CSF filter, RCL + CCL from FB to OCR, ROC1/ROC2 divider
+    W(3, 1, -26, 1); W(-8, -1, -8, 5); W(-8, 9, -6, 9); W(3, 3, -2, 3); W(-2, 3, -2, 13); W(-2, 13, -8, 13);
+    W(-26, 5, -26, 30); W(-26, 30, 72, 30); W(72, 30, 72, 12);
+    // soft start: DTC ← CSS ∥ RDT from REF, RSS to GND
+    W(3, 5, 2, 5); W(2, 5, 2, 16); W(2, 16, 20, 16);
   } else if (name === 'delay555') {
     // power-on delay: flip POWER on → C1 pulls TRIG/THR high (output LOW), R1 drains it → below 1/3 Vcc the output goes HIGH. t ≈ 1.1 × R1 × C1 ≈ 1.1 s
     c.tdiv = 0.2;
@@ -1745,6 +1874,32 @@ export function example(name) {
     W(4, -6, 10, -6); W(4, -3, 7, -3); W(7, -3, 7, -5); W(7, -5, 10, -5);
     W(10, -3, 9, -3); W(10, -4, 8, -4); W(8, -4, 8, 9); W(8, 9, -4, 9); W(-4, 9, -4, 7); W(-4, 6, -6, 6);
     W(-10, -4, -4, -4); W(4, 7, 6, 7); W(6, 7, 6, 11); W(6, 11, -14, 11); W(-14, 11, -14, 0); W(-14, 0, -8, 0); W(-8, 0, -8, -2);
+  } else if (name === 'ads1115') {
+    // 0–25 V voltage sensor: VIN + SET pot make the voltage to measure, R1 68 k / R2 10 k divide it into ADS1115 A0, C1 filters.
+    // The ESP32 reads the ADS1115 over I2C and shows it on the LCD (both on GPIO21 / 22). VM1 shows the real voltage to compare.
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.ads1115; m.props.run = true;
+    const d = addPart(c, 'LCD', 21, -8); d.name = 'LCD1';
+    const u = addPart(c, 'ADS1115', 19, 4); u.name = 'ADS1';
+    addPart(c, 'GND', 13, -6); addPart(c, 'GND', -6, 6); addPart(c, 'GND', 14, 6);
+    // SCL bus (x = 6) and SDA bus (x = 8)
+    W(4, -6, 6, -6); W(6, -9, 6, 1); W(6, -9, 14, -9); W(6, 1, 15, 1);
+    W(4, -3, 8, -3); W(8, -8, 8, 2); W(8, -8, 14, -8); W(8, 2, 15, 2);
+    // LCD: GND, 5 V from VIN around the top
+    W(14, -6, 13, -6);
+    W(14, -7, 11, -7); W(11, -7, 11, -11); W(11, -11, -8, -11); W(-8, -11, -8, 9); W(-8, 9, -4, 9); W(-4, 9, -4, 7);
+    W(-4, 6, -6, 6);
+    // ADS1115: VDD from 3V3, GND
+    W(4, 7, 12, 7); W(12, 7, 12, 5); W(12, 5, 15, 5); W(15, 6, 14, 6);
+    // A0 node: R1 from the pot wiper, R2 + C1 to GND
+    const r1 = addPart(c, 'R', 33, 2); r1.name = 'R1'; r1.props.r = 68000;
+    const r2 = addPart(c, 'R', 24, 5, 1); r2.name = 'R2'; r2.props.r = 10000;
+    const c1 = addPart(c, 'C', 29, 5, 1); c1.name = 'C1'; Object.assign(c1.props, { c: 100e-9, vmax: 50, polar: false });
+    W(23, 2, 31, 2); W(24, 2, 24, 3); W(29, 2, 29, 3); W(24, 7, 24, 9); W(29, 7, 29, 9); W(24, 9, 29, 9); addPart(c, 'GND', 26, 9);
+    // the voltage to measure: 24 V supply + SET pot (wiper = 0…24 V), VM1 shows it
+    const pot = addPart(c, 'POT', 40, 2, 3); pot.name = 'SET'; pot.props.pos = 50;
+    const b = addPart(c, 'BAT', 50, 2, 1); b.name = 'VIN'; b.props.v = 24;
+    const vm = addPart(c, 'VM', 38, 7, 1); vm.name = 'VM1';
+    W(35, 2, 38, 2); W(40, 0, 50, 0); W(40, 4, 50, 4); addPart(c, 'GND', 46, 4); W(38, 2, 38, 5); W(38, 9, 38, 10); addPart(c, 'GND', 38, 10);
   } else if (name === 'oled') {
     // ESP32 + OLED 128×64 SSD1306 I2C (SDA = GPIO21, SCL = GPIO22): text, a bar and a moving graph of the pot voltage
     const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.oled; m.props.run = true;

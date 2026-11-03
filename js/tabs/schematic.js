@@ -107,7 +107,7 @@ export function schematicTab(root) {
     for (const p of c.parts) {
       if (!S.isBoard(p.type) || !p.props.run || !p.props.code) continue;
       p.props.pins = {};                         // a fresh boot: every pin is an input until the code says otherwise
-      try { sketches.set(p.id, createRuntime(p, p.props.code, { t: () => sim.t, v: (n) => boardV(p, n), pins: p.props.pins, dht: (n) => dhtAt(p, n), echo: (n) => echoAt(p, n), keypad: (rows, cols) => keyAt(p, rows, cols) })); }
+      try { sketches.set(p.id, createRuntime(p, p.props.code, { t: () => sim.t, v: (n) => boardV(p, n), pins: p.props.pins, dht: (n) => dhtAt(p, n), echo: (n) => echoAt(p, n), keypad: (rows, cols) => keyAt(p, rows, cols), ads: (addr) => adsAt(p, addr) })); }
       catch (e) { sketches.set(p.id, { err: e.message, lines: [], step() { } }); }
     }
   }
@@ -154,6 +154,21 @@ export function schematicTab(root) {
     const r = res?.ok ? res.parts.get(d.id) : null; if (!r || r.v < 3) return null;
     return { t: d.props.temp, h: d.props.hum };
   }
+  // ADS1115 on this board's I2C bus (ESP32 GPIO21 / 22, UNO A4 / A5) at that address, powered
+  function i2cOn(nl, b, p, sdaI, sclI) {
+    const [a1, a2] = b.type === 'ESP32' ? ['D21', 'D22'] : ['A4', 'A5'], sda = boardNet(nl, b, a1), scl = boardNet(nl, b, a2);
+    return sda != null && sda >= 0 && pinNetOf(nl, p, sdaI) === sda && pinNetOf(nl, p, sclI) === scl;
+  }
+  function adsAt(b, addr) {
+    const nl = nets(); if (!nl) return null;
+    for (const p of c.parts) {
+      if (p.type !== 'ADS1115' || !i2cOn(nl, b, p, 3, 2)) continue;
+      const r = res?.ok ? res.parts.get(p.id) : null;
+      if (r && r.v >= 2 && r.addr === addr) return { vdd: r.v, ain: r.ain };
+    }
+    return null;
+  }
+  function adsBoard(p) { const nl = nets(); return nl ? c.parts.find(b => S.isBoard(b.type) && i2cOn(nl, b, p, 3, 2)) ?? null : null; }
   function echoAt(b, name) {
     const nl = nets(), bn = boardNet(nl, b, name); if (bn == null || bn < 0) return null;
     const u = c.parts.find(p => p.type === 'HCSR04' && pinNetOf(nl, p, 2) === bn); if (!u) return null;
@@ -410,7 +425,7 @@ export function schematicTab(root) {
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { LCD: 'LCD I2C', OLED: 'OLED I2C', ENC: 'Encoder', SR595: '74HC595', TL494: 'TL494 PWM', LM2596: 'LM2596', IR2104: 'IR2104', RMOD: 'Relay module', SEG7: '7-segment', DHT: 'DHT22', HCSR04: 'HC-SR04', LDR: 'LDR', PIR: 'PIR', KEYPAD: 'Keypad', BUZZER: 'Buzzer', LOCK: 'Door lock', XFMR: 'Transformer', R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { LCD: 'LCD I2C', OLED: 'OLED I2C', ADS1115: 'ADS1115', ENC: 'Encoder', SR595: '74HC595', TL494: 'TL494 PWM', LM2596: 'LM2596', IR2104: 'IR2104', RMOD: 'Relay module', SEG7: '7-segment', DHT: 'DHT22', HCSR04: 'HC-SR04', LDR: 'LDR', PIR: 'PIR', KEYPAD: 'Keypad', BUZZER: 'Buzzer', LOCK: 'Door lock', XFMR: 'Transformer', R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -739,6 +754,7 @@ export function schematicTab(root) {
       case 'PIR': return q.motion ? 'MOTION' : 'quiet';
       case 'LCD': return '0x' + (q.addr ?? 0x27).toString(16).toUpperCase();
       case 'OLED': return '0x' + (q.addr ?? 0x3C).toString(16).toUpperCase();
+      case 'ADS1115': { const r = res?.ok ? res.parts.get(p.id) : null; return r ? '0x' + r.addr.toString(16).toUpperCase() : ''; }
       case 'ENC': return 'click ' + (ENCS.get(p.id)?.pos ?? 0);
       case 'SR595': return q.model ?? '74HC595';
       case 'TL494': return q.model ?? 'TL494C';
@@ -1472,6 +1488,7 @@ export function schematicTab(root) {
           el('button', { class: 'btn', type: 'button', text: 'Right ⟳', onclick: () => encTurn(p, 1) }));
         f.append(row, note('Pins CLK, DT, SW, +, GND. + to 3.3 V (ESP32) or 5 V (UNO). CLK and DT have 10 kΩ pull-ups on the module; SW has none: use INPUT_PULLUP. One click: CLK and DT both go LOW and back, CLK first when you turn right. Tap the knob on the drawing too: left half ⟲, right half ⟳, middle = push.')); break;
       }
+      case 'ADS1115': f.append(note('Header VDD, GND, SCL, SDA, ADDR, ALRT, A0–A3 (same order as the module). VDD 2–5.5 V: with an ESP32 use <b>3.3 V</b> (the module\'s 10 kΩ pull-ups then keep SDA / SCL at 3.3 V). ESP32: SDA = GPIO21, SCL = GPIO22. UNO: SDA = A4, SCL = A5. Address: ADDR open or to GND = 0x48, to VDD = 0x49, to SDA = 0x4A, to SCL = 0x4B. An input must never go above VDD + 0.3 V or below −0.3 V: use a divider for bigger voltages. Read it with the Adafruit_ADS1X15 library (see 💻 Code → examples).')); break;
       case 'OLED': f.append(choice('I2C address', String(q.addr ?? 0x3C), [['60', '0x3C (most 0.96" modules)'], ['61', '0x3D (address jumper moved)']], v => { q.addr = +v; }),
         choice('Color', q.color ?? 'white', [['white', 'white'], ['blue', 'blue'], ['yb', 'yellow top 16 rows + blue']], v => { q.color = v; }),
         note('Header GND, VCC, SCL, SDA (check the print on your module: some have VCC and GND swapped). 3.3 V or 5 V. ESP32: SDA = GPIO21, SCL = GPIO22. UNO: SDA = A4, SCL = A5. Pictures come from a running sketch (Adafruit_SSD1306 library), see 💻 Code on the board.')); break;
@@ -1722,6 +1739,24 @@ export function schematicTab(root) {
         vals.push(['Clicks', String(ENCS.get(p.id)?.pos ?? 0), true], ['CLK', si(r.vclk, 'V'), true], ['DT', si(r.vdt, 'V'), true], ['SW', si(r.vsw, 'V')], ['Supply', si(r.v, 'V')]);
         if (r.v < 2.5) warn.push(['bad', 'No power: connect + and GND (the CLK / DT pull-ups need it).']);
         L.push('Read it with an interrupt: attachInterrupt(digitalPinToInterrupt(CLK), isr, FALLING); in the ISR, DT HIGH = turned right, LOW = turned left.', 'UNO: only D2 and D3 have interrupts, so CLK goes on D2 (or D3).');
+        break;
+      }
+      case 'ADS1115': {
+        const b = adsBoard(p), gains = [[6.144, 'GAIN_TWOTHIRDS'], [4.096, 'GAIN_ONE'], [2.048, 'GAIN_TWO'], [1.024, 'GAIN_FOUR'], [0.512, 'GAIN_EIGHT'], [0.256, 'GAIN_SIXTEEN']];
+        vals.push(['Supply', si(r.v, 'V'), true], ['Address', '0x' + r.addr.toString(16).toUpperCase(), true]);
+        r.ain.forEach((v, k) => vals.push(['A' + k, si(v, 'V', 4)]));
+        if (r.v < 2) warn.push(['bad', 'No power: connect VDD (3.3 V from the ESP32, or 5 V) and GND.']);
+        else if (r.v > 5.5) warn.push(['bad', `${si(r.v, 'V')} on VDD: 5.5 V is the maximum.`]);
+        r.ain.forEach((v, k) => {
+          if (v > r.v + 0.3 && r.v >= 2) warn.push(['bad', `A${k} is ${si(v, 'V', 3)}, above VDD + 0.3 V: the protection diode conducts and the reading is wrong (and the chip can be damaged). Divide it down.`]);
+          else if (v < -0.3) warn.push(['bad', `A${k} is ${si(v, 'V', 3)}: below −0.3 V damages the input.`]);
+        });
+        if (!b) warn.push(['warn', 'SDA / SCL not wired to a board\'s I2C pins (ESP32 GPIO21 / 22, UNO A4 / A5).']);
+        else if (b.type === 'ESP32' && r.v > 3.6) warn.push(['warn', `Powered from ${si(r.v, 'V')}: its pull-ups put that on the ESP32 SDA / SCL pins (3.3 V max). Power it from 3V3.`]);
+        else warn.push(['ok', `On ${b.name}'s I2C bus at 0x${r.addr.toString(16).toUpperCase()}: begin(0x${r.addr.toString(16).toUpperCase()}).`]);
+        const top = Math.max(...r.ain.map(Math.abs)), gBest = [...gains].reverse().find(([fs]) => fs >= Math.min(top * 1.1, r.v + 0.3)) ?? gains[0];
+        if (top > 0.001) L.push(`Best gain for ${si(top, 'V', 3)}: ${gBest[1]} (±${gBest[0]} V, 1 bit = ${si(gBest[0] / 32768, 'V', 3)}).`);
+        L.push('Counts → volts: volts = counts × full-scale ÷ 32768 (ads.computeVolts(counts) does it). Full scale is set by setGain(); the input still can\'t go above VDD.');
         break;
       }
       case 'OLED': {
@@ -2007,7 +2042,7 @@ export function schematicTab(root) {
   globalThis.__schDbg = { c: () => c, res: () => res, sim, sketches };     // for automated tests
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; probes = []; if (S.isDynamic(c)) { autoTimeQuiet(); autoSpeed(); } if (!running) msg += ' Tap ▶ Run to simulate.'; hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['oled', '💻 ESP32 + OLED 128×64 SSD1306: text, bar + live graph of the pot (code runs)'], ['encoder', '🎛 Rotary encoder menu: ESP32 interrupt + OLED + LED (turn + push the knob)'], ['sr595sig', '📈 74HC595 by hand: signal generators feed SER (data) + SRCLK (clock), 8 LEDs'], ['relay10', '🔌 10 relay modules on 3 wires: ESP32 + two 74HC595 in a chain (type commands in Serial)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM'], ['tl494pwm', '📈 TL494 PWM: 10 kHz lamp dimmer with a MOSFET (turn DUTY)'], ['tl494inv', '📈 TL494 push-pull inverter 12 V → 220 V AC 50 Hz (turn POWER)'], ['bms48', '🔋 48 V protector: 2 × 24 V LiFePO4, whole-pack low / high cut-off (relay)'], ['bms48b', '🔋 48 V BMS: 2 × 24 V LiFePO4, each battery watched + balancing'], ['lm2596', '📈 LM2596 buck module: 24 V → 5 V 3 A (turn SET, flip BIG LOAD / RUN)'], ['buck30', '📈 30 A synchronous buck 24 V → 12 V: TL494 + IR2104 + 2 × IRFB4110 (POWER, then MAIN)']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['oled', '💻 ESP32 + OLED 128×64 SSD1306: text, bar + live graph of the pot (code runs)'], ['ads1115', '💻 ADS1115 16-bit voltage sensor 0–25 V: ESP32 + LCD (turn SET)'], ['encoder', '🎛 Rotary encoder menu: ESP32 interrupt + OLED + LED (turn + push the knob)'], ['sr595sig', '📈 74HC595 by hand: signal generators feed SER (data) + SRCLK (clock), 8 LEDs'], ['relay10', '🔌 10 relay modules on 3 wires: ESP32 + two 74HC595 in a chain (type commands in Serial)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM'], ['tl494pwm', '📈 TL494 PWM: 10 kHz lamp dimmer with a MOSFET (turn DUTY)'], ['tl494inv', '📈 TL494 push-pull inverter 12 V → 220 V AC 50 Hz (turn POWER)'], ['bms48', '🔋 48 V protector: 2 × 24 V LiFePO4, whole-pack low / high cut-off (relay)'], ['bms48b', '🔋 48 V BMS: 2 × 24 V LiFePO4, each battery watched + balancing'], ['lm2596', '📈 LM2596 buck module: 24 V → 5 V 3 A (turn SET, flip BIG LOAD / RUN)'], ['buck30', '📈 30 A synchronous buck 24 V → 12 V: TL494 + IR2104 + 2 × IRFB4110 (POWER, then MAIN)']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -2228,6 +2263,15 @@ function symbol(ctx, p, r, g) {
       const lw = ctx.lineWidth; ctx.lineWidth = 0.22; ctx.strokeStyle = '#FFD54F'; L(-0.6 + 0.35 * Math.sin(ang), -0.35 * Math.cos(ang), -0.6 + 1.25 * Math.sin(ang), -1.25 * Math.cos(ang)); ctx.lineWidth = lw; ctx.strokeStyle = C.part;
       ['CLK', 'DT', 'SW', '+', 'GND'].forEach((n, k) => T(n, 2.15, -2 + k, 0.34, C.dim));
       if (q._a || q._b) T((q._a ? 'A' : '') + (q._b ? 'B' : ''), -0.6, 2.25, 0.36, '#FFD54F');
+      break;
+    }
+    case 'ADS1115': {
+      ctx.fillStyle = '#5B2C83'; ctx.fillRect(-3.4, -3.7, 6.8, 6.4); ctx.strokeRect(-3.4, -3.7, 6.8, 6.4);
+      ctx.fillStyle = '#20232A'; ctx.fillRect(-1.1, -1.1, 2.2, 1.6);
+      ctx.fillStyle = '#9AA7B3'; for (let k = 0; k < 5; k++) { ctx.fillRect(-1.45, -0.95 + k * 0.3, 0.35, 0.12); ctx.fillRect(1.1, -0.95 + k * 0.3, 0.35, 0.12); }
+      [[-3, 'SCL'], [-2, 'SDA'], [-1, 'ALRT'], [0, 'ADDR'], [1, 'VDD'], [2, 'GND']].forEach(([y, n]) => { L(-4, y, -3.4, y); T(n, -2.45, y, 0.36, '#E1C8F5'); });
+      [-2, -1, 0, 1].forEach((y, k) => { L(3.4, y, 4, y); T('A' + k, 2.75, y, 0.38, '#E1C8F5'); });
+      T('ADS1115', 0, 1.3, 0.42, '#FFFFFF'); T('16-bit ADC', 0, 1.9, 0.32, '#C9B3DD');
       break;
     }
     case 'OLED': {
@@ -2477,6 +2521,6 @@ function arrowHead(ctx, x1, y1, x2, y2, f) {
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, OLED: 6, ENC: 7, SR595: 4.5, TL494: 4, LM2596: 8, IR2104: 6, RMOD: 7, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10, KEYPAD: 5.5, BUZZER: 14, LOCK: 14 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, OLED: 6, ADS1115: 6, ENC: 7, SR595: 4.5, TL494: 4, LM2596: 8, IR2104: 6, RMOD: 7, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10, KEYPAD: 5.5, BUZZER: 14, LOCK: 14 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

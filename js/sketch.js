@@ -4,9 +4,17 @@
 import { BOARDS } from './sch-core.js';
 import { makeOled, OLED_CONST } from './oled.js';
 
+// ADS1X15 gains (library values) → full-scale volts; MUX values for startADCReading
+const ADS_CONST = { GAIN_TWOTHIRDS: 0x0000, GAIN_ONE: 0x0200, GAIN_TWO: 0x0400, GAIN_FOUR: 0x0600, GAIN_EIGHT: 0x0800, GAIN_SIXTEEN: 0x0A00,
+  RATE_ADS1115_8SPS: 0x0000, RATE_ADS1115_16SPS: 0x0020, RATE_ADS1115_32SPS: 0x0040, RATE_ADS1115_64SPS: 0x0060, RATE_ADS1115_128SPS: 0x0080, RATE_ADS1115_250SPS: 0x00A0, RATE_ADS1115_475SPS: 0x00C0, RATE_ADS1115_860SPS: 0x00E0,
+  RATE_ADS1015_128SPS: 0x0000, RATE_ADS1015_1600SPS: 0x0080, RATE_ADS1015_3300SPS: 0x00C0,
+  ADS1X15_REG_CONFIG_MUX_DIFF_0_1: 0x0000, ADS1X15_REG_CONFIG_MUX_DIFF_0_3: 0x1000, ADS1X15_REG_CONFIG_MUX_DIFF_1_3: 0x2000, ADS1X15_REG_CONFIG_MUX_DIFF_2_3: 0x3000,
+  ADS1X15_REG_CONFIG_MUX_SINGLE_0: 0x4000, ADS1X15_REG_CONFIG_MUX_SINGLE_1: 0x5000, ADS1X15_REG_CONFIG_MUX_SINGLE_2: 0x6000, ADS1X15_REG_CONFIG_MUX_SINGLE_3: 0x7000 };
+const ADS_FS = { 0x0000: 6.144, 0x0200: 4.096, 0x0400: 2.048, 0x0600: 1.024, 0x0800: 0.512, 0x0A00: 0.256 };
+const ADS_MUX = { 0x0000: [0, 1], 0x1000: [0, 3], 0x2000: [1, 3], 0x3000: [2, 3], 0x4000: [0], 0x5000: [1], 0x6000: [2], 0x7000: [3] };
 const TYPES = 'int|long|short|float|double|bool|boolean|byte|char|word|size_t|String|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t';
 const API_NAMES = ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'analogReadMilliVolts', 'ledcSetup', 'ledcAttachPin', 'ledcAttach', 'ledcWrite', 'ledcDetachPin', 'ledcDetach',
-  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'DHT', 'DHT11', 'DHT22', 'DHT21', 'pulseIn', 'pulseInLong', 'isnan', 'NAN', 'Keypad', 'makeKeymap', 'NO_KEY', 'Adafruit_SSD1306', ...Object.keys(OLED_CONST), 'attachInterrupt', 'detachInterrupt', 'digitalPinToInterrupt', 'interrupts', 'noInterrupts', 'shiftOut', 'MSBFIRST', 'LSBFIRST', 'RISING', 'FALLING', 'CHANGE', 'NOT_AN_INTERRUPT', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
+  'tone', 'noTone', 'dacWrite', 'dacDisable', 'analogReadResolution', 'analogWriteResolution', 'analogSetAttenuation', 'analogWriteFrequency', 'millis', 'micros', 'Serial', 'Servo', 'LiquidCrystal_I2C', 'Wire', 'DHT', 'DHT11', 'DHT22', 'DHT21', 'pulseIn', 'pulseInLong', 'isnan', 'NAN', 'Keypad', 'makeKeymap', 'NO_KEY', 'Adafruit_SSD1306', ...Object.keys(OLED_CONST), 'Adafruit_ADS1115', 'Adafruit_ADS1015', ...Object.keys(ADS_CONST), 'attachInterrupt', 'detachInterrupt', 'digitalPinToInterrupt', 'interrupts', 'noInterrupts', 'shiftOut', 'MSBFIRST', 'LSBFIRST', 'RISING', 'FALLING', 'CHANGE', 'NOT_AN_INTERRUPT', 'map', 'constrain', 'random', 'randomSeed', 'abs', 'min', 'max', 'pow', 'sqrt', 'sq', 'sin', 'cos', 'tan', 'floor', 'ceil', 'round',
   'HIGH', 'LOW', 'INPUT', 'OUTPUT', 'INPUT_PULLUP', 'INPUT_PULLDOWN', 'LED_BUILTIN', 'PI', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'DEC', 'HEX', 'BIN', '__ops', 'int', 'float', 'yieldNow', '__no'];
 
 // find the ')' matching the '(' at i (skips strings / chars)
@@ -89,6 +97,7 @@ export function transpile(src) {
   s = s.replace(/^\s*#\s*define\s+(\w+)\s+(.+)$/gm, 'const $1 = $2;');
   s = s.replace(/\bLiquidCrystal_I2C\s+(\w+)\s*\(([^)]*)\)\s*;/g, 'let $1 = new LiquidCrystal_I2C($2);');
   s = s.replace(/\bDHT\s+(\w+)\s*\(([^)]*)\)\s*;/g, 'let $1 = new DHT($2);');
+  s = s.replace(/\b(Adafruit_ADS1[01]15)\s+(\w+)\s*(?:\(\s*\))?\s*;/g, 'let $2 = new $1();');
   s = s.replace(/\bAdafruit_SSD1306\s+(\w+)\s*\(([^)]*)\)\s*;/g, (_, n, a) => `let ${n} = new Adafruit_SSD1306(${a.replace(/&/g, '')});`).replace(/\bAdafruit_SSD1306\s+(\w+)\s*;/g, 'let $1 = new Adafruit_SSD1306();');
   s = s.replace(/\b(?:IRAM_ATTR|ICACHE_RAM_ATTR|ARDUINO_ISR_ATTR)\b/g, '');
   s = s.replace(/\bPROGMEM\b/g, '').replace(/\bstatic\s+(?=const\b)/g, '');
@@ -203,6 +212,30 @@ export function createRuntime(p, src, host) {
     getKey() { const k = host.keypad?.(this.rows, this.cols); if (!k) return ''; const ch = this.map?.[k.r]?.[k.c] ?? ''; this.last = ch; return ch; }
     getState() { return 0; } setDebounceTime() { } setHoldTime() { } isPressed(ch) { return this.last === ch; }
   }
+  // ADS1115 / ADS1015 (Adafruit_ADS1X15 library): reads the module wired to this board's SDA / SCL at that address
+  class Adafruit_ADS1X15 {
+    constructor(bits) { this.bits = bits; this.gain = ADS_CONST.GAIN_TWOTHIRDS; this.addr = 0x48; this.rate = 0; this.last = 0; }
+    begin(addr = 0x48) { this.addr = addr; return !!host.ads?.(addr); }
+    setGain(g) { this.gain = g; } getGain() { return this.gain; }
+    setDataRate(r) { this.rate = r; } getDataRate() { return this.rate; }
+    fs() { return ADS_FS[this.gain] ?? 6.144; }
+    conv(pos, neg) {
+      const d = host.ads?.(this.addr);
+      if (!d) return this.bits === 16 ? -1 : -1;               // no answer on the bus: the real library returns garbage too
+      const pin = (k) => Math.max(-0.3, Math.min(d.vdd + 0.3, d.ain[k]));   // inputs are clamped by the chip's protection diodes
+      const v = pin(pos) - (neg == null ? 0 : pin(neg)), full = 2 ** (this.bits - 1);
+      this.last = Math.max(-full, Math.min(full - 1, Math.round(v / this.fs() * full)));
+      return this.last;
+    }
+    readADC_SingleEnded(ch) { if (!(ch >= 0 && ch <= 3)) throw new Error(`readADC_SingleEnded(${ch}): channel must be 0–3`); return this.conv(ch); }
+    readADC_Differential_0_1() { return this.conv(0, 1); } readADC_Differential_0_3() { return this.conv(0, 3); }
+    readADC_Differential_1_3() { return this.conv(1, 3); } readADC_Differential_2_3() { return this.conv(2, 3); }
+    computeVolts(counts) { return counts * this.fs() / 2 ** (this.bits - 1); }
+    startADCReading(mux) { const m = ADS_MUX[mux]; if (m) this.conv(m[0], m[1]); } conversionComplete() { return true; } getLastConversionResults() { return this.last; }
+    startComparator_SingleEnded() { } startComparator_Differential() { }
+  }
+  class Adafruit_ADS1115 extends Adafruit_ADS1X15 { constructor() { super(16); } }
+  class Adafruit_ADS1015 extends Adafruit_ADS1X15 { constructor() { super(12); } }
   const Wire = { begin() { }, setClock() { }, beginTransmission() { }, endTransmission: () => 0, write() { }, requestFrom: () => 0, available: () => 0, read: () => 0 };
   const api = {
     HIGH: 1, LOW: 0, INPUT: 'in', OUTPUT: 'out', INPUT_PULLUP: 'pu', INPUT_PULLDOWN: 'pd', LED_BUILTIN: esp ? 2 : 13, PI: Math.PI, DEC: 10, HEX: 16, BIN: 2,
@@ -253,7 +286,7 @@ export function createRuntime(p, src, host) {
     detachInterrupt(num) { isrs.delete(esp ? PN(num) : num === 0 ? 'D2' : 'D3'); },
     interrupts() { intOn = true; }, noInterrupts() { intOn = false; },
     __no: (n) => () => { throw new Error(`${n}() is not an Arduino function` + (n === 'print' || n === 'println' ? `. Use Serial.${n}() or lcd.${n}().` : '.')); },
-    Keypad, makeKeymap: (m) => m, NO_KEY: '', Adafruit_SSD1306, ...OLED_CONST,
+    Keypad, makeKeymap: (m) => m, NO_KEY: '', Adafruit_SSD1306, ...OLED_CONST, Adafruit_ADS1115, Adafruit_ADS1015, ...ADS_CONST,
     Servo, LiquidCrystal_I2C, Wire, DHT, DHT11: 11, DHT22: 22, DHT21: 21, pulseIn, pulseInLong: pulseIn, isnan: Number.isNaN, NAN: NaN, yieldNow: 0,
   };
   let main;
@@ -305,6 +338,8 @@ export const EXAMPLES = {
     uno: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\n#define SCREEN_WIDTH 128\n#define SCREEN_HEIGHT 64\nAdafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);   // SDA = A4, SCL = A5\n\nint graph[128];   // last 128 readings for the moving graph\n\nvoid setup() {\n  Serial.begin(9600);\n  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {\n    Serial.println("OLED not found");\n    for (;;);\n  }\n  for (int i = 0; i < 128; i++) graph[i] = 63;\n  display.clearDisplay();\n  display.setTextSize(2);\n  display.setTextColor(SSD1306_WHITE);\n  display.setCursor(4, 24);\n  display.println("Hello migo");\n  display.display();\n  delay(1500);\n}\n\nvoid loop() {\n  float v = analogRead(A0) * 5.0 / 1023;\n\n  for (int i = 0; i < 127; i++) graph[i] = graph[i + 1];\n  graph[127] = 63 - int(v / 5.0 * 28);\n\n  display.clearDisplay();\n  display.setTextSize(1);\n  display.setCursor(0, 0);\n  display.print("Pot voltage");\n  display.setTextSize(2);\n  display.setCursor(0, 14);\n  display.print(v, 2);\n  display.print(" V");\n  display.drawRect(84, 16, 44, 10, SSD1306_WHITE);\n  display.fillRect(86, 18, int(v / 5.0 * 40), 6, SSD1306_WHITE);\n  display.drawFastHLine(0, 34, 128, SSD1306_WHITE);\n  for (int x = 1; x < 128; x++) display.drawLine(x - 1, graph[x - 1], x, graph[x], SSD1306_WHITE);\n  display.display();\n  delay(100);\n}\n' },
   lcd: { name: 'LCD 16x2 I2C: show the pot voltage', esp: '#include <Wire.h>\n#include <LiquidCrystal_I2C.h>\n\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // SDA = GPIO21, SCL = GPIO22\n\nvoid setup() {\n  lcd.init();\n  lcd.backlight();\n  lcd.print("Hello migo!");\n}\n\nvoid loop() {\n  float v = analogRead(34) * 3.3 / 4095;\n  lcd.setCursor(0, 1);\n  lcd.print("Pot: ");\n  lcd.print(v, 2);\n  lcd.print(" V   ");\n  delay(200);\n}\n',
     uno: '#include <Wire.h>\n#include <LiquidCrystal_I2C.h>\n\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // SDA = A4, SCL = A5\n\nvoid setup() {\n  lcd.init();\n  lcd.backlight();\n  lcd.print("Hello migo!");\n}\n\nvoid loop() {\n  float v = analogRead(A0) * 5.0 / 1023;\n  lcd.setCursor(0, 1);\n  lcd.print("A0: ");\n  lcd.print(v, 2);\n  lcd.print(" V   ");\n  delay(200);\n}\n' },
+  ads1115: { name: 'ADS1115 16-bit voltage sensor 0–25 V (+ LCD)', esp: '// 0-25 V voltage sensor: divider R1 68k / R2 10k -> ADS1115 A0 (16-bit), ESP32 reads it over I2C, LCD shows it\n#include <Wire.h>\n#include <Adafruit_ADS1X15.h>\n#include <LiquidCrystal_I2C.h>\n\nAdafruit_ADS1115 ads;                 // ADDR open = 0x48 (pull-down on the module)\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // both on SDA = GPIO21, SCL = GPIO22\n\nconst float R1 = 68000.0;             // top resistor: from the voltage you measure to A0\nconst float R2 = 10000.0;             // bottom resistor: A0 to GND\nconst float RATIO = (R1 + R2) / R2;   // 7.8: 25 V in -> 3.2 V on A0 (below VDD 3.3 V)\nconst float CAL = 1.000;              // fine trim: real volts / shown volts (measure once with a good meter)\n\nvoid setup() {\n  Serial.begin(115200);\n  lcd.init();\n  lcd.backlight();\n  if (!ads.begin(0x48)) {\n    Serial.println(\"ADS1115 not found! Check VDD, GND, SDA, SCL.\");\n    lcd.print(\"ADS1115 missing\");\n    while (true) {\n      delay(100);\n    }\n  }\n  ads.setGain(GAIN_ONE);              // +-4.096 V full scale, 1 bit = 0.125 mV on A0\n  lcd.print(\"Voltage sensor\");\n}\n\nvoid loop() {\n  // average 8 readings: less noise on a real board\n  long sum = 0;\n  for (int i = 0; i < 8; i++) sum += ads.readADC_SingleEnded(0);\n  int16_t raw = sum / 8;\n\n  float vA0 = ads.computeVolts(raw);    // volts on the A0 pin\n  float vin = vA0 * RATIO * CAL;        // volts before the divider\n\n  Serial.print(\"raw \");\n  Serial.print(raw);\n  Serial.print(\"  A0 \");\n  Serial.print(vA0, 4);\n  Serial.print(\" V  input \");\n  Serial.print(vin, 3);\n  Serial.println(\" V\");\n\n  lcd.setCursor(0, 0);\n  lcd.print(\"A0  \");\n  lcd.print(vA0, 4);\n  lcd.print(\" V     \");\n  lcd.setCursor(0, 1);\n  lcd.print(\"VIN \");\n  lcd.print(vin, 2);\n  lcd.print(\" V     \");\n  delay(250);\n}\n',
+    uno: '// 0-25 V voltage sensor: divider R1 68k / R2 10k -> ADS1115 A0 (16-bit), ESP32 reads it over I2C, LCD shows it\n#include <Wire.h>\n#include <Adafruit_ADS1X15.h>\n#include <LiquidCrystal_I2C.h>\n\nAdafruit_ADS1115 ads;                 // ADDR open = 0x48 (pull-down on the module)\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // both on SDA = A4, SCL = A5\n\nconst float R1 = 30000.0;             // top resistor: from the voltage you measure to A0\nconst float R2 = 7500.0;              // bottom resistor: A0 to GND\nconst float RATIO = (R1 + R2) / R2;   // 5: 25 V in -> 5 V on A0 (VDD 5 V)\nconst float CAL = 1.000;              // fine trim: real volts / shown volts (measure once with a good meter)\n\nvoid setup() {\n  Serial.begin(9600);\n  lcd.init();\n  lcd.backlight();\n  if (!ads.begin(0x48)) {\n    Serial.println(\"ADS1115 not found! Check VDD, GND, SDA, SCL.\");\n    lcd.print(\"ADS1115 missing\");\n    while (true) {\n      delay(100);\n    }\n  }\n  ads.setGain(GAIN_TWOTHIRDS);        // +-6.144 V full scale, 1 bit = 0.1875 mV on A0\n  lcd.print(\"Voltage sensor\");\n}\n\nvoid loop() {\n  // average 8 readings: less noise on a real board\n  long sum = 0;\n  for (int i = 0; i < 8; i++) sum += ads.readADC_SingleEnded(0);\n  int16_t raw = sum / 8;\n\n  float vA0 = ads.computeVolts(raw);    // volts on the A0 pin\n  float vin = vA0 * RATIO * CAL;        // volts before the divider\n\n  Serial.print(\"raw \");\n  Serial.print(raw);\n  Serial.print(\"  A0 \");\n  Serial.print(vA0, 4);\n  Serial.print(\" V  input \");\n  Serial.print(vin, 3);\n  Serial.println(\" V\");\n\n  lcd.setCursor(0, 0);\n  lcd.print(\"A0  \");\n  lcd.print(vA0, 4);\n  lcd.print(\" V     \");\n  lcd.setCursor(0, 1);\n  lcd.print(\"VIN \");\n  lcd.print(vin, 2);\n  lcd.print(\" V     \");\n  delay(250);\n}\n' },
   thermo: { name: 'DHT22 thermostat: fan on above 30 °C', esp: '#include <DHT.h>\n\nDHT dht(4, DHT22);        // DATA on GPIO4\nconst int FAN = 23;\n\nvoid setup() {\n  Serial.begin(115200);\n  dht.begin();\n  pinMode(FAN, OUTPUT);\n}\n\nvoid loop() {\n  float t = dht.readTemperature();\n  float h = dht.readHumidity();\n  if (isnan(t)) {\n    Serial.println("DHT not found!");\n    delay(1000);\n    return;\n  }\n  digitalWrite(FAN, t > 30 ? HIGH : LOW);\n  Serial.printf("%.1f C  %.0f %%  fan %s\\n", t, h, t > 30 ? "ON" : "OFF");\n  delay(1000);\n}\n',
     uno: '#include <DHT.h>\n\nDHT dht(2, DHT22);        // DATA on D2\nconst int FAN = 13;\n\nvoid setup() {\n  Serial.begin(9600);\n  dht.begin();\n  pinMode(FAN, OUTPUT);\n}\n\nvoid loop() {\n  float t = dht.readTemperature();\n  float h = dht.readHumidity();\n  if (isnan(t)) {\n    Serial.println("DHT not found!");\n    delay(1000);\n    return;\n  }\n  digitalWrite(FAN, t > 30 ? HIGH : LOW);\n  Serial.print(t, 1); Serial.print(" C  ");\n  Serial.print(h, 0); Serial.println(" %");\n  delay(1000);\n}\n' },
   sonar: { name: 'HC-SR04 distance: LED when closer than 20 cm', esp: 'const int TRIG = 5, ECHO = 18, LED = 23;   // ECHO is 5 V: use a divider into the ESP32!\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(TRIG, OUTPUT);\n  pinMode(ECHO, INPUT);\n  pinMode(LED, OUTPUT);\n}\n\nvoid loop() {\n  digitalWrite(TRIG, LOW);\n  delayMicroseconds(2);\n  digitalWrite(TRIG, HIGH);\n  delayMicroseconds(10);\n  digitalWrite(TRIG, LOW);\n  long us = pulseIn(ECHO, HIGH, 30000);\n  float cm = us / 58.0;\n  digitalWrite(LED, cm > 0 && cm < 20 ? HIGH : LOW);\n  Serial.print("Distance: ");\n  Serial.print(cm, 1);\n  Serial.println(" cm");\n  delay(200);\n}\n',
