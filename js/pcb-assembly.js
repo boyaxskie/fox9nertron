@@ -29,6 +29,7 @@ export function partValue(p) {
     case 'STEPPER': return 'A4988 module (+ 2x8 female headers)';
     case 'OPTO': return 'PC817';
     case 'SR595': return q.model ?? '74HC595';
+    case 'LM2596': return `${(q.model ?? 'LM2596S-ADJ').replace('LM2596S', 'LM2596T')} (TO-220-5)`;
     case 'TL494': return `${q.model ?? 'TL494C'} (DIP-16, use a socket)`;
     case 'RMOD': return `relay module 5V 1ch (${q.trig === 'high' ? 'HIGH' : 'LOW'} trigger)`;
     case 'ENC': return 'rotary encoder KY-040 (5-pin header)';

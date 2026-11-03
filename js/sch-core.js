@@ -10,12 +10,14 @@ export const DIODES = {
   '1N5408': { vf: 0.75, rs: 0.02, imax: 3, piv: 1000, note: '3 A rectifier' },
   '1N4148': { vf: 0.65, rs: 0.5, imax: 0.2, piv: 75, note: 'small signal' },
   '1N5819': { vf: 0.35, rs: 0.05, imax: 1, piv: 40, note: 'Schottky, low drop (flyback diode)' },
+  '1N5822': { vf: 0.4, rs: 0.03, imax: 3, piv: 40, note: 'Schottky 3 A (LM2596 / buck catch diode, also SS34)' },
 };
 
 export const BJTS = {
   '2N2222': { pol: 'npn', beta: 150, vbe: 0.65, rb: 2, vsat: 0.2, rsat: 0.3, imax: 0.6, vmax: 40, pmax: 0.5, note: 'NPN 600 mA, small switch' },
   'BC547': { pol: 'npn', beta: 200, vbe: 0.65, rb: 5, vsat: 0.2, rsat: 1, imax: 0.1, vmax: 45, pmax: 0.5, note: 'NPN 100 mA, small signal' },
   'S8050': { pol: 'npn', beta: 200, vbe: 0.65, rb: 2, vsat: 0.25, rsat: 0.4, imax: 0.5, vmax: 25, pmax: 0.6, note: 'NPN 500 mA' },
+  '2N5551': { pol: 'npn', beta: 80, vbe: 0.65, rb: 2, vsat: 0.2, rsat: 1, imax: 0.6, vmax: 160, pmax: 0.6, note: 'NPN 160 V small signal (level shifters, 48 V gear)' },
   'TIP120': { pol: 'npn', beta: 1000, vbe: 1.3, rb: 2, vsat: 0.9, rsat: 0.1, imax: 5, vmax: 60, pmax: 2, note: 'NPN Darlington 5 A' },
   'TIP31C': { pol: 'npn', beta: 50, vbe: 0.8, rb: 1, vsat: 0.3, rsat: 0.1, imax: 3, vmax: 100, pmax: 2, note: 'NPN power 3 A' },
   '2N2907': { pol: 'pnp', beta: 150, vbe: 0.65, rb: 2, vsat: 0.2, rsat: 0.3, imax: 0.6, vmax: 60, pmax: 0.5, note: 'PNP 600 mA' },
@@ -59,7 +61,11 @@ export const TIMERS = {
 // TL494 PWM controller (TI SLVS074): ramp 0 → 3 V on CT, charged by 3 V ÷ RT → f = 1 ÷ (RT × CT).
 // dead-time comparator offset 0.11 V, PWM comparator offset 0.7 V, 5 V reference, 7–40 V supply, outputs 200 mA (Vce sat ≈ 1.1 V)
 export const TL494 = { peak: 3, dtcOff: 0.11, pwmOff: 0.7, vmin: 7, vmax: 40, iout: 0.2, iref: 0.01, vsat: 1.1, rsat: 1, ea: { a: 56000, dh: 1.5, dl: 0 } };
-const TL_F = new Map();          // TL494 id → oscillator frequency seen in the last run (sets the time step)
+const TL_F = new Map();
+// LM2596 3 A buck regulator (TI SNVS124): 150 kHz, feedback 1.23 V (ADJ) or fixed 3.3 / 5 / 12 V, input 4.5–40 V,
+// switch drop ≈ 1.16 V at 3 A, current limit ≈ 4.5 A (cycle by cycle), ON/OFF pin HIGH (> 1.3 V) = off
+export const LM2596 = { f: 150e3, vref: 1.23, vmin: 4.5, vmax: 40, ilim: 4.5, iout: 3, vsat: 0.6, rsat: 0.18, von: 1.3, fc: 100,
+  models: { 'LM2596S-ADJ': 0, 'LM2596S-3.3': 3.3, 'LM2596S-5.0': 5, 'LM2596S-12': 12 } };          // TL494 id → oscillator frequency seen in the last run (sets the time step)
 // motors
 export const SERVOS = {
   SG90: { vmin: 4.0, vmax: 6.0, idle: 0.01, run: 0.25, stall: 0.65, speed: 600, note: 'micro servo 9 g, 1.8 kg·cm' },          // speed in °/s (0.1 s / 60°)
@@ -210,6 +216,8 @@ export const TYPES = {
   SR595: { label: '74HC595 shift register (8 outputs)', prefix: 'U', pins: [[4, -3], [4, -2], [4, -1], [4, 0], [4, 1], [4, 2], [4, 3], [0, 7], [4, 5], [2, -6], [-4, -3], [-4, -2], [2, 7], [-4, -4], [4, -4], [0, -6]], box: [-4, -6, 4, 7], props: { model: '74HC595' } },
   // TL494 PWM controller, index = DIP pin − 1: 1 1IN+, 2 1IN−, 3 FEEDBACK, 4 DTC, 5 CT, 6 RT, 7 GND, 8 C1, 9 E1, 10 E2, 11 C2, 12 VCC, 13 OUTPUT CTRL, 14 REF, 15 2IN−, 16 2IN+
   TL494: { label: 'TL494 PWM controller (SMPS, inverters)', prefix: 'U', pins: [[-5, -4], [-5, -5], [-5, -2], [-5, 4], [-3, 7], [-1, 7], [1, 7], [5, -5], [5, -2], [5, 0], [5, -4], [2, -7], [3, 7], [-2, -7], [-5, 2], [-5, 0]], box: [-5, -7, 5, 7], props: { model: 'TL494C' } },
+  // LM2596 buck regulator, index = pin − 1: 1 VIN, 2 OUTPUT (switch), 3 GND, 4 FEEDBACK, 5 ON/OFF
+  LM2596: { label: 'LM2596 buck regulator 3 A (150 kHz)', prefix: 'U', pins: [[-4, -1], [4, -1], [0, 3], [4, 1], [-4, 1]], box: [-4, -2.2, 4, 3], props: { model: 'LM2596S-ADJ' } },
   // 1-channel 5 V relay module (opto / transistor + LED on board): VCC, GND, IN | COM, NO, NC
   RMOD: { label: 'Relay module 5 V (1 channel)', prefix: 'K', pins: [[-3, -1], [-3, 0], [-3, 1], [3, 0], [3, -1], [3, 1]], box: [-3, -2, 3, 2], props: { trig: 'low' } },
   LCD: { label: 'LCD 16×2 (I2C backpack)', prefix: 'LCD', pins: [[-7, 2], [-7, 1], [-7, 0], [-7, -1]], box: [-7, -2.3, 7, 2.8], props: { addr: 0x27 } },
@@ -226,8 +234,8 @@ export const TYPES = {
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'TL494', 'SR595', 'ESP32', 'UNO', 'LCD', 'OLED', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'ENC', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'RMOD', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
-export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER', 'ENC', 'TL494']);
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'TL494', 'LM2596', 'SR595', 'ESP32', 'UNO', 'LCD', 'OLED', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'ENC', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'RMOD', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER', 'ENC', 'TL494', 'LM2596']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
 // signal generator value at time t
@@ -254,6 +262,7 @@ export function fastestFreq(c) {
   for (const p of c.parts) {
     if (p.type === 'SIG') f = Math.max(f, p.props.f);
     if (p.type === 'TL494') f = Math.max(f, TL_F.get(p.id) ?? 0);      // its own oscillator: at least 40 steps per cycle
+    if (p.type === 'LM2596') f = Math.max(f, LM2596.f / 2);           // 20 steps per switching cycle (the ON time is dithered exactly)
     if (isBoard(p.type)) for (const q of Object.values(p.props.pins ?? {})) if (q.mode === 'pwm') f = Math.max(f, Math.min(500, q.f ?? 1000));   // pwmAvg keeps faster PWM exact on average
   }
   return f;
@@ -317,11 +326,11 @@ export const ldrOhms = (lux) => Math.max(100, Math.min(1e6, 15000 * Math.pow(Mat
 
 // ---------- faults (Troubleshoot mode): break a part on purpose and measure it like on the bench ----------
 // open = no connection between any pins · short = the two pins below welded together (others float) · weak = drifted value
-export const FAULT_SHORT = { NPN: [1, 2], PNP: [1, 2], NMOS: [1, 2], PMOS: [1, 2], OPAMP: [3, 4], T555: [7, 0], TL494: [11, 6], REG: [0, 1], RELAY: [2, 4], OPTO: [2, 3], XFMR: [0, 1] };
-const FAULTABLE = new Set(['R', 'POT', 'C', 'L', 'D', 'LED', 'ZD', 'LAMP', 'SW', 'PB', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'REG', 'T555', 'TL494', 'RELAY', 'OPTO', 'XFMR', 'BAT']);
+export const FAULT_SHORT = { NPN: [1, 2], PNP: [1, 2], NMOS: [1, 2], PMOS: [1, 2], OPAMP: [3, 4], T555: [7, 0], TL494: [11, 6], LM2596: [0, 1], REG: [0, 1], RELAY: [2, 4], OPTO: [2, 3], XFMR: [0, 1] };
+const FAULTABLE = new Set(['R', 'POT', 'C', 'L', 'D', 'LED', 'ZD', 'LAMP', 'SW', 'PB', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'REG', 'T555', 'TL494', 'LM2596', 'RELAY', 'OPTO', 'XFMR', 'BAT']);
 export function faultOptions(type) {
   if (!FAULTABLE.has(type)) return [];
-  const shortTxt = { NPN: 'shorted C–E (blown)', PNP: 'shorted C–E (blown)', NMOS: 'shorted D–S (blown)', PMOS: 'shorted D–S (blown)', OPAMP: 'shorted supply (dead chip)', T555: 'shorted VCC–GND (dead chip)', TL494: 'shorted VCC–GND (dead chip)', REG: 'shorted IN–OUT (blown)',
+  const shortTxt = { NPN: 'shorted C–E (blown)', PNP: 'shorted C–E (blown)', NMOS: 'shorted D–S (blown)', PMOS: 'shorted D–S (blown)', OPAMP: 'shorted supply (dead chip)', T555: 'shorted VCC–GND (dead chip)', TL494: 'shorted VCC–GND (dead chip)', LM2596: 'shorted VIN–OUT (switch blown: VIN goes straight out)', REG: 'shorted IN–OUT (blown)',
     RELAY: 'contacts welded (always ON)', OPTO: 'shorted output (always ON)', XFMR: 'shorted primary turns', SW: 'stuck closed', PB: 'stuck pressed', BAT: 'shorted cell' }[type] ?? 'shorted';
   const openTxt = { R: 'open (burnt)', C: 'open (broken lead)', L: 'open (broken wire)', LAMP: 'open (filament gone)', SW: 'stuck open', PB: 'never closes', BAT: 'dead / disconnected', XFMR: 'open winding', RELAY: 'dead (coil + contacts open)', POT: 'open (worn track)' }[type] ?? 'open (dead)';
   const o = [['ok', 'OK (working)'], ['open', openTxt], ['short', shortTxt]];
@@ -375,7 +384,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
     else if (mc) { const gi = BOARDS[mc.type].pins.findIndex(q => q.k === 'gnd'); const [x, y] = pinsOf(mc)[gi]; gkeys.add(key(x, y)); autoGround = mc.name + ' GND'; }
   }
   pieces.forEach((w, k) => R(node(w.x1, w.y1), node(w.x2, w.y2), R_WIRE, null, 'wire' + k));
-  const diodes = [], trans = [], fets = [], zeners = [], amps = [], regs = [], relays = [], timers = [], tls = [];
+  const diodes = [], trans = [], fets = [], zeners = [], amps = [], regs = [], relays = [], timers = [], tls = [], lms = [];
   for (const p of c.parts) {
     if (p.type === 'GND') continue;
     const pins = pinsOf(p).map(([x, y]) => node(x, y));
@@ -605,6 +614,23 @@ export function solveCircuit(c, sim = null, opts = {}) {
           outs: [{ c: C1, e: E1, n: inner(), on: !!prev.o?.[0] }, { c: C2, e: E2, n: inner(), on: !!prev.o?.[1] }] });
         break;
       }
+      case 'LM2596': {
+        // pins VIN, OUT, GND, FB, ON/OFF. The switch (VIN → OUT) is ON for the first `duty` part of every 150 kHz cycle; an integrator
+        // moves `duty` until FEEDBACK = 1.23 V. Cycle-by-cycle current limit 4.5 A.
+        const L = LM2596, prev = st.get(p.id) ?? {}, [VI, VO, G, FB, ON] = pins, fixed = L.models[pr.model] ?? 0;
+        R(VI, G, prev.en === false ? 300000 : 2400, p, 'main');               // ≈ 5 mA running at 12 V, ≈ 80 µA when switched off (ON/OFF HIGH)
+        R(FB, G, fixed ? 10000 : 1e8, p, 'fb'); R(ON, G, 1e8, p, 'on');
+        // a step can't be cut in half, so each cycle gets a whole number of ON steps and the leftover is carried to the next cycle
+        // (sigma-delta): the average duty comes out exact, as with the real chip's continuous pulse width
+        let want = false, cyc = 0, nOn = prev.nOn ?? 0, acc = prev.acc ?? 0;
+        if (sim) {
+          const tm = sim.t - sim.dt / 2, N = 1 / (L.f * sim.dt), ph = ((tm * L.f) % 1 + 1) % 1; cyc = Math.floor(tm * L.f);
+          if (cyc !== prev.cyc) { const x = (prev.en ? prev.duty ?? 0 : 0) * N + acc; nOn = Math.floor(x); acc = Math.min(1, x - nOn); }
+          want = !!prev.en && Math.floor(ph * N) < nOn && prev.oc !== cyc;
+        }
+        lms.push({ p, VI, VO, G, FB, ON, n: inner(), on: want && !!prev.on, want, cyc, nOn, acc, fixed });
+        break;
+      }
       case 'RELAY': {
         const prev = st.get(p.id), n = inner(), rm = relayOf(pr);
         if (sim) { R(pins[0], n, Math.max(rm.l, 1e-9) / sim.dt, p, 'coil'); I(pins[0], n, prev?.i ?? 0, p, 'hist'); } else R(pins[0], n, R_WIRE, p, 'coil');
@@ -672,6 +698,10 @@ export function solveCircuit(c, sim = null, opts = {}) {
     for (const t of timers) {
       if (t.q) all.push({ kind: 'V', a: t.VCC, b: t.no, val: t.m.dh, owner: t.p, role: 'o' }); else all.push({ kind: 'V', a: t.no, b: t.G, val: 0.1, owner: t.p, role: 'o' });
       all.push({ kind: 'R', a: t.DIS, b: t.G, val: t.q ? R_OPEN : 10, owner: t.p, role: 'dis' });
+    }
+    for (const u of lms) {
+      if (u.on) { all.push({ kind: 'V', a: u.VI, b: u.n, val: LM2596.vsat, owner: u.p, role: 'sw' }); all.push({ kind: 'R', a: u.n, b: u.VO, val: LM2596.rsat, owner: u.p, role: 'swr' }); }
+      else all.push({ kind: 'R', a: u.VI, b: u.VO, val: 1e9, owner: u.p, role: 'sw' });
     }
     for (const t of tls) {
       t.outs.forEach((o, k) => {
@@ -757,6 +787,14 @@ export function solveCircuit(c, sim = null, opts = {}) {
       else if (V_[t.TR] < lo) q = 1;
       else if (V_[t.TH] > hi) q = 0;
       if (q !== t.q) { t.q = q; changed = true; }
+    }
+    // LM2596 switch: conducts VIN → OUT only (like its built-in transistor)
+    for (const u of lms) {
+      let on = u.on;
+      if (!u.want) on = false;
+      else if (!u.on) on = V_[u.VI] - V_[u.VO] > LM2596.vsat + 1e-9;
+      else if ((findEl(res.els, u.p, 'sw', 'V')?.i ?? 0) < -1e-12) on = false;
+      if (on !== u.on) { u.on = on; changed = true; }
     }
     // TL494: reference follows the supply below 7 V; outputs ON while the ramp on CT is above both DTC + 0.11 V and FB − 0.7 V.
     // OUTPUT CTRL (pin 13) HIGH = push-pull (the flip-flop gives alternate cycles to Q1 / Q2), LOW = both outputs together.
@@ -978,6 +1016,26 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, q: t.q, vcc, vout: res.v[t.OUT] - vg, iout: ro.i, vtrig: res.v[t.TR] - vg, vthr: res.v[t.TH] - vg, vlo: res.v[t.n13] - vg, vhi: res.v[t.CV] - vg, idis: t.q ? 0 : dis.i, v: res.v[t.OUT] - vg, i: ro.i, p: pw, dots: [] });
       continue;
     }
+    if (p.type === 'LM2596') {
+      const L = LM2596, u = lms.find(x => x.p === p), prev = st.get(p.id) ?? {}, g = (role) => mine.find(e => e.role === role);
+      const vg = res.v[u.G], vin = res.v[u.VI] - vg, vsw = res.v[u.VO] - vg, vfb = res.v[u.FB] - vg, von = res.v[u.ON] - vg;
+      const isw = u.on ? g('sw').i : 0, en = vin >= L.vmin && von < L.von, nom = L.models[p.props.model] ?? 0;
+      const vfbE = nom ? vfb * L.vref / nom : vfb;                       // fixed versions divide the output inside
+      let duty = prev.duty ?? 0, swA = prev.swA ?? 0, fbA = prev.fbA ?? 0, inA = prev.inA ?? 0, lossA = prev.lossA ?? 0, oc = prev.oc ?? null, ocN = prev.ocN ?? 0;
+      if (sim) {
+        const a = Math.min(1, sim.dt * L.f / 3);                         // ≈ 3-cycle averages
+        swA += a * (vsw - swA); fbA += a * (vfbE - fbA); inA += a * (isw - inA); lossA += a * (Math.max(0, vin - vsw) * isw - lossA);
+        if (isw > L.ilim) { oc = u.cyc; ocN = 1; } else ocN = Math.max(0, ocN - a / 3);
+        if (!en) duty = 0;
+        else {
+          // integrator: crossover ≈ 100 Hz whatever Vin / Vout are (k = how much of the output reaches FB)
+          const k = Math.min(1, Math.max(0.03, fbA / Math.max(swA, 0.5))), ki = 2 * Math.PI * L.fc / (Math.max(vin, 1) * k);
+          duty = Math.min(1, Math.max(0, duty + ki * (L.vref - vfbE) * sim.dt));
+        }
+      }
+      parts.set(p.id, { va, vb, v: vin, i: g('main').i, p: lossA + vin * g('main').i, vin, vsw, vfb, von, en, duty, on: u.on, isw, iavg: inA, swA, fbA, inA, lossA, oc, ocN, ocl: ocN > 0.05, nom, cyc: u.cyc, nOn: u.nOn, acc: u.acc, dots: [] });
+      continue;
+    }
     if (p.type === 'TL494') {
       const T = TL494, t = tls.find(x => x.p === p), vg = res.v[t.G], vcc = res.v[t.VCC] - vg, g = (role) => mine.find(e => e.role === role);
       const prev = st.get(p.id) ?? {}, vct = res.v[t.CT] - vg, peak = t.vrt.val, irt = -(g('rt')?.i ?? 0), iref = -(g('ref')?.i ?? 0);
@@ -1035,6 +1093,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
     else if (p.type === 'REG') next.set(p.id, { rs: r.state });
     else if (p.type === 'RELAY') next.set(p.id, { i: r.icoil, on: r.on });
     else if (p.type === 'T555') next.set(p.id, { q: r.q });
+    else if (p.type === 'LM2596') next.set(p.id, { duty: r.duty, on: r.on, en: r.en, swA: r.swA, fbA: r.fbA, inA: r.inA, lossA: r.lossA, oc: r.oc, ocN: r.ocN, cyc: r.cyc, nOn: r.nOn, acc: r.acc });
     else if (p.type === 'TL494') next.set(p.id, { vref: tls.find(x => x.p === p).vref.val, dis: r.dis, v0: r.v0, ff: r.ff, tl: r.tl, per: r.per, acc: r.acc, w: r.w, o: r.q, es: r.es, ds: r.ds, vct: r.vct });
     else if (p.type === 'SR595') next.set(p.id, { sr: r.sr, q: r.q, sh: r.sh, stc: r.stc, ser: r.ser, en: r.en, pw: r.pw });
     else if (p.type === 'RMOD') next.set(p.id, { on: r.on });
@@ -1361,6 +1420,142 @@ export function example(name) {
     W(25, -2, 29, -2); W(25, 2, 29, 2); W(29, 2, 29, 3);
     // scope: CH1 = the 220 V output, CH2 = Q2 gate
     W(29, -2, 32, -2); W(32, -2, 32, 9); W(32, 9, 33, 9); W(9, 6, 9, 13); W(9, 13, 33, 13); W(33, 13, 33, 11); W(36, 12, 36, 13);
+  } else if (name === 'bms48') {
+    // Pack-level protector for 2 × 24 V LiFePO4 in series (48 V). One divider watches the whole pack: U1 HIGH = "not too low" (> 44 V),
+    // U2 HIGH = "not too high" (< 58 V). Q1 and Q2 are in series (AND): both HIGH → coil current → K1 connects P− to the pack. Load + charger sit on P+ / P−.
+    const b1 = addPart(c, 'BAT', 0, -4, 1); b1.name = 'BATT1'; b1.lbl = [-9, 0]; Object.assign(b1.props, { v: 25.6, rint: 0.02 });
+    const b2 = addPart(c, 'BAT', 0, 4, 1); b2.name = 'BATT2'; b2.lbl = [-9, 0]; Object.assign(b2.props, { v: 25.6, rint: 0.02 });
+    const r1 = addPart(c, 'R', 5, -12, 1); r1.name = 'R1'; r1.props.r = 100000;
+    const r2 = addPart(c, 'R', 5, -8, 1); r2.name = 'R2'; r2.props.r = 3090;
+    const r3 = addPart(c, 'R', 5, -4, 1); r3.name = 'R3'; r3.props.r = 10000;
+    const rs = addPart(c, 'R', 14, -12, 1); rs.name = 'RS'; Object.assign(rs.props, { r: 3300, rating: 1 });
+    const z12 = addPart(c, 'ZD', 14, -8, 3); z12.name = 'ZD1';  Object.assign(z12.props, { vz: 12, pmax: 0.5 });
+    const rr = addPart(c, 'R', 21, -8, 1); rr.name = 'RR'; rr.props.r = 2200;
+    const z5 = addPart(c, 'ZD', 21, -4, 3); z5.name = 'ZD2'; Object.assign(z5.props, { vz: 5.1, pmax: 0.5 });
+    const u1 = addPart(c, 'OPAMP', 28, 6); u1.name = 'U1'; u1.lbl = [3, -1]; u1.props.model = 'LM358';
+    const u2 = addPart(c, 'OPAMP', 38, 6); u2.name = 'U2'; u2.lbl = [3, -1]; u2.props.model = 'LM358';
+    const q1 = addPart(c, 'NMOS', 56, 1); q1.name = 'Q1'; q1.lbl = [6, -2.9]; q1.props.model = '2N7000';
+    const q2 = addPart(c, 'NMOS', 56, 5); q2.name = 'Q2'; q2.lbl = [6, -2.9]; q2.props.model = '2N7000';
+    const rc = addPart(c, 'R', 57, -12, 1); rc.name = 'RC'; Object.assign(rc.props, { r: 1500, rating: 0.5 });
+    const k = addPart(c, 'RELAY', 60, -6); k.name = 'K1'; Object.assign(k.props, { vcoil: 24, rcoil: 1600, l: 0.5 });
+    const df = addPart(c, 'D', 55, -6, 3); df.name = 'D1'; df.lbl = [-7, 0]; df.props.model = '1N4007';
+    const lp = addPart(c, 'LAMP', 66, -12, 1); lp.name = 'LAMP'; Object.assign(lp.props, { vr: 48, wr: 100 });
+    const sl = addPart(c, 'SW', 66, -8, 1); sl.name = 'LOAD'; sl.props.on = true;
+    const ch = addPart(c, 'BAT', 76, -12, 1); ch.name = 'CHG 58.4V'; Object.assign(ch.props, { v: 58.4, rint: 2 });
+    const sc = addPart(c, 'SW', 76, -8, 1); sc.name = 'CHARGER'; sc.props.on = false;
+    for (const [x, y] of [[0, 6], [5, -2], [14, -6], [21, -2], [28, 8], [38, 8], [57, 7], [60, -4]]) addPart(c, 'GND', x, y);
+    // batteries in series → PACK+ rail
+    W(0, -2, 0, 2); W(0, -6, 0, -14); W(0, -14, 76, -14);
+    // R1 / R2 / R3: tap A (R1–R2) → U1 IN+, tap B (R2–R3) → U2 IN−
+    W(5, -10, 2, -10); W(2, -10, 2, 3); W(2, 3, 23, 3); W(23, 3, 23, 7); W(23, 7, 25, 7);
+    W(5, -6, 3, -6); W(3, -6, 3, 2); W(3, 2, 33, 2); W(33, 2, 33, 5); W(33, 5, 35, 5);
+    // 12 V rail (RS + 12 V zener) → op-amps; 5.1 V reference (RR + 5.1 V zener) → U1 IN−, U2 IN+
+    W(14, -10, 38, -10); W(28, 4, 28, -10); W(38, 4, 38, -10);
+    W(21, -6, 24, -6); W(24, -6, 24, 5); W(24, 5, 25, 5); W(24, 5, 24, 10); W(24, 10, 34, 10); W(34, 10, 34, 7); W(34, 7, 35, 7);
+    // U2 → Q1 gate, U1 → Q2 gate (Q1 + Q2 in series = AND)
+    W(41, 6, 42, 6); W(42, 6, 42, 1); W(42, 1, 54, 1);
+    W(31, 6, 32, 6); W(32, 6, 32, 12); W(32, 12, 50, 12); W(50, 12, 50, 5); W(50, 5, 54, 5);
+    // relay coil: PACK+ → RC → coil → Q1 → Q2 → GND, D1 across the coil
+    W(57, -10, 57, -8); W(57, -4, 57, -1); W(55, -8, 57, -8); W(55, -4, 57, -4);
+    // contact COM = GND (pack −), NO = P− : the load and the charger return through K1
+    W(62, -8, 63, -8); W(63, -8, 63, -4); W(63, -4, 76, -4); W(66, -6, 66, -4); W(76, -6, 76, -4);
+  } else if (name === 'bms48b') {
+    // Per-battery BMS for 2 × 24 V LiFePO4 in series. Each battery is measured on its own (÷ 6): BATT2 by RD1 / RD2, BATT1 by U1, a difference amp
+    // (PACK+ − middle point). Six comparators against a reference ladder: BAL (> 28.2 V → bleed that battery), UV (< 22.0 V → stop discharge),
+    // OV (> 28.8 V → stop charge). Discharge: Q5 (IRF540N) in the load return. Charge: relay K1 in the charger return (separate charge port).
+    const P = (t, x, y, rot, name, props, lbl) => { const p = addPart(c, t, x, y, rot); p.name = name; Object.assign(p.props, props); if (lbl) p.lbl = lbl; return p; };
+    P('BAT', 0, -4, 1, 'BATT1', { v: 25.6, rint: 0.02 }); P('BAT', 0, 4, 1, 'BATT2', { v: 25.6, rint: 0.02 });
+    // bleeders: BATT1 through Q1 (P-MOSFET) switched by Q2 (level shift), BATT2 through Q3
+    P('PMOS', -13, -10, 0, 'Q1', { model: 'IRF9540N' }, [-8, -2.9]); P('R', -12, -6, 1, 'RB1', { r: 220, rating: 5 });
+    P('R', -15, -15, 1, 'RG1', { r: 10000 }, [-8.6, 0]); P('R', -15, -6, 1, 'RG2', { r: 33000 }, [-8.6, 0]);
+    P('NPN', -16, -1, 0, 'Q2', { model: '2N5551' }, [-6, -2.9]); P('R', -18, 3, 1, 'RBQ', { r: 10000 }, [-7.6, 0]);
+    P('R', -12, 3, 1, 'RB2', { r: 220, rating: 5 }); P('NMOS', -13, 8, 0, 'Q3', { model: 'IRLZ44N' }, [6, -2.9]);
+    // measuring: BATT2 ÷ 6 = RD1 / RD2; BATT1 ÷ 6 = U1 with RA / RB / RC / RF
+    P('R', 10, 2, 1, 'RD1', { r: 100000 }); P('R', 10, 8, 1, 'RD2', { r: 20000 });
+    P('OPAMP', 28, -8, 0, 'U1', { model: 'LM358' }, [-5, -6.4]);
+    P('R', 20, -18, 1, 'RA', { r: 120000 }); P('R', 20, -3, 1, 'RB', { r: 20000 }); P('R', 16, -4, 1, 'RC', { r: 120000 }, [-6.6, 0]); P('R', 32, -11, 1, 'RF', { r: 20000 });
+    // 12 V rail, 5.1 V reference, ladder L1–L4 → OV / BAL / UV reference voltages
+    P('R', 40, -18, 1, 'RS', { r: 2200, rating: 2 }); P('ZD', 40, -14, 3, 'ZD1', { vz: 12, pmax: 0.5 }, [-7.1, 0]);
+    P('R', 44, -14, 1, 'RR', { r: 2200 }); P('ZD', 44, -10, 3, 'ZD2', { vz: 5.1, pmax: 0.5 });
+    P('R', 52, -10, 1, 'L1', { r: 3010 }); P('R', 52, -6, 1, 'L2', { r: 1000 }); P('R', 52, -2, 1, 'L3', { r: 10200 }); P('R', 52, 4, 1, 'L4', { r: 36500 });
+    // comparators: HIGH = act (bleed / stop)
+    [['BAL1', 70], ['BAL2', 80], ['UV1', 90], ['UV2', 100], ['OV1', 110], ['OV2', 120]].forEach(([n, x]) => P('OPAMP', x, -4, 0, n, { model: 'LM358' }, [3.5, -5.9]));
+    // discharge: UV1 / UV2 → Q4a / Q4b pull the DSG line LOW (RGD pulls it up) → Q5 IRF540N in the load return
+    P('NMOS', 97, 20, 0, 'Q4a', { model: '2N7000' }, [1, 1.6]); P('NMOS', 107, 20, 0, 'Q4b', { model: '2N7000' }, [1, 1.6]);
+    P('R', 132, 14, 1, 'RGD', { r: 10000 }, [-7.4, 0]); P('NMOS', 138, 16, 0, 'Q5', { model: 'IRF540N' }, [-8, -0.4]);
+    // charge: OV1 / OV2 → Q6a / Q6b pull the CHG line LOW (RGC pulls it up) → Q7 → relay K1 in the charger return
+    P('NMOS', 117, 24, 0, 'Q6a', { model: '2N7000' }, [1, 1.6]); P('NMOS', 127, 24, 0, 'Q6b', { model: '2N7000' }, [1, 1.6]);
+    P('R', 141, 18, 1, 'RGC', { r: 10000 }, [-7.6, -0.4]); P('NMOS', 148, 20, 0, 'Q7', { model: '2N7000' }, [0, 0.3]);
+    P('RELAY', 152, 16, 0, 'K1', { vcoil: 24, rcoil: 1600, l: 0.5 }); P('R', 149, 10, 1, 'RK', { r: 1500, rating: 0.5 }); P('D', 147, 16, 3, 'D1', { model: '1N4007' }, [-6.5, -3]);
+    // load and charger
+    P('LAMP', 144, -16, 1, 'LAMP', { vr: 48, wr: 100 }); P('SW', 144, -10, 1, 'LOAD', { on: true });
+    P('BAT', 158, -12, 1, 'CHG 58.4V', { v: 58.4, rint: 2 }); P('SW', 158, -6, 1, 'CHARGER', { on: false });
+    for (const [x, y] of [[0, 6], [-15, 1], [-12, 10], [10, 10], [20, -1], [28, -6], [40, -12], [44, -8], [52, 6], [70, -2], [80, -2], [90, -2], [100, -2], [110, -2], [120, -2],
+      [98, 22], [108, 22], [118, 26], [128, 26], [139, 18], [149, 22], [152, 18]]) addPart(c, 'GND', x, y);
+    // batteries, PACK+ rail, middle point (BATT1 − = BATT2 +)
+    W(0, -2, 0, 2); W(0, -6, 0, -20); W(-15, -20, 158, -20); W(-12, 0, 0, 0); W(0, 0, 16, 0);
+    // bleeders
+    W(-12, -12, -12, -20); W(-12, -4, -12, 0); W(-15, -17, -15, -20); W(-15, -13, -15, -10); W(-15, -10, -15, -8); W(-15, -4, -15, -3); W(-18, -1, -18, 1);
+    W(-12, 0, -12, 1); W(-12, 5, -12, 6); W(-18, 5, -18, 28); W(-15, 8, -16, 8); W(-16, 8, -16, 27);
+    // BATT2 ÷ 6 → Vb2; U1: RA / RB from PACK+, RC from the middle point, RF feedback; U1 out = BATT1 ÷ 6 → Vb1
+    W(10, 4, 10, 6); W(10, 6, 12, 6); W(12, 6, 12, 14); W(12, 14, 61, 14);
+    W(20, -16, 20, -5); W(20, -7, 25, -7); W(16, 0, 16, -2); W(16, -6, 16, -9); W(16, -9, 25, -9);
+    W(28, -16, 28, -10); W(31, -8, 32, -8); W(32, -8, 32, -9); W(32, -13, 26, -13); W(26, -13, 26, -9); W(26, -9, 25, -9);
+    W(32, -8, 34, -8); W(34, -8, 34, 12); W(34, 12, 60, 12);
+    // 12 V rail, reference, ladder taps
+    W(28, -16, 141, -16); W(44, -12, 52, -12); W(52, 0, 52, 2);
+    // buses: UVref (y 1), Vb1 (y 2 and −11), Vb2 (y 3 and −12), OVref (y −9), BALref (y −10)
+    W(60, 12, 60, -11); W(61, 14, 61, -12);
+    W(52, 1, 97, 1); W(60, 2, 107, 2); W(61, 3, 117, 3);
+    W(52, -8, 56, -8); W(56, -8, 56, -9); W(56, -9, 117, -9); W(52, -4, 58, -4); W(58, -4, 58, -10); W(58, -10, 77, -10);
+    W(60, -11, 87, -11); W(61, -12, 97, -12);
+    // comparator inputs (IN+ from below, IN− from above) and supplies
+    W(67, 2, 67, -3); W(67, -10, 67, -5); W(77, 3, 77, -3); W(77, -10, 77, -5);
+    W(87, 1, 87, -3); W(87, -11, 87, -5); W(97, 1, 97, -3); W(97, -12, 97, -5);
+    W(107, 2, 107, -3); W(107, -9, 107, -5); W(117, 3, 117, -3); W(117, -9, 117, -5);
+    for (const x of [70, 80, 90, 100, 110, 120]) W(x, -16, x, -6);
+    // outputs: BAL1 / BAL2 back to the bleeders, UV → Q4a / Q4b, OV → Q6a / Q6b
+    W(73, -4, 75, -4); W(75, -4, 75, 28); W(75, 28, -18, 28);
+    W(83, -4, 85, -4); W(85, -4, 85, 27); W(85, 27, -16, 27);
+    W(93, -4, 95, -4); W(95, -4, 95, 20); W(103, -4, 105, -4); W(105, -4, 105, 20);
+    W(113, -4, 115, -4); W(115, -4, 115, 24); W(123, -4, 125, -4); W(125, -4, 125, 24);
+    // DSG line → Q5 gate, CHG line → Q7 gate
+    W(98, 18, 98, 16); W(108, 18, 108, 16); W(98, 16, 136, 16); W(132, 12, 132, -16);
+    W(118, 22, 118, 20); W(128, 22, 128, 20); W(118, 20, 146, 20); W(141, 16, 141, -16);
+    // relay coil: PACK+ → RK → coil → Q7, D1 across it; contact COM = GND, NO = charger −
+    W(149, 8, 149, -20); W(149, 12, 149, 14); W(147, 14, 149, 14); W(147, 18, 149, 18);
+    W(158, -14, 158, -20); W(158, -10, 158, -8); W(158, -4, 158, 14); W(158, 14, 154, 14);
+    // load: PACK+ → LAMP → LOAD → Q5 drain
+    W(144, -18, 144, -20); W(144, -14, 144, -12); W(144, -8, 144, 12); W(139, 14, 139, 12); W(139, 12, 144, 12);
+  } else if (name === 'lm2596') {
+    // LM2596S-ADJ buck module: 24 V → 5 V, up to 3 A. Vout = 1.23 V × (1 + R2 ÷ R1). SET (10 kΩ trimmer, used as a variable resistor) = R2,
+    // R1 = 1 kΩ: at 31 % R2 = 3.1 kΩ → 1.23 × (1 + 3.1) = 5.04 V. L1 33 µH, D1 Schottky 3 A, CIN / COUT 220 µF. RUN closed = ON/OFF pin LOW = running.
+    c.tdiv = 1e-5; c.speed = 0.001;            // 150 kHz: 1 ms of circuit time per second (start-up ≈ 6 ms)
+    const P = (t, x, y, rot, name, props, lbl) => { const p = addPart(c, t, x, y, rot); p.name = name; Object.assign(p.props, props); if (lbl) p.lbl = lbl; return p; };
+    P('BAT', 0, 4, 1, 'VIN', { v: 24, rint: 0.05 });
+    P('C', 4, 0, 1, 'CIN', { c: 220e-6, vmax: 50 }, [-1, 4.5]);
+    P('R', 8, -2, 1, 'RON', { r: 47000 }, [-1, -3.2]);
+    P('SW', 10, 4, 1, 'RUN', { on: true }, [0, 3]);
+    P('LM2596', 14, 0, 0, 'U1', { model: 'LM2596S-ADJ' }, [0, -7.2]);
+    P('D', 21, 1, 3, 'D1', { model: '1N5822' }, [1.4, 0]);
+    P('L', 25, -1, 0, 'L1', { l: 33e-6, r: 0.03 }, [0, -2.8]);
+    P('C', 29, 1, 1, 'COUT', { c: 220e-6, vmax: 35 }, [0, 3.7]);
+    P('VM', 32, 1, 1, 'VOUT', {});
+    P('POT', 41, 3, 1, 'SET', { r: 10000, pos: 31 }, [-7.6, 0]);
+    P('R', 41, 9, 1, 'R1', { r: 1000 });
+    P('R', 45, 1, 1, 'LOAD', { r: 10, rating: 5 });
+    P('SW', 53, 1, 1, 'BIG LOAD', { on: false });
+    P('R', 53, 6, 1, 'R3', { r: 2, rating: 25 });
+    addPart(c, 'SCOPE', 61, 4);
+    for (const [x, y] of [[0, 6], [4, 2], [10, 6], [14, 3], [21, 3], [29, 3], [32, 3], [41, 11], [45, 3], [53, 8], [61, 6]]) addPart(c, 'GND', x, y);
+    // input: VIN → CIN → U1 VIN; RON pulls ON/OFF up, RUN shorts it to GND (= on)
+    W(0, 2, 0, -4); W(0, -4, 10, -4); W(4, -4, 4, -2); W(10, -4, 10, -1); W(8, 0, 8, 1); W(8, 1, 10, 1); W(10, 1, 10, 2);
+    // switch node → D1 (catch diode) + L1 → output
+    W(18, -1, 21, -1); W(21, -1, 23, -1); W(27, -1, 57, -1);
+    // feedback: OUT → SET (R2) → FB node → R1 → GND; FB node → U1 FB
+    W(41, -1, 41, 1); W(43, 3, 43, 5); W(43, 5, 41, 5); W(41, 5, 41, 7); W(18, 1, 19, 1); W(19, 1, 19, 6); W(19, 6, 41, 6);
+    // big load switch, scope (CH1 = Vout, CH2 = switch node)
+    W(53, 3, 53, 4); W(57, -1, 57, 3); W(57, 3, 58, 3); W(23, -1, 23, 13); W(23, 13, 56, 13); W(56, 13, 56, 5); W(56, 5, 58, 5);
   } else if (name === 'delay555') {
     // power-on delay: flip POWER on → C1 pulls TRIG/THR high (output LOW), R1 drains it → below 1/3 Vcc the output goes HIGH. t ≈ 1.1 × R1 × C1 ≈ 1.1 s
     c.tdiv = 0.2;
