@@ -63,6 +63,8 @@ export const TIMERS = {
 // dead-time comparator offset 0.11 V, PWM comparator offset 0.7 V, 5 V reference, 7–40 V supply, outputs 200 mA (Vce sat ≈ 1.1 V)
 export const TL494 = { peak: 3, dtcOff: 0.11, pwmOff: 0.7, vmin: 7, vmax: 40, iout: 0.2, iref: 0.01, vsat: 1.1, rsat: 1, ea: { a: 56000, dh: 1.5, gbw: 800e3 } };
 const TL_F = new Map();
+// TL494 oscillator frequency measured by the solver (0 until it has run): the schematic averages its meters over a few cycles
+export const tlFreq = (id) => TL_F.get(id) ?? 0;
 // LM2596 3 A buck regulator (TI SNVS124): 150 kHz, feedback 1.23 V (ADJ) or fixed 3.3 / 5 / 12 V, input 4.5–40 V,
 // switch drop ≈ 1.16 V at 3 A, current limit ≈ 4.5 A (cycle by cycle), ON/OFF pin HIGH (> 1.3 V) = off
 export const LM2596 = { f: 150e3, vref: 1.23, vmin: 4.5, vmax: 40, ilim: 4.5, iout: 3, vsat: 0.6, rsat: 0.18, von: 1.3, fc: 100,
