@@ -247,6 +247,7 @@ export const DEFAULT_CAM = {
   vAngle: 30, vTip: 0.1, isoDepth: 0.15, isoPasses: 2, isoOverlap: 0.4, isoFeed: 150, plunge: 50, rpm: 1000, // rpm = Fox9ner S value (speed_map 0–1000)
   zSafe: 3, zTravel: 1, bits: '0.8, 1.0, 1.2', drillDepth: 1.8, drillFeed: 60,
   cutDia: 1.5, cutDepth: 1.7, cutStep: 0.4, cutFeed: 120, tabs: 4, tabW: 3, tabH: 0.6, thick: 1.6, mirror: true,
+  spotMarks: true, spotDepth: 0.2, // V-bit dimple at every hole centre (drill guide), done at the end of isolation
 };
 export const DEFAULT_RULES = { trace: 0.6, power: 1.0, clear: 0.4, grid: 0.25, edge: 0.6, bigPads: true };
 export function newLayout() { return { v: 1, w: 50, h: 40, parts: {}, traces: [], jumpers: [], cam: { ...DEFAULT_CAM }, rules: { ...DEFAULT_RULES } }; }

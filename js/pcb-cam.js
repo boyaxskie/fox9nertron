@@ -185,7 +185,7 @@ export function camAll(c) {
   const stats = {}, warn = [];
   // isolation
   {
-    const g = header(c, 'isolation (V-bit)', [`V-bit ${cam.vAngle} deg, tip ${cam.vTip} mm, depth ${cam.isoDepth} mm → cuts ${f3(iso.w)} mm wide`, `${iso.passes} pass(es), ${iso.loops.length} loops`]);
+    const g = header(c, 'isolation (V-bit)', [`V-bit ${cam.vAngle} deg, tip ${cam.vTip} mm, depth ${cam.isoDepth} mm → cuts ${f3(iso.w)} mm wide`, `${iso.passes} pass(es), ${iso.loops.length} loops${cam.spotMarks && holes.length ? `, drill marks Z-${f3(Math.abs(cam.spotDepth))}` : ''}`]);
     let cutLen = 0, travel = 0, at = [0, 0];
     const order = nearestOrder(iso.loops, [0, L.h], (lp) => lp.pts[0]);
     for (const lp of order) {
@@ -198,8 +198,20 @@ export function camAll(c) {
       for (let k = 0; k < lp.pts.length; k++) { const a = lp.pts[k], b = lp.pts[(k + 1) % lp.pts.length]; cutLen += Math.hypot(b[0] - a[0], b[1] - a[1]); }
       at = p0;
     }
+    // drill marks: dimple every hole centre with the V-bit so the drill bit starts dead-centre
+    let nSpot = 0;
+    if (cam.spotMarks) {
+      const all = nearestOrder(holes.flatMap(h => h.holes), at);
+      if (all.length) g.push(`(drill marks · ${all.length} holes · Z-${f3(Math.abs(cam.spotDepth))})`);
+      for (const h of all) {
+        travel += Math.hypot(h.x - at[0], h.y - at[1]); at = [h.x, h.y];
+        const [X, Y] = M([h.x, h.y]);
+        g.push(`G0 Z${f3(cam.zTravel)}`, `G0 X${f3(X)} Y${f3(Y)}`, `G1 Z${f3(-Math.abs(cam.spotDepth))} F${Math.round(cam.plunge)}`);
+        nSpot++;
+      }
+    }
     g.push(...footer(cam));
-    stats.iso = { lines: g.length, cutLen, minutes: cutLen / cam.isoFeed + order.length * (cam.isoDepth + cam.zTravel) / cam.plunge + travel / 1000 };
+    stats.iso = { lines: g.length, cutLen, spots: nSpot, minutes: cutLen / cam.isoFeed + (order.length + nSpot) * (cam.isoDepth + cam.zTravel) / cam.plunge + travel / 1000 };
     stats.iso.gcode = g.join('\n') + '\n';
   }
   // drilling
