@@ -449,7 +449,7 @@ export function pcbView(api) {
       el('div', { class: 'sub', text: `Isolation (V-bit) · cut width ${w.toFixed(3)} mm` }),
       grid(numIn('V-bit angle', C.vAngle, '°', v => setCam('vAngle', v)), numIn('Tip width', C.vTip, 'mm', v => setCam('vTip', v)), numIn('Depth', C.isoDepth, 'mm', v => setCam('isoDepth', v), 'copper is 0.035'),
         numIn('Passes', C.isoPasses, '', v => setCam('isoPasses', Math.max(1, Math.round(v)))), numIn('Overlap', C.isoOverlap * 100, '%', v => setCam('isoOverlap', Math.min(90, v) / 100)), numIn('Feed', C.isoFeed, 'mm/min', v => setCam('isoFeed', v)),
-        numIn('Plunge feed', C.plunge, 'mm/min', v => setCam('plunge', v)), numIn('Spindle', C.rpm, 'rpm', v => setCam('rpm', v), 'S value')),
+        numIn('Plunge feed', C.plunge, 'mm/min', v => setCam('plunge', v)), numIn('Spindle', C.rpm, 'S', v => setCam('rpm', Math.max(1, Math.min(1000, Math.round(v)))), 'Fox9ner 0–1000 (1000 = full)')),
       el('div', { class: 'sub', text: 'Drilling' }),
       grid(el('label', { class: 'field' }, el('span', { class: 'lab', text: 'Drill bits you have' }), Object.assign(el('input', { class: 'num wide', value: C.bits }), { onchange: (e) => setCam('bits', e.target.value) })),
         numIn('Drill depth', C.drillDepth, 'mm', v => setCam('drillDepth', v)), numIn('Drill feed', C.drillFeed, 'mm/min', v => setCam('drillFeed', v))),
