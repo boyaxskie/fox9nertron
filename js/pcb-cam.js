@@ -4,6 +4,8 @@
 import { analyze, padCapsule } from './pcb-core.js';
 import { edt } from './pcb-route.js';
 
+// Fox9ner spindle scale is S0–1000: never send more than full speed
+const spin = (cam) => Math.max(1, Math.min(1000, Math.round(cam.rpm || 1000)));
 export const vWidth = (cam) => cam.vTip + 2 * cam.isoDepth * Math.tan((cam.vAngle / 2) * Math.PI / 180);
 
 // ---------- copper bitmap ----------
@@ -173,7 +175,7 @@ function machine(c) {
 function header(c, title, lines = []) {
   const L = c.pcb, cam = L.cam;
   return [`(Fox9nertron PCB · ${title})`, `(${c.title ?? 'circuit'} · board ${L.w} x ${L.h} mm${cam.mirror ? ' · MIRRORED for bottom copper' : ''})`, '(Origin X0 Y0 = lower-left board corner, Z0 = top of the copper)', ...lines.map(l => `(${l})`),
-    'G21', 'G90', 'G94', 'G17', `G0 Z${f3(cam.zSafe)}`, `M3 S${Math.round(cam.rpm)}`, 'G4 P3'];
+    'G21', 'G90', 'G94', 'G17', `G0 Z${f3(cam.zSafe)}`, `M3 S${spin(cam)}`, 'G4 P3'];
 }
 const footer = (cam) => [`G0 Z${f3(cam.zSafe)}`, 'M5', 'G0 X0 Y0', 'M2'];
 
@@ -205,7 +207,7 @@ export function camAll(c) {
     const g = header(c, 'drilling', holes.map(h => `${h.holes.length} holes with ${h.bit} mm bit`));
     let n = 0, travel = 0;
     holes.forEach((grp, gi) => {
-      if (gi > 0) g.push(`G0 Z${f3(Math.max(cam.zSafe, 10))}`, 'M5', `(CHANGE BIT TO ${grp.bit} mm, set Z0 on the copper again, then resume)`, 'M0', `M3 S${Math.round(cam.rpm)}`, 'G4 P3');
+      if (gi > 0) g.push(`G0 Z${f3(Math.max(cam.zSafe, 10))}`, 'M5', `(CHANGE BIT TO ${grp.bit} mm, set Z0 on the copper again, then resume)`, 'M0', `M3 S${spin(cam)}`, 'G4 P3');
       else g.push(`(BIT ${grp.bit} mm)`);
       let at = [0, L.h];
       for (const h of grp.holes) {
