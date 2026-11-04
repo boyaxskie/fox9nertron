@@ -459,6 +459,8 @@ export function pcbView(api) {
         numIn('Tab width', C.tabW, 'mm', v => setCam('tabW', v)), numIn('Tab height', C.tabH, 'mm', v => setCam('tabH', v)),
         numIn('Safe Z', C.zSafe, 'mm', v => setCam('zSafe', v)), numIn('Travel Z', C.zTravel, 'mm', v => setCam('zTravel', v))),
       el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: !!C.mirror, onchange: (e) => setCam('mirror', e.target.checked) }), ' Mirror for bottom copper (normal for single-sided)'),
+      el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: !!C.spotMarks, onchange: (e) => setCam('spotMarks', e.target.checked) }), ' Drill marks: V-bit dimple at every hole centre (end of isolation)'),
+      C.spotMarks ? grid(numIn('Drill mark depth', C.spotDepth, 'mm', v => setCam('spotDepth', Math.min(1, Math.max(0.05, Math.abs(v)))), '0.2 = small dimple')) : null,
       el('div', { class: 'row wrap' }, btn('🛠 Make G-code', () => { showCam = true; makeCam(); renderPanel(); }), btn(showCam ? 'Hide toolpaths' : 'Show toolpaths', () => { showCam = !showCam; if (showCam && !cam) makeCam(); renderPanel(); draw(); })));
     if (cam) {
       const st = cam.stats, total = st.iso.minutes + st.drill.minutes + st.cut.minutes;
