@@ -365,3 +365,24 @@ main.wide { max-width: none; }
 .rt-fill.retry { background: linear-gradient(90deg, #4FC3F7, #9BE3FF); }
 .rt-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font: 600 12px system-ui, sans-serif; color: #E6EDF3; }
 .sb.primary { background: var(--accent); color: #111; border-color: var(--accent); }
+
+/* PCB full screen + floating tool menu */
+.pcb-fullbtn { position: absolute; top: 8px; right: 8px; z-index: 5; min-width: 40px; background: rgba(14, 19, 24, 0.85); }
+html.pcb-fs, html.pcb-fs body { overflow: hidden; }
+.pcb-box.pcb-full { position: fixed; inset: 0; z-index: 1000; background: var(--bg, #0B0F13); gap: 0; padding: 0; margin: 0; height: 100dvh; width: 100vw; }
+.pcb-full > .sch-tools, .pcb-full > .sch-panel { display: none !important; }
+.pcb-full .pcb-wrap { border: 0; border-radius: 0; flex: 1 1 auto; }
+.pcb-full .pcb-wrap > .sch-status { position: absolute; left: 8px; right: 56px; top: 8px; z-index: 3; font-size: 12.5px; line-height: 1.35; color: #DDE3EA; background: rgba(14, 19, 24, 0.78); border-radius: 8px; padding: 5px 8px; max-height: 3.1em; overflow: hidden; pointer-events: none; }
+.pcb-full .pcb-wrap > .sch-status:empty { display: none; }
+.pcb-fm { position: absolute; z-index: 6; left: 8px; top: 8px; width: min(330px, calc(100vw - 16px)); background: rgba(18, 24, 30, 0.95); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45); }
+.pcb-fm[hidden] { display: none; }
+.fm-head { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 10px; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.fm-grip { flex: 1; color: var(--dim); font: 600 13px var(--sans); padding: 6px 0; }
+.fm-btn { background: none; border: 0; color: var(--dim); font-size: 18px; min-width: 36px; min-height: 36px; border-radius: 8px; cursor: pointer; }
+.fm-btn:active { background: var(--card); }
+.fm-body { display: flex; flex-direction: column; gap: 6px; padding: 0 8px 8px; max-height: calc(100dvh - 80px); overflow-y: auto; }
+.fm-body[hidden] { display: none; }
+.fm-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.fm-row .sel.sm { padding: 7px 6px; font-size: 13px; width: auto; }
+.fm-body .pcb-routebar, .fm-body .pcb-nudge { border-top: 1px solid var(--line); padding-top: 6px; }
+.sb:disabled { opacity: 0.45; }

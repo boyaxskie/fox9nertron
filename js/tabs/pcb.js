@@ -38,6 +38,68 @@ export function pcbView(api) {
   const nudgeBar = el('div', { class: 'pcb-nudge', hidden: true }, el('span', { class: 'muted', text: 'Nudge' }),
     btn('◀', () => nudge(-1, 0), 'icon'), btn('▲', () => nudge(0, -1), 'icon'), btn('▼', () => nudge(0, 1), 'icon'), btn('▶', () => nudge(1, 0), 'icon'), stepSel);
   const box = el('div', { class: 'pcb-box', hidden: true }, top, wrap, routeBar, nudgeBar, status, panel);
+  // ---------- ⛶ full screen: only the board + a floating tool menu (drag it by ⠿, ▾ folds it) ----------
+  let full = false, routeW = +store.get('pcb.routeW', '0') || 0;     // 0 = board rule width
+  const fullBtn = el('button', { class: 'sb icon pcb-fullbtn', type: 'button', text: '⛶', title: 'Full screen', onclick: () => (full ? exitFull() : enterFull()) });
+  wrap.append(fullBtn);
+  const fmModes = { move: btn('✋ Move', () => setMode('move')), route: btn('✏ Route', () => setMode('route')), jumper: btn('⤴ Jumper', () => setMode('jumper')), delete: btn('🗑', () => { if (mode === 'move' && deleteSel()) return; setMode('delete'); }) };
+  fmModes.delete.title = 'Delete (the selected item, or tap what to delete)';
+  const wSel = el('select', { class: 'sel sm', 'aria-label': 'Trace width for hand routing' }, [[0, 'width: rule'], [0.4, '0.4 mm'], [0.6, '0.6 mm'], [0.8, '0.8 mm'], [1.0, '1.0 mm'], [1.5, '1.5 mm'], [2.0, '2.0 mm']].map(([v, t]) => el('option', { value: v, text: t })));
+  wSel.value = String(routeW); wSel.onchange = () => { routeW = +wSel.value; store.set('pcb.routeW', wSel.value); if (route) { route.w = routeW || L.rules.trace; draw(); } say(`Hand traces: ${routeW ? routeW + ' mm' : `board rule (${L.rules.trace} mm)`}.`); };
+  const lockBtn = btn('📌 Lock', () => {
+    if (sel?.kind !== 'part' || !L.parts[sel.id]) return say('Select a part first, then 📌 Lock keeps it where it is during 🧩 Auto place.');
+    const bp = L.parts[sel.id], p = api.getC().parts.find(q => q.id === sel.id);
+    if (bp.lock) delete bp.lock; else bp.lock = true;
+    change(bp.lock ? `${p.name} 📌 locked: 🧩 Auto place leaves it here.` : `${p.name} unlocked.`);
+  });
+  const fmBody = el('div', { class: 'fm-body' },
+    el('div', { class: 'fm-row' }, ...Object.values(fmModes)),
+    el('div', { class: 'fm-row' }, btn('↻', () => rotateSel(), 'icon'), lockBtn, btn('↶', () => api.undo(), 'icon'), btn('↷', () => api.redo(), 'icon'), btn('Fit', () => { fit(); draw(); })),
+    el('div', { class: 'fm-row' }, wSel),
+    el('div', { class: 'fm-row' }, btn('🧩 Auto place', () => doAutoPlace()), btn('⚡ Autoroute', () => doAutoroute())));
+  const fmFold = el('button', { class: 'fm-btn', type: 'button', text: '▾', title: 'Fold / unfold the menu' });
+  const fmHead = el('div', { class: 'fm-head' }, el('span', { class: 'fm-grip', text: '⠿ PCB tools' }), fmFold, el('button', { class: 'fm-btn', type: 'button', text: '✕', title: 'Leave full screen', onclick: () => exitFull() }));
+  const fm = el('div', { class: 'pcb-fm', hidden: true }, fmHead, fmBody);
+  const setFold = (f) => { fmBody.hidden = f; fmFold.textContent = f ? '▸' : '▾'; store.set('pcb.fmFold', f ? '1' : ''); };
+  fmFold.onclick = () => setFold(!fmBody.hidden);
+  setFold(store.get('pcb.fmFold', '') === '1');
+  // drag the menu by its head; the spot is remembered
+  const placeFm = (x, y) => { const r = fm.getBoundingClientRect(), bw = box.clientWidth, bh = box.clientHeight; x = Math.max(0, Math.min(bw - Math.min(r.width, bw), x)); y = Math.max(0, Math.min(bh - 40, y)); fm.style.left = x + 'px'; fm.style.top = y + 'px'; return [x, y]; };
+  fmHead.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.fm-btn')) return;
+    e.preventDefault(); fmHead.setPointerCapture?.(e.pointerId);
+    const r = fm.getBoundingClientRect(), b = box.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    const mv = (ev) => placeFm(ev.clientX - b.left - dx, ev.clientY - b.top - dy);
+    const upf = () => { fmHead.removeEventListener('pointermove', mv); fmHead.removeEventListener('pointerup', upf); fmHead.removeEventListener('pointercancel', upf); store.set('pcb.fmPos', JSON.stringify([parseFloat(fm.style.left), parseFloat(fm.style.top)])); };
+    fmHead.addEventListener('pointermove', mv); fmHead.addEventListener('pointerup', upf); fmHead.addEventListener('pointercancel', upf);
+  });
+  function syncFm() {
+    for (const [k, b] of Object.entries(fmModes)) b.classList.toggle('on', k === mode);
+    const bp = sel?.kind === 'part' ? L?.parts[sel.id] : null;
+    lockBtn.disabled = !bp; lockBtn.classList.toggle('on', !!bp?.lock); lockBtn.textContent = bp?.lock ? '📌 Locked' : '📌 Lock';
+  }
+  function enterFull() {
+    if (full) return; full = true;
+    box.classList.add('pcb-full'); fm.hidden = false; fullBtn.textContent = '✕'; fullBtn.title = 'Leave full screen';
+    box.append(fm); fmBody.append(routeBar, nudgeBar); wrap.append(status);     // route / nudge bars ride in the menu, the status line on the board
+    document.documentElement.classList.add('pcb-fs');
+    try { history.pushState({ pcbFull: 1 }, ''); } catch { }
+    box.requestFullscreen?.({ navigationUI: 'hide' })?.catch?.(() => { });
+    syncFm();
+    requestAnimationFrame(() => { W = 0; resize(); let pos = null; try { pos = JSON.parse(store.get('pcb.fmPos', 'null')); } catch { } placeFm(...(pos ?? [8, 64])); });
+  }
+  function exitFull(fromBack = false) {
+    if (!full) return; full = false;
+    box.classList.remove('pcb-full'); fm.hidden = true; fullBtn.textContent = '⛶'; fullBtn.title = 'Full screen';
+    box.insertBefore(routeBar, panel); box.insertBefore(nudgeBar, panel); box.insertBefore(status, panel);
+    document.documentElement.classList.remove('pcb-fs');
+    if (document.fullscreenElement) document.exitFullscreen?.().catch?.(() => { });
+    if (!fromBack && history.state?.pcbFull) history.back();
+    requestAnimationFrame(() => { W = 0; resize(); });
+  }
+  addEventListener('popstate', () => { if (full) exitFull(true); });
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && full) exitFull(); });
+
   const ctx = canvas.getContext('2d');
   let W = 0, H = 0;
   const nameBoxes = [];
@@ -56,7 +118,7 @@ export function pcbView(api) {
   function setMode(m) {
     mode = m; route = null; routeBar.hidden = true; jfirst = null;
     for (const [k, b] of Object.entries(modeBtns)) b.classList.toggle('on', k === m);
-    syncNudge();
+    syncNudge(); syncFm();
     say({ move: 'Drag parts, labels and traces (corners or segments). Tap to select, arrows below for fine tuning. Tap empty board to pan.', route: 'Tap a pad to start a trace, tap to add bends, tap a pad of the same net to finish.', jumper: 'Jumper: tap anywhere for the first hole, then anywhere for the second (the white dashed wire joins them on the parts side). Drag a hole to move it. Then ✏ Route traces to the holes like any pad.', delete: 'Tap a trace or a jumper wire to delete it.' }[m]);
     draw();
   }
@@ -88,7 +150,7 @@ export function pcbView(api) {
     const dpr = devicePixelRatio || 1;
     // height follows the board shape (a wide board on a phone doesn't need a tall window)
     const ww = wrap.getBoundingClientRect().width || 300, asp = L ? (L.h + 8) / (L.w + 8) : 0.7;
-    wrap.style.height = Math.round(Math.max(260, Math.min(760, innerHeight * 0.64, ww * asp + 30))) + 'px';
+    wrap.style.height = full ? box.clientHeight + 'px' : Math.round(Math.max(260, Math.min(760, innerHeight * 0.64, ww * asp + 30))) + 'px';
     const r = wrap.getBoundingClientRect(); const first = !W;
     W = Math.round(r.width); H = Math.round(r.height); if (!W) return;
     canvas.width = W * dpr; canvas.height = H * dpr; canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
@@ -374,7 +436,7 @@ export function pcbView(api) {
     const pts = cleanPath(route.pts);
     route = null; routeBar.hidden = true;
     if (pts.length < 2) { draw(); return; }
-    L.traces.push({ w: L.rules.trace, pts, auto: false });
+    L.traces.push({ w: routeW || L.rules.trace, pts, auto: false });
     change('Trace added.');
   }
 
@@ -556,7 +618,7 @@ export function pcbView(api) {
       const pd = padAt(x, y);
       if (!route) {
         if (!pd) return say('Start on a pad (copper dot).');
-        route = { net: pd.net, pts: [[pd.x, pd.y]], w: L.rules.trace, from: pd }; routeBar.hidden = false; jumpBtn.classList.remove('on');
+        route = { net: pd.net, pts: [[pd.x, pd.y]], w: routeW || L.rules.trace, from: pd }; routeBar.hidden = false; jumpBtn.classList.remove('on');
         say(`Routing ${netName(pd.net)}: tap to bend, tap a ${netName(pd.net)} pad to finish, ⤴ Jumper to hop over a trace.`); draw(); return;
       }
       if (route.jump) {
@@ -607,6 +669,7 @@ export function pcbView(api) {
   }
   const grid = (...k) => el('div', { class: 'fields' }, ...k);
   function renderPanel() {
+    syncFm();
     if (!L) return;
     syncNudge();
     panel.innerHTML = '';
@@ -732,7 +795,7 @@ export function pcbView(api) {
   return {
     el: box,
     show() { box.hidden = false; const had = load(); sel = null; route = null; if (!had) setTimeout(() => say('Board made from your schematic. Drag parts into place, then ⚡ Autoroute.'), 0); else setMode(mode); W = 0; resize(); renderPanel(); },
-    hide() { box.hidden = true; },
+    hide() { exitFull(); box.hidden = true; },
     refresh() {
       if (box.hidden) return; load(); cam = null;
       if (sel?.kind === 'trace' && !L.traces[sel.i]) sel = null; if (sel?.kind === 'jumper' && !L.jumpers[sel.i]) sel = null; if (sel?.kind === 'part' && !L.parts[sel.id]) sel = null; if (sel?.kind === 'pad') sel = null;
