@@ -25,10 +25,7 @@ export function pcbView(api) {
   const canvas = el('canvas', { class: 'sch-canvas' });
   const wrap = el('div', { class: 'sch-wrap pcb-wrap' }, canvas);
   const status = el('div', { class: 'sch-status' });
-  // ⤴ Jumper while routing by hand: the next tap is where a wire on the parts side lands (it hops over other traces), then the trace goes on from there
-  const jumpBtn = btn('⤴ Jumper', () => { if (!route) return; route.jump = !route.jump; jumpBtn.classList.toggle('on', route.jump); say(route.jump ? 'Jumper: tap where the wire should land (straight line, it jumps over any trace). Tap ⤴ Jumper again to cancel.' : 'Jumper cancelled: tap to bend the trace.'); draw(); });
-  jumpBtn.title = 'Next tap = a jumper wire on the parts side, hopping over other traces';
-  const routeBar = el('div', { class: 'pcb-routebar', hidden: true }, jumpBtn, btn('✓ Finish here', () => finishRoute(null)), btn('↶ Back one', () => { if (route?.pts.length > 1) { route.pts.pop(); draw(); } }), btn('✖ Cancel', () => { route = null; routeBar.hidden = true; draw(); }));
+  const routeBar = el('div', { class: 'pcb-routebar', hidden: true }, btn('✓ Finish here', () => finishRoute(null)), btn('↶ Back one', () => { if (route?.pts.length > 1) { route.pts.pop(); draw(); } }), btn('✖ Cancel', () => { route = null; routeBar.hidden = true; draw(); }));
   const panel = el('div', { class: 'sch-panel' });
   // fine tuning: arrows move the selected part / trace corner / trace segment by one step
   let step = +store.get('pcb.step', '0.25');
@@ -187,14 +184,7 @@ export function pcbView(api) {
     if (route) {
       const pts = [...route.pts]; if (hover?.pt) pts.push(hover.pt);
       ctx.strokeStyle = COL.sel; ctx.lineWidth = Math.max(1, route.w * view.s); ctx.globalAlpha = 0.8;
-      if (route.jump) pts.pop();
       ctx.beginPath(); pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke(); ctx.globalAlpha = 1;
-      if (route.jump && hover?.pt) {   // pending jumper: blue wire with a hole at each end
-        const [x1, y1] = route.pts[route.pts.length - 1], [x2, y2] = hover.pt;
-        ctx.strokeStyle = COL.jump; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(sx(x1), sy(y1)); ctx.lineTo(sx(x2), sy(y2)); ctx.stroke(); ctx.setLineDash([]);
-        ctx.fillStyle = COL.jump; for (const [x, y] of [[x1, y1], [x2, y2]]) { ctx.beginPath(); ctx.arc(sx(x), sy(y), Math.max(3, 0.9 * view.s), 0, 7); ctx.fill(); }
-        ctx.fillStyle = '#E6EDF3'; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText(`jumper ${Math.hypot(x2 - x1, y2 - y1).toFixed(1)} mm`, sx(x2) + 8, sy(y2) - 4);
-      }
     }
     drawRouting();
     // origin marker (machine X0 Y0 = lower-left, or lower-right before mirroring)
@@ -442,23 +432,8 @@ export function pcbView(api) {
       const pd = padAt(x, y);
       if (!route) {
         if (!pd) return say('Start on a pad (copper dot).');
-        route = { net: pd.net, pts: [[pd.x, pd.y]], w: L.rules.trace, from: pd }; routeBar.hidden = false; jumpBtn.classList.remove('on');
-        say(`Routing ${netName(pd.net)}: tap to bend, tap a ${netName(pd.net)} pad to finish, ⤴ Jumper to hop over a trace.`); draw(); return;
-      }
-      if (route.jump) {
-        const last = route.pts[route.pts.length - 1];
-        if (pd && pd.net >= 0 && route.net >= 0 && pd.net !== route.net) return say(`That pad is on ${netName(pd.net)}, this trace is ${netName(route.net)}.`);
-        const end = pd ? [pd.x, pd.y] : routePoint(x, y);
-        const len = Math.hypot(end[0] - last[0], end[1] - last[1]);
-        if (len < 2.5) return say('Jumper too short: land it at least 2.54 mm away (one hole).');
-        // the trace so far ends at the jumper's first hole
-        const pts = cleanPath(route.pts);
-        if (pts.length >= 2) L.traces.push({ w: route.w, pts, auto: false });
-        L.jumpers = L.jumpers ?? []; L.jumpers.push({ x1: last[0], y1: last[1], x2: end[0], y2: end[1], auto: false });
-        jumpBtn.classList.remove('on');
-        if (pd) { route = null; routeBar.hidden = true; change(`Jumper added (${len.toFixed(2)} mm) and connected to the pad.`); return; }
-        route = { ...route, pts: [end], jump: false, from: null };
-        change(`Jumper added (${len.toFixed(2)} mm). Keep routing from its end, or ✓ Finish here.`); routeBar.hidden = false; return;
+        route = { net: pd.net, pts: [[pd.x, pd.y]], w: L.rules.trace, from: pd }; routeBar.hidden = false;
+        say(`Routing ${netName(pd.net)}: tap to bend, tap a ${netName(pd.net)} pad to finish.`); draw(); return;
       }
       if (pd && pd !== route.from) {
         if (pd.net >= 0 && route.net >= 0 && pd.net !== route.net) return say(`That pad is on ${netName(pd.net)}, this trace is ${netName(route.net)}. Pick a ${netName(route.net)} pad.`);

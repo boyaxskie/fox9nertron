@@ -43,7 +43,14 @@ class Heap {
 const DIRS = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2]];
 
 // route every missing connection. keepManual: traces drawn by hand stay. Returns { routed, failed: [{a,b}] }
-export function autoroute(c, { keepManual = true, onProgress } = {}) {
+export function autoroute(c, opts = {}) {
+  const g = autorouteSteps(c, opts); let r;
+  while (!(r = g.next()).done);
+  return r.value;
+}
+// same router, one step at a time: yields after every connection so the app can show the traces growing + a progress bar
+// yield { attempt, attempts, done, total, routed, failed, net, newTraces, newJumpers, ok }
+export function* autorouteSteps(c, { keepManual = true, onProgress } = {}) {
   const L = c.pcb, R = L.rules, gs = R.grid;
   L.traces = keepManual ? L.traces.filter(t => !t.auto) : [];
   L.jumpers = keepManual ? (L.jumpers ?? []).filter(t => !t.auto) : [];
@@ -53,28 +60,31 @@ export function autoroute(c, { keepManual = true, onProgress } = {}) {
   const base = JSON.stringify(L.traces), baseJ = JSON.stringify(L.jumpers);
   const hard = new Map();          // net → how often it failed (routed earlier next time)
   let seed = 12345; const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-  for (let attempt = 0; attempt < 6; attempt++) {
+  const ATTEMPTS = 6;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     L.traces = JSON.parse(base); L.jumpers = JSON.parse(baseJ);
     const an = analyze(c, nl);
     // boxed-in pads (many other-net pads close by) go first, then short connections
     const crowd = (pd) => an.pads.filter(q => q.net !== pd.net && Math.hypot(q.x - pd.x, q.y - pd.y) < 3.6).length;
     let edges = an.rats.map(e => ({ e, k: e.d * (attempt >= 3 ? 0.5 + rnd() : 1) - 8 * Math.max(crowd(e.a), crowd(e.b)) - 1000 * (hard.get(e.net) ?? 0) })).sort((a, b) => a.k - b.k).map(x => x.e);
     let failed = [];
-    let routed = 0;
+    let routed = 0, done = 0;
+    const total0 = edges.length;
     for (let round = 0; round < 4 && edges.length; round++) {
     failed = [];
     for (const e of edges) {
+      done++;
       // current connectivity (earlier routes may have joined this already)
       const now = analyze(c, nl);
-      if (sameCluster(now, e.a, e.b)) continue;
+      if (sameCluster(now, e.a, e.b)) { yield { attempt, attempts: ATTEMPTS, done: Math.min(done, total0), total: total0, routed, failed: failed.length, net: e.net, newTraces: [], newJumpers: [], ok: true, skip: true }; continue; }
       const net = e.net, power = nl.nets[net]?.power;
       let ok = false;
       const jumpsOk = R.jumpers !== false, early = jumpsOk && attempt >= 2;      // later attempts: hop early instead of boxing pads in
       for (const [w, jump] of [...(power ? [[R.power, early]] : []), [R.trace, early], ...(jumpsOk && !early ? [[R.trace, true]] : [])]) {
         const r = routeOne(c, now, nl, e, w, gs, nx, ny, N, jump);
-        if (r) { for (const pts of r.traces) L.traces.push({ w, pts, auto: true }); for (const j of r.jumpers) L.jumpers.push({ ...j, auto: true }); ok = true; routed++; break; }
+        if (r) { for (const pts of r.traces) L.traces.push({ w, pts, auto: true }); for (const j of r.jumpers) L.jumpers.push({ ...j, auto: true }); ok = true; routed++; yield { attempt, attempts: ATTEMPTS, done: Math.min(done, total0), total: total0, routed, failed: failed.length, net, newTraces: r.traces.map(pts => ({ w, pts })), newJumpers: r.jumpers, ok: true, a: e.a, b: e.b }; break; }
       }
-      if (!ok) failed.push(e);
+      if (!ok) { failed.push(e); yield { attempt, attempts: ATTEMPTS, done: Math.min(done, total0), total: total0, routed, failed: failed.length, net, newTraces: [], newJumpers: [], ok: false, a: e.a, b: e.b }; }
       onProgress?.(routed, edges.length);
     }
     // a route may have joined a different piece of the same net: route what is still missing

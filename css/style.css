@@ -355,3 +355,12 @@ main.wide { max-width: none; }
 .ser-box .scope-head select[hidden] { display: none; }
 .scope-cv[hidden] { display: none; }
 .scope-box [hidden] { display: none !important; }
+
+/* autoroute progress */
+.pcb-wrap { position: relative; }
+.rt-box { position: absolute; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 20px)); box-sizing: border-box; bottom: 10px; z-index: 4; background: rgba(14, 19, 24, 0.92); border: 1px solid #FFE16B66; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.rt-box[hidden] { display: none; }
+.rt-track { height: 8px; background: #1E262E; border-radius: 6px; overflow: hidden; }
+.rt-fill { height: 100%; width: 0; background: linear-gradient(90deg, #E8B04B, #FFE16B); transition: width .15s; }
+.rt-fill.retry { background: linear-gradient(90deg, #4FC3F7, #9BE3FF); }
+.rt-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font: 600 12px system-ui, sans-serif; color: #E6EDF3; }
