@@ -166,6 +166,20 @@ export function cutoutPath(c) {
   return out;
 }
 
+// perforation: a row of drill holes just outside the board edge (snap the board out afterwards)
+export function perforationHoles(c) {
+  const L = c.pcb, cam = L.cam, r = cam.perfBit / 2, pitch = Math.max(cam.perfBit + 0.1, cam.perfBit + cam.perfGap);
+  const x0 = -r, y0 = -r, x1 = L.w + r, y1 = L.h + r;
+  const corners = [[x0, y1], [x1, y1], [x1, y0], [x0, y0]];
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    const [ax, ay] = corners[i], [bx, by] = corners[(i + 1) % 4], len = Math.hypot(bx - ax, by - ay);
+    const n = Math.max(1, Math.round(len / pitch));        // evenly spaced, corner holes included once
+    for (let k = 0; k < n; k++) out.push({ x: ax + (bx - ax) * k / n, y: ay + (by - ay) * k / n });
+  }
+  return out;
+}
+
 // ---------- G-code ----------
 const f3 = (v) => (Math.abs(v) < 5e-4 ? '0' : v.toFixed(3).replace(/\.?0+$/, ''));
 function machine(c) {
@@ -181,7 +195,7 @@ const footer = (cam) => [`G0 Z${f3(cam.zSafe)}`, 'M5', 'G0 X0 Y0', 'M2'];
 
 export function camAll(c) {
   const L = c.pcb, cam = L.cam, an = analyze(c), M = machine(c);
-  const iso = isolationPaths(c, an), holes = drillHoles(c, an), cut = cutoutPath(c);
+  const iso = isolationPaths(c, an), holes = drillHoles(c, an), cut = cutoutPath(c), perf = cam.cutMode === 'perf' ? perforationHoles(c) : null;
   const stats = {}, warn = [];
   // isolation
   {
@@ -214,23 +228,34 @@ export function camAll(c) {
     stats.iso = { lines: g.length, cutLen, spots: nSpot, minutes: cutLen / cam.isoFeed + (order.length + nSpot) * (cam.isoDepth + cam.zTravel) / cam.plunge + travel / 1000 };
     stats.iso.gcode = g.join('\n') + '\n';
   }
-  // drilling
+  // drilling: one file per bit size, so each bit change is its own job (swap bit → Probe Z0 → run)
   {
-    const g = header(c, 'drilling', holes.map(h => `${h.holes.length} holes with ${h.bit} mm bit`));
-    let n = 0, travel = 0;
-    holes.forEach((grp, gi) => {
-      if (gi > 0) g.push(`G0 Z${f3(Math.max(cam.zSafe, 10))}`, 'M5', `(CHANGE BIT TO ${grp.bit} mm, set Z0 on the copper again, then resume)`, 'M0', `M3 S${spin(cam)}`, 'G4 P3');
-      else g.push(`(BIT ${grp.bit} mm)`);
-      let at = [0, L.h];
+    let n = 0, minutes = 0;
+    const files = holes.map((grp, gi) => {
+      const g = header(c, `drilling ${gi + 1}/${holes.length} · ${grp.bit} mm bit`, [`${grp.holes.length} holes with ${grp.bit} mm bit`, `Bit ${grp.bit} mm in, set Z0 on the copper, keep X0 Y0, then run`]);
+      let travel = 0, at = [0, L.h];
       for (const h of grp.holes) {
         const [X, Y] = M([h.x, h.y]); travel += Math.hypot(h.x - at[0], h.y - at[1]); at = [h.x, h.y];
         g.push(`G0 X${f3(X)} Y${f3(Y)}`, `G1 Z${f3(-cam.drillDepth)} F${Math.round(cam.drillFeed)}`, `G0 Z${f3(cam.zTravel)}`); n++;
       }
+      g.push(...footer(cam));
+      const min = grp.holes.length * (cam.drillDepth + cam.zTravel) / cam.drillFeed + travel / 1000;
+      minutes += min;
+      return { bit: grp.bit, holes: grp.holes.length, minutes: min, gcode: g.join('\n') + '\n' };
     });
-    g.push(...footer(cam));
-    stats.drill = { holes: n, bits: holes.map(h => h.bit), minutes: n * (cam.drillDepth + cam.zTravel) / cam.drillFeed + travel / 1000 + (holes.length - 1) * 1, gcode: g.join('\n') + '\n' };
+    stats.drill = { holes: n, bits: holes.map(h => h.bit), minutes, files, gcode: files.map(f => f.gcode).join('') };
   }
-  // cutout
+  // cutout: milled with tabs, or a perforation row drilled with a drill bit
+  if (perf) {
+    const g = header(c, 'board cutout · perforation', [`${perf.length} holes with ${cam.perfBit} mm drill bit, ${f3(cam.perfGap)} mm left between holes, ${cam.drillDepth} mm deep`, 'Snap the board out along the holes afterwards, then file the edge']);
+    let travel = 0, at = [0, L.h];
+    for (const h of perf) {
+      const [X, Y] = M([h.x, h.y]); travel += Math.hypot(h.x - at[0], h.y - at[1]); at = [h.x, h.y];
+      g.push(`G0 X${f3(X)} Y${f3(Y)}`, `G1 Z${f3(-cam.drillDepth)} F${Math.round(cam.drillFeed)}`, `G0 Z${f3(cam.zTravel)}`);
+    }
+    g.push(...footer(cam));
+    stats.cut = { mode: 'perf', holes: perf.length, passes: 0, minutes: perf.length * (cam.drillDepth + cam.zTravel) / cam.drillFeed + travel / 1000, gcode: g.join('\n') + '\n' };
+  } else
   {
     const g = header(c, 'board cutout', [`end mill ${cam.cutDia} mm, ${cut.length} passes to ${cam.cutDepth} mm, ${cam.tabs} tabs ${cam.tabW} mm wide x ${cam.tabH} mm high`]);
     let len = 0;
@@ -262,7 +287,7 @@ export function camAll(c) {
   if (tight.length) warn.push(['bad', `${tight.length} gap(s) narrower than the ${f3(iso.w)} mm cut: those spots stay joined (short). Smallest gap ${f3(Math.min(...tight.map(t => t.d)))} mm, needs ${f3(iso.w + 2 * iso.margin)} mm. Use a sharper / shallower V-bit or move traces apart.`]);
   if (an.rats.length) warn.push(['warn', `${an.rats.length} connection(s) are not routed yet: the board would be missing them.`]);
   if (an.shorts.length) warn.push(['bad', `Short circuit on the board: ${an.shorts.map(s => s.nets.join(' + ')).join(', ')}.`]);
-  return { iso, holes, cut, stats, warn, tight };
+  return { iso, holes, cut, perf, stats, warn, tight };
 }
 function segGap(a, b) {
   const pt = (px, py, x1, y1, x2, y2) => { const vx = x2 - x1, vy = y2 - y1, l2 = vx * vx + vy * vy; const t = l2 ? Math.max(0, Math.min(1, ((px - x1) * vx + (py - y1) * vy) / l2)) : 0; return Math.hypot(px - x1 - t * vx, py - y1 - t * vy); };
