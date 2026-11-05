@@ -3,7 +3,7 @@ import { el, store, note } from '../ui.js';
 import { parse } from '../num.js';
 import { rotPt } from '../sch-core.js';
 import * as P from '../pcb-core.js';
-import { autoroute, cleanPath } from '../pcb-route.js';
+import { autoroute, autorouteSteps, cleanPath } from '../pcb-route.js';
 import { camAll, vWidth, copperSvg, copperPdf } from '../pcb-cam.js';
 import { gerberSet, excellon } from '../pcb-gerber.js';
 import { assemblyPdf, bomCsv } from '../pcb-assembly.js';
@@ -25,7 +25,10 @@ export function pcbView(api) {
   const canvas = el('canvas', { class: 'sch-canvas' });
   const wrap = el('div', { class: 'sch-wrap pcb-wrap' }, canvas);
   const status = el('div', { class: 'sch-status' });
-  const routeBar = el('div', { class: 'pcb-routebar', hidden: true }, btn('✓ Finish here', () => finishRoute(null)), btn('↶ Back one', () => { if (route?.pts.length > 1) { route.pts.pop(); draw(); } }), btn('✖ Cancel', () => { route = null; routeBar.hidden = true; draw(); }));
+  // ⤴ Jumper while routing by hand: the next tap is where a wire on the parts side lands (it hops over other traces), then the trace goes on from there
+  const jumpBtn = btn('⤴ Jumper', () => { if (!route) return; route.jump = !route.jump; jumpBtn.classList.toggle('on', route.jump); say(route.jump ? 'Jumper: tap where the wire should land (straight line, it jumps over any trace). Tap ⤴ Jumper again to cancel.' : 'Jumper cancelled: tap to bend the trace.'); draw(); });
+  jumpBtn.title = 'Next tap = a jumper wire on the parts side, hopping over other traces';
+  const routeBar = el('div', { class: 'pcb-routebar', hidden: true }, jumpBtn, btn('✓ Finish here', () => finishRoute(null)), btn('↶ Back one', () => { if (route?.pts.length > 1) { route.pts.pop(); draw(); } }), btn('✖ Cancel', () => { route = null; routeBar.hidden = true; draw(); }));
   const panel = el('div', { class: 'sch-panel' });
   // fine tuning: arrows move the selected part / trace corner / trace segment by one step
   let step = +store.get('pcb.step', '0.25');
@@ -118,7 +121,9 @@ export function pcbView(api) {
     const hiNet = sel?.kind === 'trace' ? traceNet(sel.i) : sel?.kind === 'pad' ? sel.pad.net : route ? route.net : hover?.net ?? -2;
     // traces
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const growing = rt ? new Set(rt.anim.filter(a => a.ok && performance.now() - a.t0 < GROW).map(a => a.pts)) : null;
     L.traces.forEach((t, i) => {
+      if (growing?.has(t.pts)) return;          // still drawing itself (⚡ Autoroute animation)
       const n = traceNet(i);
       ctx.strokeStyle = (sel?.kind === 'trace' && sel.i === i) ? COL.sel : (n >= 0 && n === hiNet) ? COL.cuHi : COL.cu;
       ctx.lineWidth = Math.max(1, t.w * view.s);
@@ -168,12 +173,9 @@ export function pcbView(api) {
       ctx.lineWidth = 1; ctx.strokeStyle = COL.iso;
       for (const lp of cam.iso.loops) { ctx.beginPath(); lp.pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.closePath(); ctx.stroke(); }
       ctx.strokeStyle = COL.cut; ctx.lineWidth = 1.5;
-      if (cam.perf) for (const h of cam.perf) { ctx.beginPath(); ctx.arc(sx(h.x), sy(h.y), Math.max(1.5, L.cam.perfBit / 2 * view.s), 0, 7); ctx.stroke(); }
-      else {
-        const last = cam.cut[cam.cut.length - 1];
-        ctx.beginPath(); last.pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke();
-        ctx.fillStyle = COL.cut; for (const [x, y, z] of last.pts) if (z > last.z + 1e-6) { ctx.beginPath(); ctx.arc(sx(x), sy(y), 2.5, 0, 7); ctx.fill(); }
-      }
+      const last = cam.cut[cam.cut.length - 1];
+      ctx.beginPath(); last.pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke();
+      ctx.fillStyle = COL.cut; for (const [x, y, z] of last.pts) if (z > last.z + 1e-6) { ctx.beginPath(); ctx.arc(sx(x), sy(y), 2.5, 0, 7); ctx.fill(); }
       ctx.strokeStyle = COL.drill; ctx.lineWidth = 1.2;
       for (const g of cam.holes) for (const h of g.holes) { ctx.beginPath(); ctx.arc(sx(h.x), sy(h.y), Math.max(2, g.bit / 2 * view.s), 0, 7); ctx.stroke(); }
       ctx.fillStyle = COL.bad; for (const t of cam.tight) { ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 6, 0, 7); ctx.fill(); }
@@ -185,8 +187,16 @@ export function pcbView(api) {
     if (route) {
       const pts = [...route.pts]; if (hover?.pt) pts.push(hover.pt);
       ctx.strokeStyle = COL.sel; ctx.lineWidth = Math.max(1, route.w * view.s); ctx.globalAlpha = 0.8;
+      if (route.jump) pts.pop();
       ctx.beginPath(); pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke(); ctx.globalAlpha = 1;
+      if (route.jump && hover?.pt) {   // pending jumper: blue wire with a hole at each end
+        const [x1, y1] = route.pts[route.pts.length - 1], [x2, y2] = hover.pt;
+        ctx.strokeStyle = COL.jump; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(sx(x1), sy(y1)); ctx.lineTo(sx(x2), sy(y2)); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = COL.jump; for (const [x, y] of [[x1, y1], [x2, y2]]) { ctx.beginPath(); ctx.arc(sx(x), sy(y), Math.max(3, 0.9 * view.s), 0, 7); ctx.fill(); }
+        ctx.fillStyle = '#E6EDF3'; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText(`jumper ${Math.hypot(x2 - x1, y2 - y1).toFixed(1)} mm`, sx(x2) + 8, sy(y2) - 4);
+      }
     }
+    drawRouting();
     // origin marker (machine X0 Y0 = lower-left, or lower-right before mirroring)
     ctx.fillStyle = '#3DDC84'; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText(`${L.w} × ${L.h} mm · seen from the parts side (copper underneath)`, sx(0), sy(L.h) + 4);
@@ -197,14 +207,81 @@ export function pcbView(api) {
     if (sel?.kind !== 'part') return say('Select a part first (✋ Move, tap it).');
     const bp = L.parts[sel.id]; bp.rot = (bp.rot + 1) & 3; change('Rotated. Run ⚡ Autoroute again if traces no longer reach.');
   }
+  // ⚡ Autoroute, animated: the router runs a step per frame, each new trace grows from pad to pad, a bar shows how far it is
+  let rt = null;                       // { gen, anim: [{pts, w, t0, ok}], tryN, startT, last }
+  const rtBar = el('div', { class: 'rt-fill' }), rtTxt = el('span', { class: 'rt-txt' });
+  const rtStop = el('button', { class: 'sb', type: 'button', text: '⏹ Stop', onclick: () => { if (rt) rt.stop = true; } });
+  const rtBox = el('div', { class: 'rt-box', hidden: true }, el('div', { class: 'rt-track' }, rtBar), el('div', { class: 'rt-row' }, rtTxt, rtStop));
+  wrap.append(rtBox);
+  const GROW = 260;                    // ms for one trace to draw itself
   function doAutoroute() {
-    say('Routing…');
-    setTimeout(() => {
-      const t0 = performance.now();
-      const r = autoroute(api.getC(), { keepManual: true });
-      const ms = Math.round(performance.now() - t0);
-      change(r.failed.length ? `Routed ${r.routed}, ${r.failed.length} could not fit (yellow lines). Move parts apart, make the board bigger or route them by hand.` : `All connections routed in ${ms} ms${r.jumpers ? ` with ${r.jumpers} jumper wire${r.jumpers > 1 ? 's' : ''} (blue: a wire on the parts side)` : ''}.`);
-    }, 30);
+    if (rt) return;
+    const c = api.getC();
+    sel = null; route = null; renderPanel();
+    rt = { gen: autorouteSteps(c, { keepManual: true }), anim: [], tryN: 0, startT: performance.now(), lastNew: 0, n: 0, stop: false };
+    rtBox.hidden = false; rtBar.style.width = '0%'; rtTxt.textContent = 'Routing…';
+    const total0 = Math.max(1, an?.rats?.length ?? 1);
+    const pace = total0 > 40 ? 0 : total0 > 15 ? 60 : 140;      // big boards: no waiting between traces
+    const tick = () => {
+      if (!rt) return;
+      const now = performance.now(), t0 = now;
+      let res = null;
+      // routing steps until the time budget is used, or a new trace appeared and needs its moment on screen
+      while (performance.now() - t0 < 24 && !rt.stop) {
+        if (now - rt.lastNew < pace) break;
+        const s = rt.gen.next();
+        if (s.done) { res = s.value; break; }
+        const v = s.value;
+        if (v.attempt !== rt.tryN) { rt.tryN = v.attempt; rt.anim = []; }
+        rt.anim = rt.anim.filter(a => performance.now() - a.t0 < GROW + 600);
+        rt.cur = v;
+        if (!v.skip) {
+          for (const t of v.newTraces) rt.anim.push({ pts: t.pts, w: t.w, t0: performance.now(), ok: true });
+          if (!v.ok && v.a && v.b) rt.anim.push({ pts: [[v.a.x, v.a.y], [v.b.x, v.b.y]], w: 0.3, t0: performance.now(), ok: false });
+          if (v.newTraces.length || !v.ok) { rt.lastNew = performance.now(); rt.n++; break; }
+        }
+      }
+      if (rt.stop && !res) { rt.gen.return(); res = { routed: rt.cur?.routed ?? 0, failed: P.analyze(api.getC()).rats, jumpers: (L.jumpers ?? []).filter(j => j.auto).length, stopped: true }; }   // ⏹: keep what is routed so far
+      const v = rt.cur;
+      if (v) {
+        const frac = (v.attempt + v.done / Math.max(1, v.total)) / (v.attempt + 1);
+        rtBar.style.width = `${Math.round(Math.min(1, v.done / Math.max(1, v.total)) * 100)}%`;
+        rtBar.classList.toggle('retry', v.attempt > 0);
+        rtTxt.textContent = `${Math.round(Math.min(1, v.done / Math.max(1, v.total)) * 100)} % · ${v.attempt ? `Try ${v.attempt + 1} of ${v.attempts} (new order) · ` : ''}${v.done} / ${v.total} connections · ${v.routed} routed${v.failed ? ` · ${v.failed} stuck` : ''}`;
+        void frac;
+      }
+      an = P.analyze(api.getC());
+      draw();
+      if (res) {
+        const ms = Math.round(performance.now() - rt.startT);
+        rt = null; rtBox.hidden = true;
+        if (res.stopped) { change(`Stopped: ${res.routed} routed, ${res.failed.length} still open (yellow lines). ⚡ Autoroute again to finish.`); return; }
+        change(res.failed.length ? `Routed ${res.routed}, ${res.failed.length} could not fit (yellow lines). Move parts apart, make the board bigger or route them by hand.` : `All connections routed in ${(ms / 1000).toFixed(1)} s${res.jumpers ? ` with ${res.jumpers} jumper wire${res.jumpers > 1 ? 's' : ''} (blue: a wire on the parts side)` : ''}.`);
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+  // the newest traces draw themselves from the start pad to the end pad (glowing), a stuck connection flashes red
+  function drawRouting() {
+    if (!rt) return;
+    const now = performance.now();
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const a of rt.anim) {
+      const k = Math.min(1, (now - a.t0) / GROW);
+      if (k >= 1 && now - a.t0 > GROW + 500) continue;
+      const seg = []; let tot = 0; for (let i = 1; i < a.pts.length; i++) tot += Math.hypot(a.pts[i][0] - a.pts[i - 1][0], a.pts[i][1] - a.pts[i - 1][1]);
+      let left = tot * k; seg.push(a.pts[0]);
+      for (let i = 1; i < a.pts.length && left > 0; i++) { const d = Math.hypot(a.pts[i][0] - a.pts[i - 1][0], a.pts[i][1] - a.pts[i - 1][1]); if (d <= left) { seg.push(a.pts[i]); left -= d; } else { const f = left / d; seg.push([a.pts[i - 1][0] + (a.pts[i][0] - a.pts[i - 1][0]) * f, a.pts[i - 1][1] + (a.pts[i][1] - a.pts[i - 1][1]) * f]); left = 0; } }
+      ctx.shadowColor = a.ok ? '#FFE16B' : '#FF6B6B'; ctx.shadowBlur = 14;
+      ctx.strokeStyle = a.ok ? '#FFE16B' : '#FF6B6B'; ctx.lineWidth = Math.max(2, a.w * view.s);
+      ctx.globalAlpha = k < 1 ? 1 : Math.max(0, 1 - (now - a.t0 - GROW) / 500);
+      if (!a.ok) ctx.setLineDash([6, 5]);
+      ctx.beginPath(); seg.forEach(([x, y], q) => (q ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke(); ctx.setLineDash([]);
+      if (k < 1 && a.ok) { const [hx, hy] = seg[seg.length - 1]; ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(sx(hx), sy(hy), Math.max(3, a.w * view.s * 0.8), 0, 7); ctx.fill(); }   // the "drill head" at the tip
+    }
+    ctx.restore();
   }
   // snap to the 0.635 mm grid and 45° steps from the previous point
   function routePoint(x, y) {
@@ -365,8 +442,23 @@ export function pcbView(api) {
       const pd = padAt(x, y);
       if (!route) {
         if (!pd) return say('Start on a pad (copper dot).');
-        route = { net: pd.net, pts: [[pd.x, pd.y]], w: L.rules.trace, from: pd }; routeBar.hidden = false;
-        say(`Routing ${netName(pd.net)}: tap to bend, tap a ${netName(pd.net)} pad to finish.`); draw(); return;
+        route = { net: pd.net, pts: [[pd.x, pd.y]], w: L.rules.trace, from: pd }; routeBar.hidden = false; jumpBtn.classList.remove('on');
+        say(`Routing ${netName(pd.net)}: tap to bend, tap a ${netName(pd.net)} pad to finish, ⤴ Jumper to hop over a trace.`); draw(); return;
+      }
+      if (route.jump) {
+        const last = route.pts[route.pts.length - 1];
+        if (pd && pd.net >= 0 && route.net >= 0 && pd.net !== route.net) return say(`That pad is on ${netName(pd.net)}, this trace is ${netName(route.net)}.`);
+        const end = pd ? [pd.x, pd.y] : routePoint(x, y);
+        const len = Math.hypot(end[0] - last[0], end[1] - last[1]);
+        if (len < 2.5) return say('Jumper too short: land it at least 2.54 mm away (one hole).');
+        // the trace so far ends at the jumper's first hole
+        const pts = cleanPath(route.pts);
+        if (pts.length >= 2) L.traces.push({ w: route.w, pts, auto: false });
+        L.jumpers = L.jumpers ?? []; L.jumpers.push({ x1: last[0], y1: last[1], x2: end[0], y2: end[1], auto: false });
+        jumpBtn.classList.remove('on');
+        if (pd) { route = null; routeBar.hidden = true; change(`Jumper added (${len.toFixed(2)} mm) and connected to the pad.`); return; }
+        route = { ...route, pts: [end], jump: false, from: null };
+        change(`Jumper added (${len.toFixed(2)} mm). Keep routing from its end, or ✓ Finish here.`); routeBar.hidden = false; return;
       }
       if (pd && pd !== route.from) {
         if (pd.net >= 0 && route.net >= 0 && pd.net !== route.net) return say(`That pad is on ${netName(pd.net)}, this trace is ${netName(route.net)}. Pick a ${netName(route.net)} pad.`);
@@ -452,31 +544,27 @@ export function pcbView(api) {
       el('div', { class: 'sub', text: `Isolation (V-bit) · cut width ${w.toFixed(3)} mm` }),
       grid(numIn('V-bit angle', C.vAngle, '°', v => setCam('vAngle', v)), numIn('Tip width', C.vTip, 'mm', v => setCam('vTip', v)), numIn('Depth', C.isoDepth, 'mm', v => setCam('isoDepth', v), 'copper is 0.035'),
         numIn('Passes', C.isoPasses, '', v => setCam('isoPasses', Math.max(1, Math.round(v)))), numIn('Overlap', C.isoOverlap * 100, '%', v => setCam('isoOverlap', Math.min(90, v) / 100)), numIn('Feed', C.isoFeed, 'mm/min', v => setCam('isoFeed', v)),
-        numIn('Plunge feed', C.plunge, 'mm/min', v => setCam('plunge', v)), numIn('Spindle', C.rpm, 'S', v => setCam('rpm', Math.max(1, Math.min(1000, Math.round(v)))), 'Fox9ner 0–1000 (1000 = full)')),
+        numIn('Plunge feed', C.plunge, 'mm/min', v => setCam('plunge', v)), numIn('Spindle', C.rpm, 'rpm', v => setCam('rpm', v), 'S value')),
       el('div', { class: 'sub', text: 'Drilling' }),
       grid(el('label', { class: 'field' }, el('span', { class: 'lab', text: 'Drill bits you have' }), Object.assign(el('input', { class: 'num wide', value: C.bits }), { onchange: (e) => setCam('bits', e.target.value) })),
         numIn('Drill depth', C.drillDepth, 'mm', v => setCam('drillDepth', v)), numIn('Drill feed', C.drillFeed, 'mm/min', v => setCam('drillFeed', v))),
       el('div', { class: 'sub', text: 'Cutout' }),
-      grid(sel2('Board cutout', C.cutMode, [['mill', 'Mill the edge (end mill + tabs)'], ['perf', 'Perforate (row of drill holes)']], v => setCam('cutMode', v))),
-      C.cutMode === 'perf' ? grid(numIn('Perforation bit', C.perfBit, 'mm', v => setCam('perfBit', Math.max(0.5, v))), numIn('Gap between holes', C.perfGap, 'mm', v => setCam('perfGap', Math.max(0.1, v)), 'smaller = easier to snap')) : null,
       grid(numIn('End mill', C.cutDia, 'mm', v => setCam('cutDia', v)), numIn('Board thickness', C.thick, 'mm', v => setCam('thick', v)), numIn('Cut depth', C.cutDepth, 'mm', v => setCam('cutDepth', v)),
         numIn('Step down', C.cutStep, 'mm', v => setCam('cutStep', v)), numIn('Cut feed', C.cutFeed, 'mm/min', v => setCam('cutFeed', v)), numIn('Tabs', C.tabs, '', v => setCam('tabs', Math.round(v))),
         numIn('Tab width', C.tabW, 'mm', v => setCam('tabW', v)), numIn('Tab height', C.tabH, 'mm', v => setCam('tabH', v)),
         numIn('Safe Z', C.zSafe, 'mm', v => setCam('zSafe', v)), numIn('Travel Z', C.zTravel, 'mm', v => setCam('zTravel', v))),
       el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: !!C.mirror, onchange: (e) => setCam('mirror', e.target.checked) }), ' Mirror for bottom copper (normal for single-sided)'),
-      el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: !!C.spotMarks, onchange: (e) => setCam('spotMarks', e.target.checked) }), ' Drill marks: V-bit dimple at every hole centre (end of isolation)'),
-      C.spotMarks ? grid(numIn('Drill mark depth', C.spotDepth, 'mm', v => setCam('spotDepth', Math.min(1, Math.max(0.05, Math.abs(v)))), '0.2 = small dimple')) : null,
       el('div', { class: 'row wrap' }, btn('🛠 Make G-code', () => { showCam = true; makeCam(); renderPanel(); }), btn(showCam ? 'Hide toolpaths' : 'Show toolpaths', () => { showCam = !showCam; if (showCam && !cam) makeCam(); renderPanel(); draw(); })));
     if (cam) {
       const st = cam.stats, total = st.iso.minutes + st.drill.minutes + st.cut.minutes;
       const name = (c.title ?? 'board').replace(/[^\w.-]+/g, '_');
       camSec.append(el('div', { class: 'readouts' },
-        ...[['Isolation', `${cam.iso.loops.length} loops · ${Math.ceil(st.iso.minutes)} min`], ['Drilling', `${st.drill.holes} holes (${st.drill.bits.join(', ')} mm) · ${Math.ceil(st.drill.minutes)} min`], ['Cutout', `${st.cut.mode === 'perf' ? `${st.cut.holes} perforation holes` : `${st.cut.passes} passes`} · ${Math.ceil(st.cut.minutes)} min`], ['Total', `≈ ${Math.ceil(total)} min`]]
+        ...[['Isolation', `${cam.iso.loops.length} loops · ${Math.ceil(st.iso.minutes)} min`], ['Drilling', `${st.drill.holes} holes (${st.drill.bits.join(', ')} mm) · ${Math.ceil(st.drill.minutes)} min`], ['Cutout', `${st.cut.passes} passes · ${Math.ceil(st.cut.minutes)} min`], ['Total', `≈ ${Math.ceil(total)} min`]]
           .map(([l, v], k) => el('div', { class: 'ro' + (k === 3 ? ' hi' : '') }, el('span', { class: 'rl', text: l }), el('span', { class: 'rv', text: v })))),
         cam.warn.length ? el('div', { class: 'flags' }, cam.warn.map(([l, t]) => el('div', { class: 'flag ' + l, text: t }))) : el('div', { class: 'flag ok', text: 'Every gap is wider than the V-bit cut.' }),
         el('div', { class: 'row wrap' },
           btn('⬇ 1 isolation.nc', () => api.shareFile(`${name}-1-isolation.nc`, st.iso.gcode, 'text/plain')),
-          ...st.drill.files.map((f, k, all) => { const tag = all.length > 1 ? `2${'abcdefgh'[k] ?? k} drill ${f.bit}mm` : '2 drill'; return btn(`⬇ ${tag}.nc`, () => api.shareFile(`${name}-${tag.replace(/ /g, '-')}.nc`, f.gcode, 'text/plain')); }),
+          btn('⬇ 2 drill.nc', () => api.shareFile(`${name}-2-drill.nc`, st.drill.gcode, 'text/plain')),
           btn('⬇ 3 cutout.nc', () => api.shareFile(`${name}-3-cutout.nc`, st.cut.gcode, 'text/plain')),
           btn('⬇ copper.pdf (print 1:1)', () => api.shareFile(`${name}-copper.pdf`, copperPdf(api.getC(), undefined, name), 'application/pdf')),
           btn('⬇ copper.svg', () => api.shareFile(`${name}-copper.svg`, copperSvg(api.getC()), 'image/svg+xml'))),
@@ -484,10 +572,8 @@ export function pcbView(api) {
           'On the 3018:',
           '1. Tape / clamp the copper blank flat. Home or jog to its lower-left corner → set X0 Y0.',
           '2. V-bit in. Touch Z to the copper (paper method or probe) → Z0. Run 1-isolation.nc.',
-          ...(st.drill.files.length > 1
-            ? st.drill.files.map((f, k) => `3${'abcdefgh'[k] ?? k}. Drill bit ${f.bit} mm in, Z0 again (keep X0 Y0), run 2${'abcdefgh'[k] ?? k}-drill-${f.bit}mm.nc (${f.holes} holes).`)
-            : [`3. Drill bit ${st.drill.bits[0] ?? ''} mm in, Z0 again (keep X0 Y0), run 2-drill.nc.`]),
-          C.cutMode === 'perf' ? `4. ${C.perfBit} mm drill bit in, Z0 again (keep X0 Y0), run 3-cutout.nc. Snap the board out along the holes, file the edge.` : `4. ${C.cutDia} mm end mill in, Z0 again (keep X0 Y0), run 3-cutout.nc. Snap the tabs, sand the edges.`,
+          `3. Drill bit ${st.drill.bits[0] ?? ''} mm in, Z0 again, run 2-drill.nc (it pauses for each bit change).`,
+          `4. ${C.cutDia} mm end mill in, Z0 again, run 3-cutout.nc. Snap the tabs, sand the edges.`,
           'Tip: a probe or auto-level (later) helps a lot when the blank is not perfectly flat.'].join('\n') }));
     }
     // Gerber + drill (same kind of files Proteus makes) for the Fox9ner web app
