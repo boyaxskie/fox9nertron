@@ -13,13 +13,13 @@ const COL = { bg: '#0F1317', board: '#16352A', edge: '#6FAF8A', cu: '#D9894A', c
 export function pcbView(api) {
   // api: { getC, commit(push), undo, redo, say, shareFile, toSchematic }
   let L = null, an = null, errs = [], cam = null, showCam = false;
-  let mode = 'move', sel = null, route = null, hover = null;
+  let mode = 'move', sel = null, route = null, hover = null, jfirst = null;   // jfirst: first hole of a jumper being placed
   const view = { ox: 20, oy: 20, s: 8 };
   const btn = (t, f, cls = '') => el('button', { class: 'sb ' + cls, type: 'button', text: t, onclick: f });
-  const modeBtns = { move: btn('✋ Move', () => setMode('move')), route: btn('✏ Route', () => setMode('route')), delete: btn('🗑 Delete', () => { if (mode === 'move' && deleteSel()) return; setMode('delete'); }) };
+  const modeBtns = { move: btn('✋ Move', () => setMode('move')), route: btn('✏ Route', () => setMode('route')), jumper: btn('⤴ Jumper', () => setMode('jumper')), delete: btn('🗑 Delete', () => { if (mode === 'move' && deleteSel()) return; setMode('delete'); }) };
   const camBtn = btn('🛠 G-code', () => { showCam = true; makeCam(); renderPanel(); panel.querySelector('.pcb-cam')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   const top = el('div', { class: 'sch-tools' },
-    btn('⚡ Schematic', () => api.toSchematic(), 'run'), modeBtns.move, modeBtns.route, modeBtns.delete,
+    btn('⚡ Schematic', () => api.toSchematic(), 'run'), modeBtns.move, modeBtns.route, modeBtns.jumper, modeBtns.delete,
     btn('↻', () => rotateSel(), 'icon'), btn('↶', () => { api.undo(); }, 'icon'), btn('↷', () => { api.redo(); }, 'icon'), btn('Fit', () => { fit(); draw(); }),
     btn('⚡ Autoroute', () => doAutoroute()), btn('✖ Clear traces', () => { L.traces = []; L.jumpers = []; cam = null; change('All traces removed.'); }), camBtn);
   const canvas = el('canvas', { class: 'sch-canvas' });
@@ -53,10 +53,10 @@ export function pcbView(api) {
   function analyzeNow() { const c = api.getC(); an = P.analyze(c); errs = P.drc(c, an); }
   function change(msg, push = true) { cam = null; const w0 = L.w, h0 = L.h; P.fitBoard(api.getC(), 1.5, true); if (L.w !== w0 || L.h !== h0) { msg = (msg ? msg + ' ' : '') + `Board grew to ${L.w} × ${L.h} mm.`; setTimeout(() => { W = 0; resize(); }, 0); } api.commit(push); analyzeNow(); renderPanel(); draw(); if (msg) say(msg); }
   function setMode(m) {
-    mode = m; route = null; routeBar.hidden = true;
+    mode = m; route = null; routeBar.hidden = true; jfirst = null;
     for (const [k, b] of Object.entries(modeBtns)) b.classList.toggle('on', k === m);
     syncNudge();
-    say({ move: 'Drag parts, labels and traces (corners or segments). Tap to select, arrows below for fine tuning. Tap empty board to pan.', route: 'Tap a pad to start a trace, tap to add bends, tap a pad of the same net to finish.', delete: 'Tap a trace or a jumper wire to delete it.' }[m]);
+    say({ move: 'Drag parts, labels and traces (corners or segments). Tap to select, arrows below for fine tuning. Tap empty board to pan.', route: 'Tap a pad to start a trace, tap to add bends, tap a pad of the same net to finish.', jumper: 'Jumper: tap anywhere for the first hole, then anywhere for the second (the white dashed wire joins them on the parts side). Drag a hole to move it. Then ✏ Route traces to the holes like any pad.', delete: 'Tap a trace or a jumper wire to delete it.' }[m]);
     draw();
   }
 
@@ -161,8 +161,8 @@ export function pcbView(api) {
     }
     // jumper wires (on the parts side)
     for (const [ji, j] of (L.jumpers ?? []).entries()) {
-      ctx.strokeStyle = sel?.kind === 'jumper' && sel.i === ji ? COL.sel : COL.jump; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(sx(j.x1), sy(j.y1)); ctx.lineTo(sx(j.x2), sy(j.y2)); ctx.stroke();
+      ctx.strokeStyle = sel?.kind === 'jumper' && sel.i === ji ? COL.sel : '#FFFFFF'; ctx.lineWidth = Math.max(3, 0.9 * view.s); ctx.lineCap = 'butt'; ctx.setLineDash([Math.max(6, 1.6 * view.s), Math.max(4, 1.1 * view.s)]);
+      ctx.beginPath(); ctx.moveTo(sx(j.x1), sy(j.y1)); ctx.lineTo(sx(j.x2), sy(j.y2)); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'round';
     }
     // ratsnest
     ctx.strokeStyle = COL.rat; ctx.lineWidth = 1.2; ctx.setLineDash([4, 4]);
@@ -191,9 +191,19 @@ export function pcbView(api) {
       ctx.beginPath(); pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke(); ctx.globalAlpha = 1;
       if (route.jump && hover?.pt) {   // pending jumper: blue wire with a hole at each end
         const [x1, y1] = route.pts[route.pts.length - 1], [x2, y2] = hover.pt;
-        ctx.strokeStyle = COL.jump; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(sx(x1), sy(y1)); ctx.lineTo(sx(x2), sy(y2)); ctx.stroke(); ctx.setLineDash([]);
-        ctx.fillStyle = COL.jump; for (const [x, y] of [[x1, y1], [x2, y2]]) { ctx.beginPath(); ctx.arc(sx(x), sy(y), Math.max(3, 0.9 * view.s), 0, 7); ctx.fill(); }
+        ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = Math.max(3, 0.9 * view.s); ctx.setLineDash([Math.max(6, 1.6 * view.s), Math.max(4, 1.1 * view.s)]); ctx.beginPath(); ctx.moveTo(sx(x1), sy(y1)); ctx.lineTo(sx(x2), sy(y2)); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = '#FFFFFF'; for (const [x, y] of [[x1, y1], [x2, y2]]) { ctx.beginPath(); ctx.arc(sx(x), sy(y), Math.max(3, 0.9 * view.s), 0, 7); ctx.fill(); }
         ctx.fillStyle = '#E6EDF3'; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText(`jumper ${Math.hypot(x2 - x1, y2 - y1).toFixed(1)} mm`, sx(x2) + 8, sy(y2) - 4);
+      }
+    }
+    if (mode === 'jumper' && (jfirst || hover?.pt)) {
+      const a = jfirst ?? hover.pt, b = jfirst ? hover?.pt ?? jfirst : null;
+      ctx.fillStyle = '#FFFFFF';
+      for (const q of [a, b]) if (q) { ctx.beginPath(); ctx.arc(sx(q[0]), sy(q[1]), Math.max(3, 0.9 * view.s), 0, 7); ctx.fill(); ctx.fillStyle = COL.hole; ctx.beginPath(); ctx.arc(sx(q[0]), sy(q[1]), Math.max(1, 0.4 * view.s), 0, 7); ctx.fill(); ctx.fillStyle = '#FFFFFF'; }
+      if (b && jfirst) {
+        ctx.strokeStyle = '#FFFFFF'; ctx.globalAlpha = 0.85; ctx.lineWidth = Math.max(3, 0.9 * view.s); ctx.setLineDash([Math.max(6, 1.6 * view.s), Math.max(4, 1.1 * view.s)]);
+        ctx.beginPath(); ctx.moveTo(sx(a[0]), sy(a[1])); ctx.lineTo(sx(b[0]), sy(b[1])); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+        ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText(`${Math.hypot(b[0] - a[0], b[1] - a[1]).toFixed(1)} mm`, sx(b[0]) + 8, sy(b[1]) - 4);
       }
     }
     drawRouting();
@@ -256,7 +266,7 @@ export function pcbView(api) {
         const ms = Math.round(performance.now() - rt.startT);
         rt = null; rtBox.hidden = true;
         if (res.stopped) { change(`Stopped: ${res.routed} routed, ${res.failed.length} still open (yellow lines). ⚡ Autoroute again to finish.`); return; }
-        change(res.failed.length ? `Routed ${res.routed}, ${res.failed.length} could not fit (yellow lines). Move parts apart, make the board bigger or route them by hand.` : `All connections routed in ${(ms / 1000).toFixed(1)} s${res.jumpers ? ` with ${res.jumpers} jumper wire${res.jumpers > 1 ? 's' : ''} (blue: a wire on the parts side)` : ''}.`);
+        change(res.failed.length ? `Routed ${res.routed}, ${res.failed.length} could not fit (yellow lines). Move parts apart, make the board bigger or route them by hand.` : `All connections routed in ${(ms / 1000).toFixed(1)} s${res.jumpers ? ` with ${res.jumpers} jumper wire${res.jumpers > 1 ? 's' : ''} (white dashed: a wire on the parts side)` : ''}.`);
         return;
       }
       requestAnimationFrame(tick);
@@ -384,6 +394,14 @@ export function pcbView(api) {
     if (ptrs.size === 2) { const v = [...ptrs.values()]; pinch = Math.hypot(v[0][0] - v[1][0], v[0][1] - v[1][1]); down = { pinch: true, last: mid() }; return; }
     const x = wx(px), y = wy(py);
     down = { px, py, x, y, moved: false };
+    if (mode === 'move' || mode === 'jumper') {
+      const tol = Math.max(0.9, 12 / view.s);
+      for (const [ji, j] of (L.jumpers ?? []).entries()) for (const k of [0, 1]) {
+        const hx = k ? j.x2 : j.x1, hy = k ? j.y2 : j.y1;
+        if (Math.hypot(hx - x, hy - y) < tol && !down.jend) down.jend = { i: ji, k, x0: hx, y0: hy, orig: structuredClone(L.traces) };
+      }
+      if (down.jend) return;
+    }
     if (mode === 'move') {
       const nb = [...nameBoxes].reverse().find(b => px >= b.x0 && px <= b.x1 && py >= b.y0 && py <= b.y1);
       const pd = padAt(x, y), ti = pd ? -1 : traceAt(x, y);
@@ -395,13 +413,20 @@ export function pcbView(api) {
   canvas.addEventListener('pointermove', (e) => {
     const [px, py] = pos(e);
     if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, [px, py]);
-    if (!down) { if (route) { const pd = padAt(wx(px), wy(py)); hover = { pt: pd ? [pd.x, pd.y] : routePoint(wx(px), wy(py)), net: route.net }; draw(); } return; }
+    if (!down) { if (route) { const pd = padAt(wx(px), wy(py)); hover = { pt: pd ? [pd.x, pd.y] : routePoint(wx(px), wy(py)), net: route.net }; draw(); } else if (mode === 'jumper') { hover = { pt: [P.snap(wx(px), 0.1), P.snap(wy(py), 0.1)] }; draw(); } return; }
     if (down.pinch && ptrs.size === 2) {
       const v = [...ptrs.values()], d = Math.hypot(v[0][0] - v[1][0], v[0][1] - v[1][1]), m = mid();
       view.ox += m[0] - down.last[0]; view.oy += m[1] - down.last[1]; zoomAt(d / pinch, m[0], m[1]); pinch = d; down.last = m; draw(); return;
     }
     if (Math.hypot(px - down.px, py - down.py) > 6) down.moved = true;
     if (!down.moved) return;
+    if (down.jend) {          // move one jumper hole anywhere; trace ends sitting on it come along
+      const d = down.jend, nx = Math.round(P.snap(d.x0 + (px - down.px) / view.s, 0.1) * 1000) / 1000, ny = Math.round(P.snap(d.y0 + (py - down.py) / view.s, 0.1) * 1000) / 1000;
+      const j = L.jumpers[d.i]; if (d.k) { j.x2 = nx; j.y2 = ny; } else { j.x1 = nx; j.y1 = ny; }
+      L.traces = structuredClone(d.orig);
+      for (const t of L.traces) for (const q of [0, t.pts.length - 1]) if (Math.abs(t.pts[q][0] - d.x0) < 1e-6 && Math.abs(t.pts[q][1] - d.y0) < 1e-6) t.pts[q] = [nx, ny];
+      sel = { kind: 'jumper', i: d.i }; analyzeNow(); draw(); return;
+    }
     if (down.tr) {
       const d = down.tr, dx = P.snap((px - down.px) / view.s, step), dy = P.snap((py - down.py) / view.s, step);
       if (dx === d.dx && dy === d.dy) return;
@@ -425,6 +450,9 @@ export function pcbView(api) {
     const d = down; if (!d) return;
     if (d.pinch) { if (!ptrs.size) down = null; return; }
     down = null;
+    if (d.jend && d.moved) { const j = L.jumpers[d.jend.i]; change(`Jumper hole moved (${Math.hypot(j.x2 - j.x1, j.y2 - j.y1).toFixed(2)} mm long now).`); return; }
+    if (d.jend && !d.moved && mode === 'move') { sel = { kind: 'jumper', i: d.jend.i }; renderPanel(); draw(); return; }
+    if (d.jend && !d.moved && !jfirst) { sel = { kind: 'jumper', i: d.jend.i }; say('That is a jumper hole: drag it to move it, or tap empty board for a new jumper.'); renderPanel(); draw(); return; }
     if (d.tr && d.moved && d.tr.res) { sel = { kind: 'trace', i: d.tr.i, ...tidyTrace(d.tr.i, d.tr.res.moved) }; change('Trace reshaped. Use the arrows for fine tuning.'); return; }
     if (d.tr && !d.moved) { sel = { kind: 'trace', i: d.tr.i, ...d.tr.part }; renderPanel(); draw(); return; }
     if (d.lab && d.moved) { sel = { kind: 'part', id: d.lab.id }; change(`${d.lab.name} label moved.`); return; }
@@ -438,6 +466,16 @@ export function pcbView(api) {
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); const [px, py] = pos(e); zoomAt(Math.exp(-e.deltaY * 0.0015), px, py); draw(); }, { passive: false });
 
   function tap(x, y) {
+    if (mode === 'jumper') {
+      const pd = padAt(x, y), onPd = pd && pd.jumper == null && Math.hypot(pd.x - x, pd.y - y) < Math.min(pd.w, pd.h) / 2;
+      const pt = onPd ? [pd.x, pd.y] : [P.snap(x, 0.1), P.snap(y, 0.1)].map(v => Math.round(v * 1000) / 1000);
+      if (!jfirst) { jfirst = pt; say('First hole placed. Tap where the second hole goes (tap the first hole again to cancel).'); draw(); return; }
+      const len = Math.hypot(pt[0] - jfirst[0], pt[1] - jfirst[1]);
+      if (len < 0.5) { jfirst = null; say('Jumper cancelled.'); draw(); return; }
+      if (len < 2.5) return say('Too short: the second hole must be at least 2.54 mm (one hole) away.');
+      L.jumpers = L.jumpers ?? []; L.jumpers.push({ x1: jfirst[0], y1: jfirst[1], x2: pt[0], y2: pt[1], auto: false });
+      jfirst = null; change(`Jumper added (${len.toFixed(2)} mm). Tap for the next one, or ✏ Route traces to its two holes.`); return;
+    }
     if (mode === 'route') {
       const pd = padAt(x, y);
       if (!route) {
