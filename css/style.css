@@ -386,3 +386,5 @@ html.pcb-fs, html.pcb-fs body { overflow: hidden; }
 .fm-row .sel.sm { padding: 7px 6px; font-size: 13px; width: auto; }
 .fm-body .pcb-routebar, .fm-body .pcb-nudge { border-top: 1px solid var(--line); padding-top: 6px; }
 .sb:disabled { opacity: 0.45; }
+.rt-fill.busy { animation: rtbusy 1s ease-in-out infinite alternate; }
+@keyframes rtbusy { from { opacity: 1; } to { opacity: 0.45; } }

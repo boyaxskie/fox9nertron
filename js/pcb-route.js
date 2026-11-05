@@ -70,21 +70,24 @@ export function* autorouteSteps(c, { keepManual = true, onProgress } = {}) {
     let failed = [];
     let routed = 0, done = 0;
     const total0 = edges.length;
+    const stuckNets = new Set();     // nets that already failed in this try: not searched again in the clean-up rounds (that search is the slow part)
     for (let round = 0; round < 4 && edges.length; round++) {
+    if (round) edges = edges.filter(e => !stuckNets.has(e.net));
+    if (!edges.length) break;
     failed = [];
     for (const e of edges) {
       done++;
       // current connectivity (earlier routes may have joined this already)
       const now = analyze(c, nl);
-      if (sameCluster(now, e.a, e.b)) { yield { attempt, attempts: ATTEMPTS, done: Math.min(done, total0), total: total0, routed, failed: failed.length, net: e.net, newTraces: [], newJumpers: [], ok: true, skip: true }; continue; }
+      if (sameCluster(now, e.a, e.b)) { yield { attempt, round, attempts: ATTEMPTS, done: Math.min(done, total0), total: total0, routed, failed: failed.length, net: e.net, newTraces: [], newJumpers: [], ok: true, skip: true }; continue; }
       const net = e.net, power = nl.nets[net]?.power;
       let ok = false;
       const jumpsOk = R.jumpers !== false, early = jumpsOk && attempt >= 2;      // later attempts: hop early instead of boxing pads in
       for (const [w, jump] of [...(power ? [[R.power, early]] : []), [R.trace, early], ...(jumpsOk && !early ? [[R.trace, true]] : [])]) {
         const r = routeOne(c, now, nl, e, w, gs, nx, ny, N, jump);
-        if (r) { for (const pts of r.traces) L.traces.push({ w, pts, auto: true }); for (const j of r.jumpers) L.jumpers.push({ ...j, auto: true }); ok = true; routed++; yield { attempt, attempts: ATTEMPTS, done: Math.min(done, total0), total: total0, routed, failed: failed.length, net, newTraces: r.traces.map(pts => ({ w, pts })), newJumpers: r.jumpers, ok: true, a: e.a, b: e.b }; break; }
+        if (r) { for (const pts of r.traces) L.traces.push({ w, pts, auto: true }); for (const j of r.jumpers) L.jumpers.push({ ...j, auto: true }); ok = true; routed++; yield { attempt, round, attempts: ATTEMPTS, done: Math.min(done, total0), total: total0, routed, failed: failed.length, net, newTraces: r.traces.map(pts => ({ w, pts })), newJumpers: r.jumpers, ok: true, a: e.a, b: e.b }; break; }
       }
-      if (!ok) { failed.push(e); yield { attempt, attempts: ATTEMPTS, done: Math.min(done, total0), total: total0, routed, failed: failed.length, net, newTraces: [], newJumpers: [], ok: false, a: e.a, b: e.b }; }
+      if (!ok) { failed.push(e); stuckNets.add(e.net); yield { attempt, round, attempts: ATTEMPTS, done: Math.min(done, total0), total: total0, routed, failed: failed.length, net, newTraces: [], newJumpers: [], ok: false, a: e.a, b: e.b }; }
       onProgress?.(routed, edges.length);
     }
     // a route may have joined a different piece of the same net: route what is still missing

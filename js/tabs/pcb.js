@@ -303,7 +303,7 @@ export function pcbView(api) {
     const c = api.getC();
     sel = null; route = null; renderPanel();
     rt = { gen: autorouteSteps(c, { keepManual: true }), anim: [], tryN: 0, startT: performance.now(), lastNew: 0, n: 0, stop: false };
-    rtBox.hidden = false; rtBar.style.width = '0%'; rtTxt.textContent = 'Routing…';
+    rtBox.hidden = false; rtBar.style.width = '0%'; rtBar.classList.remove('busy'); rtTxt.textContent = 'Routing…';
     const total0 = Math.max(1, an?.rats?.length ?? 1);
     const pace = total0 > 40 ? 0 : total0 > 15 ? 60 : 140;      // big boards: no waiting between traces
     const tick = () => {
@@ -330,7 +330,7 @@ export function pcbView(api) {
       if (rt.paused && !res) {
         const q = rt.paused;
         rtBar.style.width = '100%';
-        rtTxt.textContent = `Try ${q.attempt + 1} done: ${q.routed} of ${q.total} routed · ${q.failed} stuck${q.bestFailed < q.failed ? ` (best try so far: ${q.bestFailed} stuck)` : ''}. 🔁 Retry tries a new order (${q.attempts - q.attempt - 1} left).`;
+        rtBar.classList.remove('busy'); rtTxt.textContent = `Try ${q.attempt + 1} done: ${q.routed} of ${q.total} routed · ${q.failed} stuck${q.bestFailed < q.failed ? ` (best try so far: ${q.bestFailed} stuck)` : ''}. 🔁 Retry tries a new order (${q.attempts - q.attempt - 1} left).`;
         rtPause(true); an = P.analyze(api.getC()); renderPanel(); draw();
         say(`Try ${q.attempt + 1} finished with ${q.failed} connection${q.failed > 1 ? 's' : ''} stuck. Tap 🔁 Retry for another try, 🧩 Place + route to rearrange the parts first, or ✓ Keep.`);
         return;                        // waits for the user
@@ -340,7 +340,10 @@ export function pcbView(api) {
         const frac = (v.attempt + v.done / Math.max(1, v.total)) / (v.attempt + 1);
         rtBar.style.width = `${Math.round(Math.min(1, v.done / Math.max(1, v.total)) * 100)}%`;
         rtBar.classList.toggle('retry', v.attempt > 0);
-        rtTxt.textContent = `${Math.round(Math.min(1, v.done / Math.max(1, v.total)) * 100)} % · ${v.attempt ? `Try ${v.attempt + 1} of ${v.attempts} (new order) · ` : ''}${v.done} / ${v.total} connections · ${v.routed} routed${v.failed ? ` · ${v.failed} stuck` : ''}`;
+        rtTxt.textContent = v.round
+          ? `${v.attempt ? `Try ${v.attempt + 1} of ${v.attempts} · ` : ''}checking pieces that came apart (pass ${v.round + 1}) · ${v.routed} routed`
+          : `${Math.round(Math.min(1, v.done / Math.max(1, v.total)) * 100)} % · ${v.attempt ? `Try ${v.attempt + 1} of ${v.attempts} (new order) · ` : ''}${v.done} / ${v.total} connections · ${v.routed} routed${v.failed ? ` · ${v.failed} stuck` : ''}${v.done >= v.total ? ' · finishing the try…' : ''}`;
+        rtBar.classList.toggle('busy', v.done >= v.total || !!v.round);
         void frac;
       }
       an = P.analyze(api.getC());
