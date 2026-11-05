@@ -175,9 +175,12 @@ export function pcbView(api) {
       ctx.lineWidth = 1; ctx.strokeStyle = COL.iso;
       for (const lp of cam.iso.loops) { ctx.beginPath(); lp.pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.closePath(); ctx.stroke(); }
       ctx.strokeStyle = COL.cut; ctx.lineWidth = 1.5;
-      const last = cam.cut[cam.cut.length - 1];
-      ctx.beginPath(); last.pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke();
-      ctx.fillStyle = COL.cut; for (const [x, y, z] of last.pts) if (z > last.z + 1e-6) { ctx.beginPath(); ctx.arc(sx(x), sy(y), 2.5, 0, 7); ctx.fill(); }
+      if (cam.perf) for (const h of cam.perf) { ctx.beginPath(); ctx.arc(sx(h.x), sy(h.y), Math.max(1.5, L.cam.perfBit / 2 * view.s), 0, 7); ctx.stroke(); }
+      else {
+        const last = cam.cut[cam.cut.length - 1];
+        ctx.beginPath(); last.pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke();
+        ctx.fillStyle = COL.cut; for (const [x, y, z] of last.pts) if (z > last.z + 1e-6) { ctx.beginPath(); ctx.arc(sx(x), sy(y), 2.5, 0, 7); ctx.fill(); }
+      }
       ctx.strokeStyle = COL.drill; ctx.lineWidth = 1.2;
       for (const g of cam.holes) for (const h of g.holes) { ctx.beginPath(); ctx.arc(sx(h.x), sy(h.y), Math.max(2, g.bit / 2 * view.s), 0, 7); ctx.stroke(); }
       ctx.fillStyle = COL.bad; for (const t of cam.tight) { ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 6, 0, 7); ctx.fill(); }
@@ -656,27 +659,31 @@ export function pcbView(api) {
       el('div', { class: 'sub', text: `Isolation (V-bit) · cut width ${w.toFixed(3)} mm` }),
       grid(numIn('V-bit angle', C.vAngle, '°', v => setCam('vAngle', v)), numIn('Tip width', C.vTip, 'mm', v => setCam('vTip', v)), numIn('Depth', C.isoDepth, 'mm', v => setCam('isoDepth', v), 'copper is 0.035'),
         numIn('Passes', C.isoPasses, '', v => setCam('isoPasses', Math.max(1, Math.round(v)))), numIn('Overlap', C.isoOverlap * 100, '%', v => setCam('isoOverlap', Math.min(90, v) / 100)), numIn('Feed', C.isoFeed, 'mm/min', v => setCam('isoFeed', v)),
-        numIn('Plunge feed', C.plunge, 'mm/min', v => setCam('plunge', v)), numIn('Spindle', C.rpm, 'rpm', v => setCam('rpm', v), 'S value')),
+        numIn('Plunge feed', C.plunge, 'mm/min', v => setCam('plunge', v)), numIn('Spindle', C.rpm, 'S', v => setCam('rpm', Math.max(1, Math.min(1000, Math.round(v)))), 'Fox9ner 0–1000 (1000 = full)')),
       el('div', { class: 'sub', text: 'Drilling' }),
       grid(el('label', { class: 'field' }, el('span', { class: 'lab', text: 'Drill bits you have' }), Object.assign(el('input', { class: 'num wide', value: C.bits }), { onchange: (e) => setCam('bits', e.target.value) })),
         numIn('Drill depth', C.drillDepth, 'mm', v => setCam('drillDepth', v)), numIn('Drill feed', C.drillFeed, 'mm/min', v => setCam('drillFeed', v))),
       el('div', { class: 'sub', text: 'Cutout' }),
+      grid(sel2('Board cutout', C.cutMode, [['mill', 'Mill the edge (end mill + tabs)'], ['perf', 'Perforate (row of drill holes)']], v => setCam('cutMode', v))),
+      C.cutMode === 'perf' ? grid(numIn('Perforation bit', C.perfBit, 'mm', v => setCam('perfBit', Math.max(0.5, v))), numIn('Gap between holes', C.perfGap, 'mm', v => setCam('perfGap', Math.max(0.1, v)), 'smaller = easier to snap')) : null,
       grid(numIn('End mill', C.cutDia, 'mm', v => setCam('cutDia', v)), numIn('Board thickness', C.thick, 'mm', v => setCam('thick', v)), numIn('Cut depth', C.cutDepth, 'mm', v => setCam('cutDepth', v)),
         numIn('Step down', C.cutStep, 'mm', v => setCam('cutStep', v)), numIn('Cut feed', C.cutFeed, 'mm/min', v => setCam('cutFeed', v)), numIn('Tabs', C.tabs, '', v => setCam('tabs', Math.round(v))),
         numIn('Tab width', C.tabW, 'mm', v => setCam('tabW', v)), numIn('Tab height', C.tabH, 'mm', v => setCam('tabH', v)),
         numIn('Safe Z', C.zSafe, 'mm', v => setCam('zSafe', v)), numIn('Travel Z', C.zTravel, 'mm', v => setCam('zTravel', v))),
       el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: !!C.mirror, onchange: (e) => setCam('mirror', e.target.checked) }), ' Mirror for bottom copper (normal for single-sided)'),
+      el('label', { class: 'chk' }, Object.assign(el('input', { type: 'checkbox' }), { checked: !!C.spotMarks, onchange: (e) => setCam('spotMarks', e.target.checked) }), ' Drill marks: V-bit dimple at every hole centre (end of isolation)'),
+      C.spotMarks ? grid(numIn('Drill mark depth', C.spotDepth, 'mm', v => setCam('spotDepth', Math.min(1, Math.max(0.05, Math.abs(v)))), '0.2 = small dimple')) : null,
       el('div', { class: 'row wrap' }, btn('🛠 Make G-code', () => { showCam = true; makeCam(); renderPanel(); }), btn(showCam ? 'Hide toolpaths' : 'Show toolpaths', () => { showCam = !showCam; if (showCam && !cam) makeCam(); renderPanel(); draw(); })));
     if (cam) {
       const st = cam.stats, total = st.iso.minutes + st.drill.minutes + st.cut.minutes;
       const name = (c.title ?? 'board').replace(/[^\w.-]+/g, '_');
       camSec.append(el('div', { class: 'readouts' },
-        ...[['Isolation', `${cam.iso.loops.length} loops · ${Math.ceil(st.iso.minutes)} min`], ['Drilling', `${st.drill.holes} holes (${st.drill.bits.join(', ')} mm) · ${Math.ceil(st.drill.minutes)} min`], ['Cutout', `${st.cut.passes} passes · ${Math.ceil(st.cut.minutes)} min`], ['Total', `≈ ${Math.ceil(total)} min`]]
+        ...[['Isolation', `${cam.iso.loops.length} loops · ${Math.ceil(st.iso.minutes)} min`], ['Drilling', `${st.drill.holes} holes (${st.drill.bits.join(', ')} mm) · ${Math.ceil(st.drill.minutes)} min`], ['Cutout', `${st.cut.mode === 'perf' ? `${st.cut.holes} perforation holes` : `${st.cut.passes} passes`} · ${Math.ceil(st.cut.minutes)} min`], ['Total', `≈ ${Math.ceil(total)} min`]]
           .map(([l, v], k) => el('div', { class: 'ro' + (k === 3 ? ' hi' : '') }, el('span', { class: 'rl', text: l }), el('span', { class: 'rv', text: v })))),
         cam.warn.length ? el('div', { class: 'flags' }, cam.warn.map(([l, t]) => el('div', { class: 'flag ' + l, text: t }))) : el('div', { class: 'flag ok', text: 'Every gap is wider than the V-bit cut.' }),
         el('div', { class: 'row wrap' },
           btn('⬇ 1 isolation.nc', () => api.shareFile(`${name}-1-isolation.nc`, st.iso.gcode, 'text/plain')),
-          btn('⬇ 2 drill.nc', () => api.shareFile(`${name}-2-drill.nc`, st.drill.gcode, 'text/plain')),
+          ...st.drill.files.map((f, k, all) => { const tag = all.length > 1 ? `2${'abcdefgh'[k] ?? k} drill ${f.bit}mm` : '2 drill'; return btn(`⬇ ${tag}.nc`, () => api.shareFile(`${name}-${tag.replace(/ /g, '-')}.nc`, f.gcode, 'text/plain')); }),
           btn('⬇ 3 cutout.nc', () => api.shareFile(`${name}-3-cutout.nc`, st.cut.gcode, 'text/plain')),
           btn('⬇ copper.pdf (print 1:1)', () => api.shareFile(`${name}-copper.pdf`, copperPdf(api.getC(), undefined, name), 'application/pdf')),
           btn('⬇ copper.svg', () => api.shareFile(`${name}-copper.svg`, copperSvg(api.getC()), 'image/svg+xml'))),
@@ -684,8 +691,10 @@ export function pcbView(api) {
           'On the 3018:',
           '1. Tape / clamp the copper blank flat. Home or jog to its lower-left corner → set X0 Y0.',
           '2. V-bit in. Touch Z to the copper (paper method or probe) → Z0. Run 1-isolation.nc.',
-          `3. Drill bit ${st.drill.bits[0] ?? ''} mm in, Z0 again, run 2-drill.nc (it pauses for each bit change).`,
-          `4. ${C.cutDia} mm end mill in, Z0 again, run 3-cutout.nc. Snap the tabs, sand the edges.`,
+          ...(st.drill.files.length > 1
+            ? st.drill.files.map((f, k) => `3${'abcdefgh'[k] ?? k}. Drill bit ${f.bit} mm in, Z0 again (keep X0 Y0), run 2${'abcdefgh'[k] ?? k}-drill-${f.bit}mm.nc (${f.holes} holes).`)
+            : [`3. Drill bit ${st.drill.bits[0] ?? ''} mm in, Z0 again (keep X0 Y0), run 2-drill.nc.`]),
+          C.cutMode === 'perf' ? `4. ${C.perfBit} mm drill bit in, Z0 again (keep X0 Y0), run 3-cutout.nc. Snap the board out along the holes, file the edge.` : `4. ${C.cutDia} mm end mill in, Z0 again (keep X0 Y0), run 3-cutout.nc. Snap the tabs, sand the edges.`,
           'Tip: a probe or auto-level (later) helps a lot when the blank is not perfectly flat.'].join('\n') }));
     }
     // Gerber + drill (same kind of files Proteus makes) for the Fox9ner web app

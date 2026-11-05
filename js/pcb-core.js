@@ -254,9 +254,11 @@ export function netlist(c) {
 
 // ---------- layout ----------
 export const DEFAULT_CAM = {
-  vAngle: 30, vTip: 0.1, isoDepth: 0.1, isoPasses: 2, isoOverlap: 0.4, isoFeed: 150, plunge: 50, rpm: 10000,
+  vAngle: 30, vTip: 0.1, isoDepth: 0.15, isoPasses: 2, isoOverlap: 0.4, isoFeed: 150, plunge: 50, rpm: 1000, // rpm = Fox9ner S value (speed_map 0–1000)
   zSafe: 3, zTravel: 1, bits: '0.8, 1.0, 1.2', drillDepth: 1.8, drillFeed: 60,
   cutDia: 1.5, cutDepth: 1.7, cutStep: 0.4, cutFeed: 120, tabs: 4, tabW: 3, tabH: 0.6, thick: 1.6, mirror: true,
+  cutMode: 'mill', perfBit: 1.0, perfGap: 0.4, // cutout: 'mill' = end mill with tabs, 'perf' = row of drill holes
+  spotMarks: true, spotDepth: 0.2, // V-bit dimple at every hole centre (drill guide), done at the end of isolation
 };
 export const DEFAULT_RULES = { trace: 0.6, power: 1.0, clear: 0.4, grid: 0.25, edge: 0.6, bigPads: true };
 export function newLayout() { return { v: 1, w: 50, h: 40, parts: {}, traces: [], jumpers: [], cam: { ...DEFAULT_CAM }, rules: { ...DEFAULT_RULES } }; }
@@ -266,6 +268,13 @@ export function syncLayout(c) {
   setBigPads(c.pcb?.rules?.bigPads);
   const L = c.pcb ?? (c.pcb = newLayout());
   L.cam = { ...DEFAULT_CAM, ...L.cam }; L.rules = { ...DEFAULT_RULES, ...L.rules }; L.jumpers ??= [];
+  // one-time upgrade of older boards to Fox9ner settings: S1000 max, 2 isolation passes, 0.15 mm deep
+  if (!L.cam.f9v2) {
+    if (!(L.cam.rpm > 0 && L.cam.rpm <= 1000)) L.cam.rpm = 1000;
+    if (L.cam.isoPasses < 2) L.cam.isoPasses = 2;
+    if (L.cam.isoDepth < 0.15) L.cam.isoDepth = 0.15;
+    L.cam.f9v2 = true;
+  }
   const live = new Set();
   const fresh = [];
   for (const p of c.parts) {
