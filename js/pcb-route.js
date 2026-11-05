@@ -98,6 +98,8 @@ export function* autorouteSteps(c, { keepManual = true, onProgress } = {}) {
     if (!best || failed.length < best.failed.length || (failed.length === best.failed.length && L.jumpers.length < JSON.parse(best.jumpers).length)) best = res;
     if (!failed.length) break;
     for (const f of failed) hard.set(f.net, (hard.get(f.net) ?? 0) + 1);
+    // try finished with stuck connections: the app may wait here for the user (next('keep') = stop and keep the best try so far)
+    if (attempt < ATTEMPTS - 1) { const cmd = yield { pause: true, attempt, attempts: ATTEMPTS, routed, failed: failed.length, total: routed + failed.length, bestFailed: best.failed.length }; if (cmd === 'keep') break; }
   }
   L.traces = JSON.parse(best.traces); L.jumpers = JSON.parse(best.jumpers);
   return { routed: best.routed, failed: best.failed, jumpers: L.jumpers.filter(j => j.auto).length };
