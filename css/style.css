@@ -364,3 +364,4 @@ main.wide { max-width: none; }
 .rt-fill { height: 100%; width: 0; background: linear-gradient(90deg, #E8B04B, #FFE16B); transition: width .15s; }
 .rt-fill.retry { background: linear-gradient(90deg, #4FC3F7, #9BE3FF); }
 .rt-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font: 600 12px system-ui, sans-serif; color: #E6EDF3; }
+.sb.primary { background: var(--accent); color: #111; border-color: var(--accent); }
