@@ -240,11 +240,12 @@ export const TYPES = {
   KEYPAD: { label: 'Keypad 4×4 (tap the keys)', prefix: 'KP', pins: [[-5, -3], [-5, -2], [-5, -1], [-5, 0], [-5, 1], [-5, 2], [-5, 3], [-5, 4]], box: [-5, -4, 4, 5.2], props: {} },
   BUZZER: { label: 'Buzzer (active, 3–5 V)', prefix: 'BZ', pins: [[-2, 0], [2, 0]], box: [-2, -1.3, 2, 1.3], props: {} },
   LOCK: { label: 'Solenoid door lock (12 V)', prefix: 'LK', pins: [[-2, 0], [2, 0]], box: [-2, -1.6, 2, 1.4], props: { v: 12, r: 24, l: 0.05 } },
+  TB: { label: 'Terminal block (screw, 2–12 ways)', prefix: 'J', pins: [[-2, 0], [2, 0], [-2, 1], [2, 1]], box: [-1.2, -0.7, 1.2, 1.7], props: { n: 2, pitch: '5.08' } },
   GND: { label: 'Ground', prefix: 'GND', pins: [[0, 0]], box: [-0.8, 0, 0.8, 1.6], props: {} },
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'TL494', 'LM2596', 'IR2104', 'SR595', 'ESP32', 'UNO', 'LCD', 'OLED', 'ADS1115', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'ENC', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'RMOD', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'TL494', 'LM2596', 'IR2104', 'SR595', 'ESP32', 'UNO', 'LCD', 'OLED', 'ADS1115', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'ENC', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'RMOD', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'TB', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
 export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER', 'ENC', 'TL494', 'LM2596']);
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
@@ -280,7 +281,21 @@ export function fastestFreq(c) {
 const R_WIRE = 1e-4, R_OPEN = 1e12, G_MIN = 1e-12;
 
 export const rotPt = ([x, y], rot) => { for (let k = 0; k < (rot & 3); k++) [x, y] = [-y, x]; return [x, y]; };
-export const pinsOf = (p) => TYPES[p.type].pins.map(q => { const [x, y] = rotPt(q, p.rot); return [p.x + x, p.y + y]; });
+// screw terminal blocks: standard PCB pitches (rating ≈ the usual datasheet values; check yours)
+export const TB_PITCH = {
+  '3.5': { label: '3.5 mm (DG350 / KF350)', a: 8, v: 250, drill: 1.0, pad: 2.0, depth: 7.0 },
+  '3.81': { label: '3.81 mm (15EDG plug-in)', a: 8, v: 300, drill: 1.1, pad: 2.0, depth: 8.0 },
+  '5.0': { label: '5.0 mm (DG128 / KF128)', a: 10, v: 300, drill: 1.2, pad: 2.4, depth: 7.5 },
+  '5.08': { label: '5.08 mm (KF301 / DG301, the common blue one)', a: 16, v: 300, drill: 1.3, pad: 2.6, depth: 7.6 },
+  '7.62': { label: '7.62 mm (KF7.62, high current)', a: 30, v: 300, drill: 1.6, pad: 3.2, depth: 10 },
+};
+export const TB_RC = 0.003;            // contact resistance per terminal, Ω
+// terminal block: way k = pin 2k (wire / screw side, left) + pin 2k+1 (PCB side, right), 1 grid step apart, way 1 on top:
+// adding ways grows it downward, so wires already on way 1, 2… stay put
+const tbN = (p) => Math.max(1, Math.min(12, Math.round(p.props?.n ?? 2)));
+export const pinDefs = (p) => p.type === 'TB' ? Array.from({ length: tbN(p) }, (_, k) => [[-2, k], [2, k]]).flat() : TYPES[p.type].pins;
+export const boxOf = (p) => { if (p.type !== 'TB') return TYPES[p.type].box; return [-1.2, -0.7, 1.2, tbN(p) - 1 + 0.7]; };
+export const pinsOf = (p) => pinDefs(p).map(q => { const [x, y] = rotPt(q, p.rot); return [p.x + x, p.y + y]; });
 export const key = (x, y) => `${Math.round(x * 1000) / 1000},${Math.round(y * 1000) / 1000}`;
 
 export function newCircuit() { return { v: 1, nextId: 1, parts: [], wires: [] }; }
@@ -412,6 +427,7 @@ export function solveCircuit(c, sim = null, opts = {}) {
         break;
       case 'ISRC': I(a, b, pr.i, p, 'main'); break;
       case 'SW': case 'PB': R(a, b, pr.on ? R_WIRE : R_OPEN, p, 'main'); break;
+      case 'TB': for (let k = 0; k * 2 + 1 < pins.length; k++) R(pins[2 * k], pins[2 * k + 1], TB_RC, p, k ? 'w' + k : 'main'); break;
       case 'SPDT': R(a, b, pr.on ? R_OPEN : R_WIRE, p, 'p1a'); R(a, pins[2], pr.on ? R_WIRE : R_OPEN, p, 'p1b'); break;
       case 'DPDT':
         R(a, b, pr.on ? R_OPEN : R_WIRE, p, 'p1a'); R(a, pins[2], pr.on ? R_WIRE : R_OPEN, p, 'p1b');
@@ -872,6 +888,12 @@ export function solveCircuit(c, sim = null, opts = {}) {
     if (p.type === 'POT') {
       const aw = mine.find(e => e.role === 'aw'), wb = mine.find(e => e.role === 'wb');
       parts.set(p.id, { va, vb, vw: res.v[pins[2]], v: va - vb, iaw: aw.i, iwb: wb.i, i: aw.i, p: aw.i * aw.i * aw.val + wb.i * wb.i * wb.val });
+      continue;
+    }
+    if (p.type === 'TB') {
+      const ii = [], dots = []; let pw = 0;
+      for (let k = 0; k * 2 + 1 < pins.length; k++) { const e = mine.find(x => x.role === (k ? 'w' + k : 'main')); const iv = e?.i ?? 0; ii.push(iv); pw += iv * iv * TB_RC; dots.push([2 * k, 2 * k + 1, iv]); }
+      parts.set(p.id, { va, vb, v: va - vb, i: ii[0] ?? 0, ii, vw: ii.map((_, k) => res.v[pins[2 * k]]), p: pw, dots });
       continue;
     }
     if (p.type === 'SPDT' || p.type === 'DPDT') {
@@ -1715,8 +1737,22 @@ export function example(name) {
     W(4, 5, 9, 5); W(13, 5, 20, 5); W(4, 6, 5, 6); W(5, 6, 5, 10); W(5, 10, 20, 10);
     W(-12, 0, -7, 0); W(-7, 0, -7, -4); W(-7, -4, -4, -4);
     W(-4, 0, -5, 0); W(-5, 0, -5, -3); W(-5, -3, -4, -3); W(-5, 0, -5, 2);
-    W(-14, 2, -14, 6); W(-14, 6, -4, 6);
-    W(-14, -2, -16, -2); W(-16, -2, -16, 9); W(-16, 9, 4, 9); W(4, 9, 4, 7);
+    // pot: wiper % counts from the 3.3 V end (90 % ≈ 2.97 V). Top → GND, bottom → 3V3
+    W(-14, -2, -16, -2); W(-16, -2, -16, 1); addPart(c, 'GND', -16, 1);
+    W(-14, 2, -14, 9); W(-14, 9, 4, 9); W(4, 9, 4, 7);
+    W(-4, 6, -6, 6); addPart(c, 'GND', -6, 6);
+  } else if (name === 'tblock') {
+    // screw terminals: 12 V battery (outside) → J1 → switch on the PCB → J2 → 21 W lamp (outside)
+    const P = (t, x, y, rot, nm, props, lbl) => { const p = addPart(c, t, x, y, rot); p.name = nm; Object.assign(p.props, props); if (lbl) p.lbl = lbl; return p; };
+    P('BAT', -12, 1, 1, 'BAT 12V', { v: 12, offboard: true }, [-9, 0]);
+    P('TB', -6, 0, 0, 'J1 IN', { n: 2, pitch: '5.08' });
+    P('SW', 0, 0, 0, 'S1', { on: true });
+    P('TB', 8, 1, 2, 'J2 OUT', { n: 2, pitch: '5.08' });
+    P('LAMP', 13, 1, 1, 'LAMP', { vr: 12, wr: 21, offboard: true });
+    addPart(c, 'GND', -12, 3);
+    W(-12, -1, -9, -1); W(-9, -1, -9, 0); W(-9, 0, -8, 0); W(-12, 3, -9, 3); W(-9, 3, -9, 1); W(-9, 1, -8, 1);
+    W(-4, 0, -2, 0); W(2, 0, 6, 0); W(-4, 1, 6, 1);
+    W(10, 0, 11, 0); W(11, 0, 11, -1); W(11, -1, 13, -1); W(10, 1, 12, 1); W(12, 1, 12, 3); W(12, 3, 13, 3);
   } else if (name === 'delay555') {
     // power-on delay: flip POWER on → C1 pulls TRIG/THR high (output LOW), R1 drains it → below 1/3 Vcc the output goes HIGH. t ≈ 1.1 × R1 × C1 ≈ 1.1 s
     c.tdiv = 0.2;

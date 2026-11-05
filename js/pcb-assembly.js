@@ -32,6 +32,7 @@ export function partValue(p) {
     case 'LM2596': return `${(q.model ?? 'LM2596S-ADJ').replace('LM2596S', 'LM2596T')} (TO-220-5)`;
     case 'TL494': return `${q.model ?? 'TL494C'} (DIP-16, use a socket)`;
     case 'IR2104': return 'IR2104 (DIP-8, use a socket)';
+    case 'TB': return `Screw terminal block ${q.n ?? 2}-way, ${q.pitch ?? '5.08'} mm pitch`;
     case 'RMOD': return `relay module 5V 1ch (${q.trig === 'high' ? 'HIGH' : 'LOW'} trigger)`;
     case 'ENC': return 'rotary encoder KY-040 (5-pin header)';
     case 'OLED': return 'OLED 0.96in SSD1306 I2C (4-pin header)';

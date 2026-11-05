@@ -1,7 +1,7 @@
 // PCB core: footprints, netlist from the schematic, board layout, connectivity, DRC.
 // Units: mm. Board coords: x right, y DOWN (like the screen), origin = board top-left.
 // Single-sided board: copper on the BOTTOM, parts on top. The view is from the top (parts side).
-import { TYPES, pinsOf, wirePieces, key, rotPt, BOARDS, isBoard } from './sch-core.js';
+import { TYPES, pinsOf, pinDefs, wirePieces, key, rotPt, BOARDS, isBoard, TB_PITCH } from './sch-core.js';
 
 // ---------- footprints ----------
 const PITCH = 2.54;
@@ -28,6 +28,14 @@ export const FOOTPRINTS = {
   RAD25: { label: 'Radial 2.54 mm (small cap)', n: 2, make: () => ({ pads: square1([th(-1.27, 0, 0, 1.6, 0.8), th(1.27, 0, 1, 1.6, 0.8)]), body: [circ(2.6)] }) },
   RAD50: { label: 'Radial 5.08 mm (big cap)', n: 2, make: () => ({ pads: square1([th(-2.54, 0, 0, 1.8, 0.9), th(2.54, 0, 1, 1.8, 0.9)]), body: [circ(5)] }) },
   LED5: { label: 'LED 5 mm', n: 2, make: () => ({ pads: square1([th(-1.27, 0, 0, 1.6, 0.8), th(1.27, 0, 1, 1.6, 0.8)]), body: [circ(2.7).slice(3, 26)] }) },
+  // screw terminal block, any number of ways / pitch: pads = the PCB-side pins (2k+1); the screw side is the outside wire
+  TBLK: { label: 'Screw terminal block', n: 2, make: (o) => {
+    const n = Math.max(1, Math.min(12, Math.round(o.tb?.n ?? 2))), P = TB_PITCH[o.tb?.pitch ?? '5.08'] ?? TB_PITCH['5.08'], pt = +(o.tb?.pitch ?? '5.08');
+    const pads = square1(Array.from({ length: n }, (_, k) => ({ ...th((k - (n - 1) / 2) * pt, 0, 2 * k + 1, P.pad, P.drill), num: k + 1 })));
+    pads[0].pin = 1; if (pads[0].shape !== 'rect') pads[0].shape = 'rect';
+    const w = n * pt / 2;
+    return { pads, body: [box(-w, -P.depth / 2, w, P.depth / 2), [[-w, -P.depth / 2 + 1.6], [w, -P.depth / 2 + 1.6]]] };
+  } },
   TERM2: { label: 'Screw terminal 2-pin 5.08 mm', n: 2, make: () => ({ pads: square1([th(-2.54, 0, 0, 2.6, 1.3), th(2.54, 0, 1, 2.6, 1.3)]), body: [box(-5, -4, 5, 4)] }) },
   HDR2: { label: 'Pin header 2-pin', n: 2, make: () => ({ pads: square1([th(-1.27, 0, 0, 1.8, 1.0), th(1.27, 0, 1, 1.8, 1.0)]), body: [box(-2.54, -1.27, 2.54, 1.27)] }) },
   HDR3: { label: 'Pin header 3-pin', n: 3, make: (o) => { const m = o.map ?? [0, 1, 2]; return { pads: square1([th(-2.54, 0, m[0], 1.8, 1.0), th(0, 0, m[1], 1.8, 1.0), th(2.54, 0, m[2], 1.8, 1.0)]), body: [box(-3.81, -1.27, 3.81, 1.27)] }; } },
@@ -114,9 +122,10 @@ function unoShield() {
   return { pads, body: [box(-34.29, -26.67, 34.29, 26.67), box(-38.5, 13, -27, 25), box(-36, -20, -27, -11)] };
 }
 const PCB_SKIP = new Set(['GND', 'VM', 'SCOPE', 'AM']);
-export const onBoard = (p) => !PCB_SKIP.has(p.type);
+export const onBoard = (p) => !PCB_SKIP.has(p.type) && !p.props?.offboard;   // ticked "Off the PCB": outside, wired to a terminal
 export function fpChoices(p) {
-  const n = TYPES[p.type].pins.length;
+  const n = pinDefs(p).length;
+  if (p.type === 'TB') return ['TBLK'];
   if (p.type === 'OPAMP') return ['DIP8'];
   if (p.type === 'OPTO') return ['DIP4'];
   if (p.type === 'T555' || p.type === 'IR2104') return ['DIP8N'];
@@ -189,7 +198,7 @@ export function footprintOf(p, bp = {}, big = BIG) {
   const letters = PIN_LETTERS[p.type];
   let order = [0, 1, 2];
   if (F.ordered && letters) { const s = (bp.order && ORDERS[p.type].includes(bp.order)) ? bp.order : (d.order ?? ORDERS[p.type][0]); order = [...s].map(ch => letters[ch]); }
-  const made = F.make({ order, drill: bp.drill ?? d.drill, map: d.map, micro: p.props.micro });
+  const made = F.make({ order, drill: bp.drill ?? d.drill, map: d.map, micro: p.props.micro, tb: p.type === 'TB' ? p.props : null });
   // lead spacing (hole to hole) set by hand: bend the legs wider so traces fit underneath
   const sp = SPACINGS[fpKey], nat = made.pads.length === 2 ? Math.abs(made.pads[1].x - made.pads[0].x) : 0;
   let pitch = nat;
@@ -200,6 +209,7 @@ export function footprintOf(p, bp = {}, big = BIG) {
 // pad name shown on the board
 export function pinLabel(p, i) {
   if (isBoard(p.type)) return BOARDS[p.type].pins[i]?.n ?? String(i + 1);
+  if (p.type === 'TB') return i % 2 ? String((i - 1) / 2 + 1) : `W${i / 2 + 1}`;   // W1 = wire / screw side of way 1
   const L = { BAT: ['+', '−'], LED: ['A', 'K'], D: ['A', 'K'], ZD: ['A', 'K'], C: ['+', '−'], NPN: ['B', 'C', 'E'], PNP: ['B', 'C', 'E'], NMOS: ['G', 'D', 'S'], PMOS: ['G', 'D', 'S'],
     OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], IR2104: ['VCC', 'IN', 'SD', 'COM', 'LO', 'VS', 'HO', 'VB'], SERVO: ['SIG', 'V+', 'GND'], LCD: ['GND', 'VCC', 'SDA', 'SCL'], OLED: ['GND', 'VCC', 'SCL', 'SDA'], ADS1115: ['VDD', 'GND', 'SCL', 'SDA', 'ADDR', 'ALRT', 'A0', 'A1', 'A2', 'A3'], ENC: ['CLK', 'DT', 'SW', '+', 'GND'], SR595: ['QB', 'QC', 'QD', 'QE', 'QF', 'QG', 'QH', 'GND', "QH'", 'SRCLR', 'SRCLK', 'RCLK', 'OE', 'SER', 'QA', 'VCC'], LM2596: ['VIN', 'OUT', 'GND', 'FB', 'ON'], TL494: ['1IN+', '1IN−', 'FB', 'DTC', 'CT', 'RT', 'GND', 'C1', 'E1', 'E2', 'C2', 'VCC', 'OC', 'REF', '2IN−', '2IN+'], RMOD: ['VCC', 'GND', 'IN', 'COM', 'NO', 'NC'], DHT: ['VCC', 'DATA', 'GND'], HCSR04: ['VCC', 'TRIG', 'ECHO', 'GND'], PIR: ['VCC', 'OUT', 'GND'], KEYPAD: ['R1', 'R2', 'R3', 'R4', 'C1', 'C2', 'C3', 'C4'], BUZZER: ['+', '-'], SEG7: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp', 'COM'], STEPPER: ['STEP', 'DIR', 'EN', 'VDD', 'GND', 'VMOT'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
   return L?.[i] ?? String(i + 1);
@@ -244,11 +254,9 @@ export function netlist(c) {
 
 // ---------- layout ----------
 export const DEFAULT_CAM = {
-  vAngle: 30, vTip: 0.1, isoDepth: 0.15, isoPasses: 2, isoOverlap: 0.4, isoFeed: 150, plunge: 50, rpm: 1000, // rpm = Fox9ner S value (speed_map 0–1000)
+  vAngle: 30, vTip: 0.1, isoDepth: 0.1, isoPasses: 2, isoOverlap: 0.4, isoFeed: 150, plunge: 50, rpm: 10000,
   zSafe: 3, zTravel: 1, bits: '0.8, 1.0, 1.2', drillDepth: 1.8, drillFeed: 60,
   cutDia: 1.5, cutDepth: 1.7, cutStep: 0.4, cutFeed: 120, tabs: 4, tabW: 3, tabH: 0.6, thick: 1.6, mirror: true,
-  cutMode: 'mill', perfBit: 1.0, perfGap: 0.4, // cutout: 'mill' = end mill with tabs, 'perf' = row of drill holes
-  spotMarks: true, spotDepth: 0.2, // V-bit dimple at every hole centre (drill guide), done at the end of isolation
 };
 export const DEFAULT_RULES = { trace: 0.6, power: 1.0, clear: 0.4, grid: 0.25, edge: 0.6, bigPads: true };
 export function newLayout() { return { v: 1, w: 50, h: 40, parts: {}, traces: [], jumpers: [], cam: { ...DEFAULT_CAM }, rules: { ...DEFAULT_RULES } }; }
@@ -258,13 +266,6 @@ export function syncLayout(c) {
   setBigPads(c.pcb?.rules?.bigPads);
   const L = c.pcb ?? (c.pcb = newLayout());
   L.cam = { ...DEFAULT_CAM, ...L.cam }; L.rules = { ...DEFAULT_RULES, ...L.rules }; L.jumpers ??= [];
-  // one-time upgrade of older boards to Fox9ner settings: S1000 max, 2 isolation passes, 0.15 mm deep
-  if (!L.cam.f9v2) {
-    if (!(L.cam.rpm > 0 && L.cam.rpm <= 1000)) L.cam.rpm = 1000;
-    if (L.cam.isoPasses < 2) L.cam.isoPasses = 2;
-    if (L.cam.isoDepth < 0.15) L.cam.isoDepth = 0.15;
-    L.cam.f9v2 = true;
-  }
   const live = new Set();
   const fresh = [];
   for (const p of c.parts) {
