@@ -18,6 +18,23 @@
 <body>
 <div id="app"></div>
 <script type="module" src="js/app.js"></script>
+<!-- blank page guard: if the app didn't start (old + new files mixed in the browser cache right after an update), offer a clean reload -->
+<script>
+setTimeout(function () {
+  var app = document.getElementById('app');
+  if (!app || app.children.length) return;
+  app.innerHTML = '<div style="max-width:420px;margin:60px auto;padding:20px;font:15px system-ui,sans-serif;color:#E6EDF3;background:#161B22;border:1px solid #30363D;border-radius:12px;text-align:center">' +
+    '<b style="font-size:18px">Fox9nertron is updating</b><p>Your browser still has some old files. Tap below to load the new version (your saved projects stay).</p>' +
+    '<button id="f9fix" style="padding:12px 18px;font-size:15px;border-radius:10px;border:0;background:#E8B04B;color:#111;font-weight:700">Load the new version</button></div>';
+  document.getElementById('f9fix').onclick = function () {
+    var done = function () { location.reload(); };
+    var jobs = [];
+    if ('serviceWorker' in navigator) jobs.push(navigator.serviceWorker.getRegistrations().then(function (r) { return Promise.all(r.map(function (x) { return x.unregister(); })); }));
+    if (window.caches) jobs.push(caches.keys().then(function (k) { return Promise.all(k.map(function (x) { return caches.delete(x); })); }));
+    Promise.all(jobs).then(done, done);
+  };
+}, 5000);
+</script>
 <!-- visitor counter (no cookies): https://fox9nertron.goatcounter.com -->
 <script data-goatcounter="https://fox9nertron.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </body>
