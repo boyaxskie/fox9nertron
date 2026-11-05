@@ -4,6 +4,7 @@ import { parse } from '../num.js';
 import { rotPt } from '../sch-core.js';
 import * as P from '../pcb-core.js';
 import { autoroute, autorouteSteps, cleanPath } from '../pcb-route.js';
+import { autoPlaceSteps } from '../pcb-place.js';
 import { camAll, vWidth, copperSvg, copperPdf } from '../pcb-cam.js';
 import { gerberSet, excellon } from '../pcb-gerber.js';
 import { assemblyPdf, bomCsv } from '../pcb-assembly.js';
@@ -21,7 +22,7 @@ export function pcbView(api) {
   const top = el('div', { class: 'sch-tools' },
     btn('⚡ Schematic', () => api.toSchematic(), 'run'), modeBtns.move, modeBtns.route, modeBtns.jumper, modeBtns.delete,
     btn('↻', () => rotateSel(), 'icon'), btn('↶', () => { api.undo(); }, 'icon'), btn('↷', () => { api.redo(); }, 'icon'), btn('Fit', () => { fit(); draw(); }),
-    btn('⚡ Autoroute', () => doAutoroute()), btn('✖ Clear traces', () => { L.traces = []; L.jumpers = []; cam = null; change('All traces removed.'); }), camBtn);
+    btn('🧩 Auto place', () => doAutoPlace()), btn('⚡ Autoroute', () => doAutoroute()), btn('✖ Clear traces', () => { L.traces = []; L.jumpers = []; cam = null; change('All traces removed.'); }), camBtn);
   const canvas = el('canvas', { class: 'sch-canvas' });
   const wrap = el('div', { class: 'sch-wrap pcb-wrap' }, canvas);
   const status = el('div', { class: 'sch-status' });
@@ -163,6 +164,7 @@ export function pcbView(api) {
     for (const [ji, j] of (L.jumpers ?? []).entries()) {
       ctx.strokeStyle = sel?.kind === 'jumper' && sel.i === ji ? COL.sel : '#FFFFFF'; ctx.lineWidth = Math.max(3, 0.9 * view.s); ctx.lineCap = 'butt'; ctx.setLineDash([Math.max(6, 1.6 * view.s), Math.max(4, 1.1 * view.s)]);
       ctx.beginPath(); ctx.moveTo(sx(j.x1), sy(j.y1)); ctx.lineTo(sx(j.x2), sy(j.y2)); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'round';
+      if (sel?.kind === 'jumper' && sel.i === ji) for (const k of sel.k == null ? [0, 1] : [sel.k]) { const hx = k ? j.x2 : j.x1, hy = k ? j.y2 : j.y1; ctx.strokeStyle = COL.sel; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(hx), sy(hy), Math.max(6, 1.4 * view.s), 0, 7); ctx.stroke(); }
     }
     // ratsnest
     ctx.strokeStyle = COL.rat; ctx.lineWidth = 1.2; ctx.setLineDash([4, 4]);
@@ -220,8 +222,15 @@ export function pcbView(api) {
   // ⚡ Autoroute, animated: the router runs a step per frame, each new trace grows from pad to pad, a bar shows how far it is
   let rt = null;                       // { gen, anim: [{pts, w, t0, ok}], tryN, startT, last }
   const rtBar = el('div', { class: 'rt-fill' }), rtTxt = el('span', { class: 'rt-txt' });
-  const rtStop = el('button', { class: 'sb', type: 'button', text: '⏹ Stop', onclick: () => { if (rt) rt.stop = true; } });
-  const rtBox = el('div', { class: 'rt-box', hidden: true }, el('div', { class: 'rt-track' }, rtBar), el('div', { class: 'rt-row' }, rtTxt, rtStop));
+  const rtStop = el('button', { class: 'sb', type: 'button', text: '⏹ Stop', onclick: () => { if (rt) rt.stop = true; if (pl) pl.stop = true; } });
+  // after a try that left connections stuck the router waits: 🔁 Retry runs one more try in a new order, ✓ Keep stops with the best try
+  const rtRetry = el('button', { class: 'sb primary', type: 'button', text: '🔁 Retry', onclick: () => { if (!rt?.paused) return; rt.paused = null; rtPause(false); requestAnimationFrame(rt.tick); } });
+  const rtKeep = el('button', { class: 'sb', type: 'button', text: '✓ Keep', onclick: () => { if (!rt?.paused) return; const s = rt.gen.next('keep'); rt.paused = null; rt.finish(s.value); } });
+  // 🧩 Place + route: the parts are where the trouble is, so rearrange them and route again
+  const rtPlace = el('button', { class: 'sb', type: 'button', text: '🧩 Place + route', title: 'Rearrange the parts for shorter, less crossing connections, then autoroute again', onclick: () => { if (!rt?.paused) return; rt.gen.return(); rt = null; rtBox.hidden = true; rtPause(false); doAutoPlace(true); } });
+  const rtPause = (on) => { rtRetry.hidden = rtKeep.hidden = rtPlace.hidden = !on; rtStop.hidden = on; };
+  const rtBox = el('div', { class: 'rt-box', hidden: true }, el('div', { class: 'rt-track' }, rtBar), el('div', { class: 'rt-row' }, rtTxt, el('span', { style: 'display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end' }, rtRetry, rtPlace, rtKeep, rtStop)));
+  rtPause(false);
   wrap.append(rtBox);
   const GROW = 260;                    // ms for one trace to draw itself
   function doAutoroute() {
@@ -242,6 +251,7 @@ export function pcbView(api) {
         const s = rt.gen.next();
         if (s.done) { res = s.value; break; }
         const v = s.value;
+        if (v.pause) { rt.paused = v; break; }
         if (v.attempt !== rt.tryN) { rt.tryN = v.attempt; rt.anim = []; }
         rt.anim = rt.anim.filter(a => performance.now() - a.t0 < GROW + 600);
         rt.cur = v;
@@ -252,6 +262,14 @@ export function pcbView(api) {
         }
       }
       if (rt.stop && !res) { rt.gen.return(); res = { routed: rt.cur?.routed ?? 0, failed: P.analyze(api.getC()).rats, jumpers: (L.jumpers ?? []).filter(j => j.auto).length, stopped: true }; }   // ⏹: keep what is routed so far
+      if (rt.paused && !res) {
+        const q = rt.paused;
+        rtBar.style.width = '100%';
+        rtTxt.textContent = `Try ${q.attempt + 1} done: ${q.routed} of ${q.total} routed · ${q.failed} stuck${q.bestFailed < q.failed ? ` (best try so far: ${q.bestFailed} stuck)` : ''}. 🔁 Retry tries a new order (${q.attempts - q.attempt - 1} left).`;
+        rtPause(true); an = P.analyze(api.getC()); renderPanel(); draw();
+        say(`Try ${q.attempt + 1} finished with ${q.failed} connection${q.failed > 1 ? 's' : ''} stuck. Tap 🔁 Retry for another try, 🧩 Place + route to rearrange the parts first, or ✓ Keep.`);
+        return;                        // waits for the user
+      }
       const v = rt.cur;
       if (v) {
         const frac = (v.attempt + v.done / Math.max(1, v.total)) / (v.attempt + 1);
@@ -262,13 +280,58 @@ export function pcbView(api) {
       }
       an = P.analyze(api.getC());
       draw();
-      if (res) {
+      if (res) { rt.finish(res); return; }
+      requestAnimationFrame(tick);
+    };
+    rt.tick = tick;
+    rt.finish = (res) => {
+      {
         const ms = Math.round(performance.now() - rt.startT);
-        rt = null; rtBox.hidden = true;
+        rt = null; rtBox.hidden = true; rtPause(false);
         if (res.stopped) { change(`Stopped: ${res.routed} routed, ${res.failed.length} still open (yellow lines). ⚡ Autoroute again to finish.`); return; }
-        change(res.failed.length ? `Routed ${res.routed}, ${res.failed.length} could not fit (yellow lines). Move parts apart, make the board bigger or route them by hand.` : `All connections routed in ${(ms / 1000).toFixed(1)} s${res.jumpers ? ` with ${res.jumpers} jumper wire${res.jumpers > 1 ? 's' : ''} (white dashed: a wire on the parts side)` : ''}.`);
+        change(res.failed.length ? `Routed ${res.routed}, ${res.failed.length} could not fit (yellow lines). 🧩 Auto place rearranges the parts, or move them apart / route those by hand.` : `All connections routed in ${(ms / 1000).toFixed(1)} s${res.jumpers ? ` with ${res.jumpers} jumper wire${res.jumpers > 1 ? 's' : ''} (white dashed: a wire on the parts side)` : ''}.`);
+      }
+    };
+    requestAnimationFrame(tick);
+  }
+  // 🧩 Auto place, animated: parts slide / turn while the optimizer works, the bar shows how far; ⏹ keeps the best so far
+  let pl = null;
+  function doAutoPlace(thenRoute = false) {
+    if (rt || pl) return;
+    const c = api.getC();
+    if (!Object.keys(L.parts).length) return say('No parts on the board yet.');
+    sel = null; route = null; routeBar.hidden = true; renderPanel();
+    const had = L.traces.length + (L.jumpers ?? []).length;
+    L.traces = []; L.jumpers = [];            // traces would no longer reach once the parts move
+    pl = { gen: autoPlaceSteps(c), stop: false, startT: performance.now() };
+    rtBox.hidden = false; rtPause(false); rtBar.style.width = '0%'; rtBar.classList.remove('retry'); rtTxt.textContent = 'Placing parts…'; say('🧩 Placing: parts slide and turn to make the connections short and cross less. ⏹ Stop keeps the best so far.');
+    const tick = () => {
+      if (!pl) return;
+      const t0 = performance.now(); let res = null, v = null;
+      while (performance.now() - t0 < 30) {
+        if (pl.stop) { pl.gen.return(); res = { stopped: true }; break; }
+        const s = pl.gen.next();
+        if (s.done) { res = s.value; break; }
+        v = s.value;
+        if (performance.now() - pl.startT < 2500) break;     // one step per frame for the first seconds, so the parts are seen moving
+      }
+      if (v) {
+        const f = (v.run + v.it / v.iters) / v.runs;
+        rtBar.style.width = `${Math.round(f * 100)}%`;
+        rtTxt.textContent = `🧩 ${Math.round(f * 100)} % · pass ${v.run + 1} of ${v.runs} · wire ${Math.round(v.len)} mm · ${v.crosses} crossing${v.crosses === 1 ? '' : 's'}${v.overlaps ? ` · ${v.overlaps} overlapping` : ''}`;
+      }
+      if (res) {
+        pl = null; rtBox.hidden = true;
+        W = 0; resize(); fit();
+        if (res.stopped) { change(`Placement stopped: the best layout so far is kept.${thenRoute ? '' : ' ⚡ Autoroute next.'}`); if (thenRoute) doAutoroute(); return; }
+        const b = res.before, a = res.after;
+        if (res.nothing) { change('Nothing to move: every part is locked or there are no connections.'); return; }
+        const msg = `Parts rearranged: wire ${Math.round(b.len)} → ${Math.round(a.len)} mm, crossings ${b.crosses} → ${a.crosses}, board ${L.w} × ${L.h} mm.${had ? ' Old traces removed.' : ''} Tap 🧩 again for a different layout, ↶ undoes it. 📌 Lock a part in its panel to keep it where it is.`;
+        change(thenRoute ? msg + ' Routing…' : msg + ' ⚡ Autoroute next.');
+        if (thenRoute) doAutoroute();
         return;
       }
+      an = P.analyze(c); draw();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -366,9 +429,19 @@ export function pcbView(api) {
       L.traces = r.T; L.jumpers = r.J;
       sel = { kind: 'trace', i: sel.i, ...tidyTrace(sel.i, r.moved) };
       change();
+      return;
+    }
+    if (sel.kind === 'jumper' && L.jumpers?.[sel.i]) {      // one hole (sel.k = 0 / 1) or the whole jumper; trace ends on a hole come along
+      const j = L.jumpers[sel.i], mx = dx * step, my = dy * step, r3 = (v) => Math.round(v * 1000) / 1000;
+      for (const k of sel.k == null ? [0, 1] : [sel.k]) {
+        const ox = k ? j.x2 : j.x1, oy = k ? j.y2 : j.y1, nx = r3(ox + mx), ny = r3(oy + my);
+        for (const t of L.traces) for (const q of [0, t.pts.length - 1]) if (Math.abs(t.pts[q][0] - ox) < 1e-6 && Math.abs(t.pts[q][1] - oy) < 1e-6) t.pts[q] = [nx, ny];
+        if (k) { j.x2 = nx; j.y2 = ny; } else { j.x1 = nx; j.y1 = ny; }
+      }
+      change(`Jumper ${sel.k == null ? '' : `hole ${sel.k + 1} `}moved · ${Math.hypot(j.x2 - j.x1, j.y2 - j.y1).toFixed(2)} mm long.`);
     }
   }
-  function syncNudge() { nudgeBar.hidden = !(mode === 'move' && (sel?.kind === 'part' || sel?.kind === 'trace')); }
+  function syncNudge() { nudgeBar.hidden = !((mode === 'move' || mode === 'jumper') && (sel?.kind === 'part' || sel?.kind === 'trace' || sel?.kind === 'jumper')); }
   // delete the selection: trace, jumper, or a part (removed from the circuit too; ↶ brings it back)
   function deleteSel() {
     if (sel?.kind === 'trace' && L.traces[sel.i]) { L.traces.splice(sel.i, 1); sel = null; change('Trace deleted. ↶ brings it back.'); return true; }
@@ -425,7 +498,7 @@ export function pcbView(api) {
       const j = L.jumpers[d.i]; if (d.k) { j.x2 = nx; j.y2 = ny; } else { j.x1 = nx; j.y1 = ny; }
       L.traces = structuredClone(d.orig);
       for (const t of L.traces) for (const q of [0, t.pts.length - 1]) if (Math.abs(t.pts[q][0] - d.x0) < 1e-6 && Math.abs(t.pts[q][1] - d.y0) < 1e-6) t.pts[q] = [nx, ny];
-      sel = { kind: 'jumper', i: d.i }; analyzeNow(); draw(); return;
+      sel = { kind: 'jumper', i: d.i, k: d.k }; analyzeNow(); draw(); return;
     }
     if (down.tr) {
       const d = down.tr, dx = P.snap((px - down.px) / view.s, step), dy = P.snap((py - down.py) / view.s, step);
@@ -451,8 +524,8 @@ export function pcbView(api) {
     if (d.pinch) { if (!ptrs.size) down = null; return; }
     down = null;
     if (d.jend && d.moved) { const j = L.jumpers[d.jend.i]; change(`Jumper hole moved (${Math.hypot(j.x2 - j.x1, j.y2 - j.y1).toFixed(2)} mm long now).`); return; }
-    if (d.jend && !d.moved && mode === 'move') { sel = { kind: 'jumper', i: d.jend.i }; renderPanel(); draw(); return; }
-    if (d.jend && !d.moved && !jfirst) { sel = { kind: 'jumper', i: d.jend.i }; say('That is a jumper hole: drag it to move it, or tap empty board for a new jumper.'); renderPanel(); draw(); return; }
+    if (d.jend && !d.moved && mode === 'move') { sel = { kind: 'jumper', i: d.jend.i, k: d.jend.k }; say(`Jumper hole ${d.jend.k + 1} selected: use the arrows to move it (tap the wire itself to move the whole jumper).`); renderPanel(); draw(); return; }
+    if (d.jend && !d.moved && !jfirst) { sel = { kind: 'jumper', i: d.jend.i, k: d.jend.k }; say('That is a jumper hole: drag it to move it, or tap empty board for a new jumper.'); renderPanel(); draw(); return; }
     if (d.tr && d.moved && d.tr.res) { sel = { kind: 'trace', i: d.tr.i, ...tidyTrace(d.tr.i, d.tr.res.moved) }; change('Trace reshaped. Use the arrows for fine tuning.'); return; }
     if (d.tr && !d.moved) { sel = { kind: 'trace', i: d.tr.i, ...d.tr.part }; renderPanel(); draw(); return; }
     if (d.lab && d.moved) { sel = { kind: 'part', id: d.lab.id }; change(`${d.lab.name} label moved.`); return; }
@@ -545,7 +618,8 @@ export function pcbView(api) {
           ...(f.pitch ? [sel2('Lead spacing (hole to hole)', String(f.pitch), P.SPACINGS[f.key].map(v => [String(v), `${v} mm (${Math.round(v / 2.54)} holes)` + (Math.abs(v - (P.FOOTPRINTS[f.key].make({ order: [0, 1, 2] }).pads.reduce((a, q) => Math.abs(q.x) * 2, 0))) < 0.01 ? ' · normal' : '')]), v => { bp.pitch = +v; change(`${p.name} legs ${v} mm apart. ⚡ Autoroute again to use the space underneath.`); })] : []),
           ...(f.orderStr ? [sel2('Pin order (left → right, flat side / tab facing you)', f.orderStr, P.ORDERS[p.type].map(o => [o, [...o].join(' ')]), v => { bp.order = v; change(`${p.name} pin order ${v}.`); })] : [])),
         el('div', { class: 'pcb-pins' }, ...nets.map((n, i) => el('span', { class: 'pin', text: `${P.pinLabel(p, i)} → ${netName(n)}` }))),
-        el('div', { class: 'row wrap' }, btn('↻ Rotate', () => rotateSel()), btn('🗑 Delete part', () => deleteSel())),
+        el('div', { class: 'row wrap' }, btn('↻ Rotate', () => rotateSel()), btn('🗑 Delete part', () => deleteSel()),
+          el('label', { class: 'chk', title: '🧩 Auto place leaves a locked part where it is' }, Object.assign(el('input', { type: 'checkbox' }), { checked: !!bp.lock, onchange: (e) => { if (e.target.checked) bp.lock = true; else delete bp.lock; change(bp.lock ? `${p.name} 📌 locked: 🧩 Auto place leaves it here.` : `${p.name} unlocked.`); } }), ' 📌 Lock place')),
         note(f.orderStr ? 'Check the pin order in the datasheet: the same transistor name can come in different pin orders.' : ''));
     } else if (sel?.kind === 'trace') {
       const t = L.traces[sel.i];
