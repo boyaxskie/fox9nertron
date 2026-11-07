@@ -398,3 +398,8 @@ html.pcb-fs, html.pcb-fs body { overflow: hidden; }
 .nova-send .nova-host { width: 150px; font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line, #444); background: var(--card); color: inherit; }
 .mq-box .serial-in { flex: 1 1 100%; width: 100%; min-width: 0; text-align: left; }
 .mq-box .serial-in + .serial-in { flex: 1 1 8em; width: auto; }
+/* SD card files */
+.sd-list { display: flex; flex-direction: column; gap: 2px; max-height: 40vh; overflow: auto; margin: 8px 0; }
+.sd-row { display: flex; align-items: center; gap: 4px; }
+.sd-row .sd-name { flex: 1; text-align: left; font: 13px ui-monospace, monospace; }
+.sd-view { max-height: 35vh; overflow: auto; white-space: pre; font-size: 12px; }

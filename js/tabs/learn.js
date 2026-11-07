@@ -423,6 +423,20 @@ const ARTICLES = [
     tryit: ['Turn SET to 100 %: LCD ≈ 23.98 V, VM1 24.00 V.', 'Turn SET to 0 %: 0 V (the ADS1115 is straight down to 0, unlike the ESP32 ADC).', 'Change GAIN_ONE to GAIN_TWO in the code, ▶ Run code, SET 100 %: stuck at 15.97 V (raw 32767: A0 is above the 2.048 V range).', 'Change R1 to 30 kΩ and R2 to 7.5 kΩ (the 5 V module): at SET 100 % A0 is 4.8 V, tap ADS1: red warning, the reading is wrong.', 'Change begin(0x48) to begin(0x49): "ADS1115 missing". Then wire ADDR to VDD: it works again.', '🔬 Analyze → Tolerance with 5 % resistors: see how far VIN can be off.'],
   },
   {
+    id: 'sdlog', title: 'ESP32 + micro SD card module: a CSV data logger (SD.h)', example: 'sdlog', tag: 'Microcontroller',
+    intro: 'The common blue micro SD module talks SPI. The ESP32 opens /log.csv, adds one line (seconds, temperature, humidity) every 2 s and closes it. Open the file later in Excel / Google Sheets. In the simulator the card\'s files are kept in the project: tap the SD module → 📂 Files on the card to read or download them.',
+    parts: [['SD1', 'micro SD module (AMS1117 + level shifter): GND, VCC 5 V, MISO, MOSI, SCK, CS'], ['ESP32', 'VSPI: SCK = GPIO18, MISO = GPIO19, MOSI = GPIO23, CS = GPIO5; VCC from VIN'], ['DHT1', 'DHT22 on GPIO4, VCC 3.3 V'], ['Card', 'micro SD, FAT32, 32 GB or less']],
+    steps: [
+      ['1. Wiring', 'MISO → 19, MOSI → 23, SCK → 18, CS → 5, GND → GND, <b>VCC → VIN (5 V)</b>. The blue module has a 3.3 V regulator: fed with 3.3 V it drops to ≈ 2.2 V and SD.begin() fails — the most common reason it "doesn\'t work". UNO: SCK 13, MISO 12, MOSI 11, CS 10.'],
+      ['2. The card', 'Format it <b>FAT32</b> (cards over 32 GB come as exFAT: reformat with the "SD Card Formatter" tool or use a smaller card). SD.begin(5) returns false if there is no card, wrong format, bad wiring or no 5 V.'],
+      ['3. Write vs append', 'ESP32: <b>FILE_WRITE starts the file over</b> (empties it), <b>FILE_APPEND</b> adds at the end. UNO: FILE_WRITE adds at the end. Open, write, <b>close()</b>: the data is only really saved on close() or flush(). Pull the power before that and the last lines are gone.'],
+      ['4. Paths and names', 'ESP32 paths start with "/" ("/log.csv", "/data/day1.csv" after SD.mkdir("/data")). The UNO library only knows 8.3 names: LOG.CSV, DATA0001.TXT.'],
+      ['5. Reading back', 'File f = SD.open("/log.csv"); while (f.available()) Serial.write(f.read()); f.close(); — or f.readStringUntil(\'\\n\') for one line. SD.open("/") + openNextFile() lists the files.'],
+      ['6. Sharing the SPI bus', 'Other SPI parts (TFT, MAX6675, RFID) share SCK / MISO / MOSI; each gets its own CS pin. Some cheap SD modules don\'t release MISO: then put the SD on its own SPI (HSPI 14 / 12 / 13) or pick a module with a 74LVC125 buffer.'],
+    ],
+    tryit: ['▶ Run code, wait 10 s, then tap SD1 → 📂 Files on the card → log.csv: one line every 2 s. ⬇ downloads it.', 'Change the DHT22 temperature: the new value shows in the next line.', 'Set Card to "no card" while it runs: "Can\'t open /log.csv". Put it back.', 'Move SD1 VCC to 3V3: SD.begin() fails at the next ⟲ t = 0 + ▶ Run.', 'Change FILE_APPEND to FILE_WRITE: the file keeps only the last line.'],
+  },
+  {
     id: 'mqtt', title: 'MQTT over WiFi: control relays and read a DHT22 from your phone (ESP32)', example: 'mqtt', tag: 'Microcontroller',
     intro: 'MQTT is how home-automation talks: one <b>broker</b> (Mosquitto on a PC / Raspberry Pi, or Home Assistant) and many devices that <b>publish</b> messages on <b>topics</b> and <b>subscribe</b> to the topics they care about. Here the ESP32 listens on home/relay1/set and home/relay2/set and sends home/temp and home/hum every 5 s. In the simulator the 📡 MQTT box under the code is the broker: you see every message and can send your own.',
     parts: [['ESP32', 'WiFi + PubSubClient library (Nick O\'Leary)'], ['RLY1 / RLY2', '5 V relay modules, LOW trigger, IN on GPIO19 / GPIO18'], ['PSU', '5 V supply for the relay coils (grounds joined with the ESP32)'], ['DHT1', 'DHT22 on GPIO4, VCC 3.3 V'], ['B12 + LAMP1 / 2', '12 V lamps switched by the relay contacts (COM → NO)']],
