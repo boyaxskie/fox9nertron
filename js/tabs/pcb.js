@@ -104,6 +104,28 @@ export function pcbView(api) {
   let W = 0, H = 0;
   const nameBoxes = [];
   const say = (t) => { status.textContent = t; };
+  // 📤 Send to Nova: open the Fox9ner Nova app on the ESP32 (http://nova.local/?import) and hand it the 3 G-code files.
+  // The Nova page asks before saving them to its SD card. postMessage works between the https page and the http ESP32 page.
+  function sendToNova(files) {
+    const host = store.get('novaHost', 'nova.local');
+    const w = window.open(`http://${host}/?import`, 'fox9ner-nova');
+    if (!w) { say('📤 The browser blocked the new tab: allow pop-ups for this page and press Send to Nova again.'); return; }
+    say(`📤 Opening http://${host} … (phone and Nova must be on the same WiFi)`);
+    let sent = false;
+    const done = (t) => { removeEventListener('message', onMsg); clearTimeout(timer); say(t); };
+    const onMsg = (e) => {
+      if (e.source !== w || typeof e.data !== 'object' || !e.data) return;
+      if (e.data.type === 'nova-ready' && !sent) {
+        sent = true; say(`📤 Nova v${e.data.version ?? '?'} found: confirm on the Nova page to save the files to its SD card.`);
+        w.postMessage({ type: 'f9t-files', files: files.map(([n, text]) => ({ name: n, text })) }, e.origin);
+      } else if (e.data.type === 'nova-imported') {
+        const ok = e.data.saved ?? [];
+        done(ok.length ? `✔ Saved on the Nova SD card: ${ok.join(', ')}. Run them from its SD card list.` : '✖ Nothing saved (cancelled on the Nova page, or no SD card).');
+      }
+    };
+    addEventListener('message', onMsg);
+    const timer = setTimeout(() => { if (!sent) done(`✖ No answer from http://${host}. Is the Nova ESP32 on and on the same WiFi? Android: type its IP (e.g. 192.168.1.50) instead of nova.local. The Nova app on the ESP32 must be v1.2.0 or newer (PlatformIO: Upload Filesystem Image).`); }, 25000);
+  }
 
   // ---------- data ----------
   function load() {
@@ -753,6 +775,11 @@ export function pcbView(api) {
           btn('⬇ 3 cutout.nc', () => api.shareFile(`${name}-3-cutout.nc`, st.cut.gcode, 'text/plain')),
           btn('⬇ copper.pdf (print 1:1)', () => api.shareFile(`${name}-copper.pdf`, copperPdf(api.getC(), undefined, name), 'application/pdf')),
           btn('⬇ copper.svg', () => api.shareFile(`${name}-copper.svg`, copperSvg(api.getC()), 'image/svg+xml'))),
+        el('div', { class: 'row wrap nova-send' },
+          btn('📤 Send to Nova', () => sendToNova([[`${name}-1-isolation.nc`, st.iso.gcode], [`${name}-2-drill.nc`, st.drill.gcode], [`${name}-3-cutout.nc`, st.cut.gcode]])),
+          el('input', { type: 'text', class: 'nova-host', value: store.get('novaHost', 'nova.local'), title: 'Fox9ner Nova ESP32: nova.local, or its IP (Android)', spellcheck: false,
+            onchange: (e) => store.set('novaHost', e.target.value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '') || 'nova.local') })),
+
         el('pre', { class: 'steps', text: [
           'On the 3018:',
           '1. Tape / clamp the copper blank flat. Home or jog to its lower-left corner → set X0 Y0.',

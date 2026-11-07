@@ -102,12 +102,62 @@ export function schematicTab(root) {
     const v = res.vAt(...pts[i]), g = res.vAt(...pts[gi]) ?? 0;
     return v == null ? null : v - g;
   }
+  // ---------- 📡 pretend WiFi + MQTT broker shared by every board in the circuit ----------
+  const MQ = { on: true, wifi: true, retained: new Map(), clients: new Map(), log: [] };
+  let syncMqtt = null;
+  const mqMatch = (f, t) => { const a = f.split('/'), b = t.split('/'); for (let i = 0; i < a.length; i++) { if (a[i] === '#') return true; if (i >= b.length || (a[i] !== '+' && a[i] !== b[i])) return false; } return a.length === b.length; };
+  function mqPublish(from, topic, payload, retain) {
+    payload = String(payload);
+    MQ.log.push({ t: sim.t, from, topic, payload, retain }); if (MQ.log.length > 200) MQ.log.shift();
+    if (retain) { if (payload === '') MQ.retained.delete(topic); else MQ.retained.set(topic, payload); }
+    if (MQ.on) for (const cl of MQ.clients.values()) if (cl.up && [...cl.subs].some(f => mqMatch(f, topic))) cl.inbox.push({ topic, payload });
+  }
+  function brokerFor(p) {
+    const cl = () => MQ.clients.get(p.id) ?? MQ.clients.set(p.id, { up: false, subs: new Set(), inbox: [], id: '' }).get(p.id);
+    return {
+      wifiOn: () => MQ.wifi, isUp: () => MQ.on,
+      connect(id, server) { if (!MQ.on) return false; const k = cl(); k.up = true; k.id = id; k.server = server; return true; },
+      drop() { const k = cl(); k.up = false; k.subs.clear(); k.inbox = []; },
+      subscribe(f) { const k = cl(); k.subs.add(f); for (const [t, v] of MQ.retained) if (mqMatch(f, t)) k.inbox.push({ topic: t, payload: v }); },
+      unsubscribe(f) { cl().subs.delete(f); },
+      publish(t, v, r) { mqPublish(cl().id || p.name, t, v, r); },
+      inbox() { return cl().inbox.splice(0); },
+    };
+  }
+  // ---------- DS3231 clocks keep their time across restarts (coin cell!) ----------
+  const RTCS = new Map();
+  const phNow = () => Math.floor(Date.now() / 1000) + 8 * 3600;      // Philippine time, as RTClib's naive local time
+  function rtcState(d) {
+    let s = RTCS.get(d.id);
+    if (!s) { const st0 = d.props.start ? Math.floor(Date.parse(d.props.start + 'Z') / 1000) : phNow(); s = { base: isFinite(st0) ? st0 : phNow(), t0: sim.t }; RTCS.set(d.id, s); }
+    return s;
+  }
+  const rtcNow = (d) => { const s = rtcState(d); return s.base + (sim.t - s.t0) * (d.props.speed || 1); };
+  const fmtClock = (u) => new Date(u * 1000).toISOString().slice(11, 19);
+  function rtcAt(b) {
+    const nl = nets(); if (!nl) return null;
+    for (const d of c.parts) {
+      if (d.type !== 'DS3231' || !i2cOn(nl, b, d, 3, 2)) continue;
+      const r = res?.ok ? res.parts.get(d.id) : null; if (!r || r.v < 2.3) continue;
+      return { now: () => rtcNow(d), set: (u) => { const s = rtcState(d); s.base = u; s.t0 = sim.t; }, lost: () => false };
+    }
+    return null;
+  }
+  function inaAt(b, addr) {
+    const nl = nets(); if (!nl) return null;
+    for (const d of c.parts) {
+      if (d.type !== 'INA219' || !i2cOn(nl, b, d, 3, 2)) continue;
+      const r = res?.ok ? res.parts.get(d.id) : null;
+      if (r && r.v >= 2.7 && r.addr === addr) return { vbus: r.vbus, vshunt: r.vshunt };
+    }
+    return null;
+  }
   function restartSketches() {
-    sketches.clear();
+    sketches.clear(); MQ.clients.clear(); MQ.retained.clear(); MQ.log = [];
     for (const p of c.parts) {
       if (!S.isBoard(p.type) || !p.props.run || !p.props.code) continue;
       p.props.pins = {};                         // a fresh boot: every pin is an input until the code says otherwise
-      try { sketches.set(p.id, createRuntime(p, p.props.code, { t: () => sim.t, v: (n) => boardV(p, n), pins: p.props.pins, dht: (n) => dhtAt(p, n), echo: (n) => echoAt(p, n), keypad: (rows, cols) => keyAt(p, rows, cols), ads: (addr) => adsAt(p, addr) })); }
+      try { sketches.set(p.id, createRuntime(p, p.props.code, { t: () => sim.t, v: (n) => boardV(p, n), pins: p.props.pins, dht: (n) => dhtAt(p, n), echo: (n) => echoAt(p, n), keypad: (rows, cols) => keyAt(p, rows, cols), ads: (addr) => adsAt(p, addr), id: p.id, mqtt: brokerFor(p), ina: (addr) => inaAt(p, addr), rtc: () => rtcAt(p) })); }
       catch (e) { sketches.set(p.id, { err: e.message, lines: [], step() { } }); }
     }
   }
@@ -522,7 +572,7 @@ export function schematicTab(root) {
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { LCD: 'LCD I2C', OLED: 'OLED I2C', ADS1115: 'ADS1115', ENC: 'Encoder', SR595: '74HC595', TL494: 'TL494 PWM', LM2596: 'LM2596', IR2104: 'IR2104', TB: 'Terminal', RMOD: 'Relay module', SEG7: '7-segment', DHT: 'DHT22', HCSR04: 'HC-SR04', LDR: 'LDR', PIR: 'PIR', KEYPAD: 'Keypad', BUZZER: 'Buzzer', LOCK: 'Door lock', XFMR: 'Transformer', R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { LCD: 'LCD I2C', OLED: 'OLED I2C', ADS1115: 'ADS1115', INA219: 'INA219', DS3231: 'DS3231 clock', ACS712: 'ACS712', PV: 'Solar panel', SCC: 'Charge ctrl', BYJ: '28BYJ-48', ENC: 'Encoder', SR595: '74HC595', TL494: 'TL494 PWM', LM2596: 'LM2596', IR2104: 'IR2104', TB: 'Terminal', RMOD: 'Relay module', SEG7: '7-segment', DHT: 'DHT22', HCSR04: 'HC-SR04', LDR: 'LDR', PIR: 'PIR', KEYPAD: 'Keypad', BUZZER: 'Buzzer', LOCK: 'Door lock', XFMR: 'Transformer', R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -855,6 +905,12 @@ export function schematicTab(root) {
       case 'LCD': return '0x' + (q.addr ?? 0x27).toString(16).toUpperCase();
       case 'OLED': return '0x' + (q.addr ?? 0x3C).toString(16).toUpperCase();
       case 'ADS1115': { const r = res?.ok ? res.parts.get(p.id) : null; return r ? '0x' + r.addr.toString(16).toUpperCase() : ''; }
+      case 'INA219': return '0x' + (q.addr ?? 0x40).toString(16).toUpperCase();
+      case 'DS3231': return fmtClock(rtcNow(p)) + ((q.speed || 1) > 1 ? ` ×${q.speed}` : '');
+      case 'ACS712': { const r = res?.ok ? res.parts.get(p.id) : null; return `${q.model}${r ? ' · ' + si(Math.abs(r.isens) < 1e-4 ? 0 : r.isens, 'A', 3) : ''}`; }
+      case 'PV': { const r = res?.ok ? res.parts.get(p.id) : null; return `${q.model} ☀${q.sun}%${r ? ' · ' + si(Math.max(0, r.p), 'W', 3) : ''}`; }
+      case 'SCC': { const r = res?.ok ? res.parts.get(p.id) : null; return `${q.mode.toUpperCase()}${r ? ' · ' + ({ bulk: 'charging', absorb: 'absorption', sleep: 'sleep', nobat: 'no battery' }[r.stage] ?? r.stage) : ''}`; }
+      case 'BYJ': { const r = res?.ok ? res.parts.get(p.id) : null; return r ? `${(Math.abs(r.rpm) < 0.05 ? 0 : r.rpm).toFixed(1)} RPM` : ''; }
       case 'ENC': return 'click ' + (ENCS.get(p.id)?.pos ?? 0);
       case 'SR595': return q.model ?? '74HC595';
       case 'TL494': return q.model ?? 'TL494C';
@@ -864,7 +920,7 @@ export function schematicTab(root) {
       case 'RMOD': return q.trig === 'high' ? 'HIGH trig.' : '';
       case 'SEG7': return q.common === 'anode' ? 'common anode' : 'common cathode';
       case 'SERVO': return q.model;
-      case 'STEPPER': return q.micro > 1 ? `1/${q.micro} step` : 'full step';
+      case 'STEPPER': return `${q.drv ?? 'A4988'} ` + (q.micro > 1 ? `1/${q.micro}` : 'full step');
     }
     return '';
   }
@@ -1370,7 +1426,32 @@ export function schematicTab(root) {
     const send = () => { const rt = sketches.get(p.id); if (!q.run || !rt?.send) { say('Run the code first (▶ Run code), then send.'); return; } rt.send(sin.value + '\n'); say(`Sent "${sin.value}" to ${p.name}'s Serial.`); sin.value = ''; };
     sin.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
     const sendRow = el('div', { class: 'row', style: 'display:flex;gap:6px' }, sin, el('button', { class: 'btn primary', type: 'button', text: 'Send', onclick: send }));
-    return el('div', { class: 'code-box' }, el('div', { class: 'row wrap' }, el('b', { text: '💻 Code (Arduino sketch)' }), runB, ex), ta, el('div', { class: 'row wrap' }, saveB, copyB), out, sendRow,
+    // 📡 WiFi + MQTT test broker (ESP32 only)
+    let mqBox = null;
+    if (esp) {
+      const mqLog = el('pre', { class: 'serial mq-log' }), mqStat = el('div', { class: 'mq-stat' });
+      const tIn = el('input', { class: 'num serial-in', type: 'text', placeholder: 'topic, e.g. bedroom/relay1/set', value: store.get('sch.mqT', ''), autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false' });
+      const pIn = el('input', { class: 'num serial-in', type: 'text', placeholder: 'message, e.g. ON', value: store.get('sch.mqP', ''), autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false' });
+      const ret = el('input', { type: 'checkbox' });
+      const pub = () => { if (!tIn.value.trim()) { say('Type a topic.'); return; } store.set('sch.mqT', tIn.value.trim()); store.set('sch.mqP', pIn.value); mqPublish('you (panel)', tIn.value.trim(), pIn.value, ret.checked); say(`Published "${pIn.value}" to ${tIn.value.trim()}.`); syncMqtt?.(); };
+      pIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); pub(); } });
+      const wifiB = el('button', { class: 'btn sm', type: 'button', onclick: () => { MQ.wifi = !MQ.wifi; say(MQ.wifi ? 'WiFi back on: the sketch should reconnect.' : 'WiFi switched off: does your sketch reconnect?'); syncMqtt?.(); } });
+      const brokB = el('button', { class: 'btn sm', type: 'button', onclick: () => { MQ.on = !MQ.on; if (!MQ.on) for (const k of MQ.clients.values()) k.up = false; say(MQ.on ? 'Broker back on.' : 'Broker off (like your VPS going down).'); syncMqtt?.(); } });
+      let lastKey = '';
+      syncMqtt = () => {
+        const me = MQ.clients.get(p.id);
+        wifiB.textContent = MQ.wifi ? '📶 WiFi ON' : '📵 WiFi OFF'; brokB.textContent = MQ.on ? '🟢 Broker ON' : '🔴 Broker OFF';
+        mqStat.textContent = !q.run ? 'Run the code to connect.' : `${p.name}: ${me?.up ? `connected as "${me.id}"${me.subs.size ? ' · subscribed: ' + [...me.subs].join(', ') : ''}` : 'not connected to the broker'}`;
+        const key = MQ.log.length + ':' + (MQ.log.at(-1)?.t ?? 0);
+        if (key !== lastKey) { lastKey = key; mqLog.textContent = MQ.log.slice(-12).map(m => `${m.t.toFixed(1).padStart(6)} s  ${m.from} → ${m.topic}: ${m.payload}${m.retain ? '  (retained)' : ''}`).join('\n') || '(no messages yet)'; mqLog.scrollTop = mqLog.scrollHeight; }
+      };
+      syncMqtt();
+      mqBox = el('details', { class: 'mq-box', open: /PubSubClient/.test(q.code ?? '') },
+        el('summary', { text: '📡 WiFi + MQTT test broker' }), mqStat, el('div', { class: 'row wrap' }, wifiB, brokB), mqLog,
+        el('div', { class: 'row', style: 'display:flex;gap:6px;flex-wrap:wrap' }, tIn, pIn, el('label', { class: 'chk' }, ret, ' retain'), el('button', { class: 'btn primary', type: 'button', text: 'Publish', onclick: pub })),
+        note('A pretend WiFi and MQTT broker (like Mosquitto on your VPS) inside the simulator. Your sketch connects with PubSubClient: client.setServer(…), client.connect("id"), client.subscribe("bedroom/#"), client.publish(…), client.loop(). Every board in the circuit talks to the same broker. Switch WiFi or the broker off to test your reconnect code.'));
+    }
+    return el('div', { class: 'code-box' }, el('div', { class: 'row wrap' }, el('b', { text: '💻 Code (Arduino sketch)' }), runB, ex), ta, el('div', { class: 'row wrap' }, saveB, copyB), out, sendRow, mqBox,
       note('Runs setup() once, then loop() forever, in circuit time: delay(500) really waits 0.5 s. Supported: pinMode, digitalWrite / Read, analogRead / Write, ' + (esp ? 'ledcAttach / ledcWrite, ' : '') + 'delay, millis, Serial.print / println, Servo, map, constrain, if / for / while, your own functions. Not: interrupts, WiFi, libraries other than Servo.'));
   }
 
@@ -1498,7 +1579,7 @@ export function schematicTab(root) {
   function renderPanel() {
     syncNudgeSch(); syncRelays = null;
     panel.innerHTML = '';
-    panelRefresh = null; syncSerial = null;
+    panelRefresh = null; syncSerial = null; syncMqtt = null;
     if (!res) solve();
     if (sel?.kind === 'wire') {
       const w = c.wires[sel.i]; if (!w) { sel = null; return renderPanel(); }
@@ -1591,6 +1672,33 @@ export function schematicTab(root) {
           el('button', { class: 'btn', type: 'button', text: 'Right ⟳', onclick: () => encTurn(p, 1) }));
         f.append(row, note('Pins CLK, DT, SW, +, GND. + to 3.3 V (ESP32) or 5 V (UNO). CLK and DT have 10 kΩ pull-ups on the module; SW has none: use INPUT_PULLUP. One click: CLK and DT both go LOW and back, CLK first when you turn right. Tap the knob on the drawing too: left half ⟲, right half ⟳, middle = push.')); break;
       }
+      case 'INA219': f.append(choice('I2C address (A0 / A1 pads)', String(q.addr ?? 0x40), [['64', '0x40 (default)'], ['65', '0x41 (A0 bridged)'], ['68', '0x44 (A1 bridged)'], ['69', '0x45 (both)']], v => { q.addr = +v; }),
+        note('Header VCC, GND, SCL, SDA, VIN+, VIN−. Current flows VIN+ → 0.1 Ω shunt → VIN− → load. It measures the current and the voltage on VIN− (bus), up to <b>26 V</b> (for a 48 V bank use the ACS712 + a divider). ESP32: SDA 21, SCL 22. Library Adafruit_INA219: getBusVoltage_V(), getCurrent_mA(), getPower_mW().')); break;
+      case 'DS3231': {
+        const inp = el('input', { class: 'num', type: 'datetime-local', step: 1, value: q.start || new Date(phNow() * 1000).toISOString().slice(0, 19) });
+        inp.addEventListener('change', () => { q.start = inp.value; RTCS.delete(p.id); commit(); });
+        f.append(el('label', { class: 'field' }, el('span', { class: 'lab', text: 'Clock starts at (when you press ⟲ t = 0)' }), inp),
+          el('button', { class: 'btn', type: 'button', text: '🕐 Set to now', onclick: () => { q.start = ''; RTCS.delete(p.id); commit(); } }),
+          choice('Clock speed (to test schedules fast)', String(q.speed || 1), [['1', '×1 real time'], ['60', '×60: 1 s = 1 minute'], ['3600', '×3600: 1 s = 1 hour']], v => { q.speed = +v; RTCS.delete(p.id); }),
+          note('Header 32K, SQW, SCL, SDA, VCC, GND (ZS-042 module). 3.3–5 V. ESP32: SDA 21, SCL 22. RTClib: rtc.begin(), rtc.now(), rtc.adjust(DateTime(F(__DATE__), F(__TIME__))). The coin cell keeps the time when the power is off. Some ZS-042 boards charge the coin cell: with a CR2032 (not rechargeable) remove the 200 Ω resistor or diode.'));
+        break;
+      }
+      case 'ACS712': f.append(choice('Version', q.model, Object.entries(S.ACS).map(([k, m]) => [k, `${k}: ${m.s * 1000} mV per A`]), v => { q.model = v; }),
+        note('Header VCC (5 V), OUT, GND; the big screw terminals IP+ / IP− go in series with the load (current IP+ → IP− = positive). OUT = 2.5 V at 0 A, + sensitivity × current, up to ≈ 4.5 V: <b>more than an ESP32 pin can take</b> — use a divider (10 k / 20 k) or an ADS1115. The current path is isolated from the 5 V side.')); break;
+      case 'PV': {
+        f.append(choice('Panel', q.model, Object.entries(S.PANELS).map(([k, m]) => [k, `${k}: Voc ${m.voc} V, Isc ${m.isc} A, best ${m.vmp} V × ${m.imp} A`]), v => { q.model = v; }));
+        const show = () => `Sunlight: ${q.sun} % (≈ ${q.sun * 10} W/m²)`;
+        const rng = el('input', { type: 'range', min: 0, max: 120, step: 1, value: q.sun ?? 100, class: 'rng' }), lb = el('span', { class: 'lab', text: show() });
+        rng.addEventListener('input', () => { q.sun = +rng.value; lb.textContent = show(); solve(); draw(); updateReadings(); });
+        rng.addEventListener('change', () => commit(false));
+        f.append(el('label', { class: 'field' }, lb, rng), note('+ on the left, − on the right. Full sun ≈ 1000 W/m² (100 %), cloudy 20–40 %, evening 5 %. A panel gives its most power only at one voltage (Vmp): a PWM controller pulls it down to the battery voltage, an MPPT controller keeps it at Vmp.'));
+        break;
+      }
+      case 'SCC': f.append(choice('Type', q.mode, [['mppt', 'MPPT (tracks the best panel voltage, ≈ 96 %)'], ['pwm', 'PWM (switch: panel at battery voltage)']], v => { q.mode = v; }),
+        choice('Battery', q.bat, Object.entries(S.SCC_BATS).map(([k, b]) => [k, `${b.name}: absorb ${b.abs} V, float ${b.flt} V`]), v => { q.bat = v; }),
+        field('Max charge current', plain(q.imax), 'A', v => { q.imax = Math.max(1, v); }),
+        note('Pins: PV+ and GND (common negative) left, BAT+ and LOAD+ right. Connect the <b>battery first</b>, then the panel. LOAD switches off below the low-voltage disconnect and back on above reconnect. Charge stages: bulk (all the sun can give) → absorption (holds the voltage, current falls).')); break;
+      case 'BYJ': f.append(note('ULN2003 board: IN1–IN4 from 4 pins (3.3 V is enough), + = 5 V (the motor\'s voltage), − = GND. The 4 LEDs show the coils. 2048 steps per turn (4096 half steps), max ≈ 15 RPM. Stepper.h: Stepper motor(2048, IN1, IN3, IN2, IN4) — note the order 1-3-2-4. Never power it from the ESP32 3.3 V pin.')); break;
       case 'ADS1115': f.append(note('Header VDD, GND, SCL, SDA, ADDR, ALRT, A0–A3 (same order as the module). VDD 2–5.5 V: with an ESP32 use <b>3.3 V</b> (the module\'s 10 kΩ pull-ups then keep SDA / SCL at 3.3 V). ESP32: SDA = GPIO21, SCL = GPIO22. UNO: SDA = A4, SCL = A5. Address: ADDR open or to GND = 0x48, to VDD = 0x49, to SDA = 0x4A, to SCL = 0x4B. An input must never go above VDD + 0.3 V or below −0.3 V: use a divider for bigger voltages. Read it with the Adafruit_ADS1X15 library (see 💻 Code → examples).')); break;
       case 'OLED': f.append(choice('I2C address', String(q.addr ?? 0x3C), [['60', '0x3C (most 0.96" modules)'], ['61', '0x3D (address jumper moved)']], v => { q.addr = +v; }),
         choice('Color', q.color ?? 'white', [['white', 'white'], ['blue', 'blue'], ['yb', 'yellow top 16 rows + blue']], v => { q.color = v; }),
@@ -1629,10 +1737,16 @@ export function schematicTab(root) {
         note(S.REGS[q.model]?.adj ? 'Pins: IN left, OUT right, ADJ bottom. R1 (240 Ω) from OUT to ADJ, R2 from ADJ to ground: Vout = 1.25 × (1 + R2 ÷ R1).' : 'Pins: IN left, OUT right, GND bottom. Real circuit: 0.33 µF on IN and 0.1 µF on OUT, close to the pins.')); break;
       case 'SERVO': f.append(choice('Type', q.model, Object.entries(S.SERVOS).map(([k, m]) => [k, `${k}: ${m.note}`]), v => { q.model = v; }),
         note('Wires: SIG (orange / yellow), V+ (red), GND (brown / black). Signal: a pulse every 20 ms (50 Hz). 0.5 ms = 0°, 1.5 ms = 90°, 2.5 ms = 180° → PWM duty 2.5 %, 7.5 %, 12.5 %.')); break;
-      case 'STEPPER': f.append(choice('Microstepping (MS1–MS3)', String(q.micro), [[1, 'Full step (all MS LOW)'], [2, '1/2 (MS1 HIGH)'], [4, '1/4 (MS2 HIGH)'], [8, '1/8 (MS1 + MS2 HIGH)'], [16, '1/16 (all MS HIGH)']].map(([v, t]) => [String(v), t]), v => { q.micro = +v; }),
+      case 'STEPPER': {
+        const D = S.DRIVERS[q.drv ?? 'A4988'], ms = { A4988: { 1: 'Full step (all MS LOW)', 2: '1/2 (MS1 HIGH)', 4: '1/4 (MS2 HIGH)', 8: '1/8 (MS1 + MS2 HIGH)', 16: '1/16 (all MS HIGH)' },
+          DRV8825: { 1: 'Full step (M0–M2 LOW)', 2: '1/2 (M0)', 4: '1/4 (M1)', 8: '1/8 (M0 + M1)', 16: '1/16 (M2)', 32: '1/32 (M0 + M2)' }, TMC2209: { 8: '1/8 (MS1 LOW, MS2 LOW)', 16: '1/16 (MS1 HIGH, MS2 HIGH)', 32: '1/32 (MS1 HIGH, MS2 LOW)', 64: '1/64 (MS1 LOW, MS2 HIGH)' } }[q.drv ?? 'A4988'];
+        if (!D.micro.includes(q.micro)) q.micro = D.micro[0];
+        f.append(choice('Driver', q.drv ?? 'A4988', [['A4988', 'A4988 (up to 35 V, 1/16)'], ['DRV8825', 'DRV8825 (up to 45 V, 1/32)'], ['TMC2209', 'TMC2209 silent (up to 29 V, 1/64)']], v => { q.drv = v; const D2 = S.DRIVERS[v]; if (!D2.micro.includes(q.micro)) q.micro = D2.micro[0]; renderPanel(); }),
+          choice('Microstepping', String(q.micro), D.micro.map(v => [String(v), ms[v]]), v => { q.micro = +v; }),
         choice('Motor', String(q.steps), [['200', '1.8° / step (200 steps per turn, NEMA 17)'], ['400', '0.9° / step (400 steps per turn)'], ['2048', '28BYJ-48 geared (≈ 2048 steps per turn)']], v => { q.steps = +v; }),
-        field('Current limit (set with the trimpot)', plain(q.ilim), 'A', v => { q.ilim = Math.max(0.05, Math.min(2, v)); }),
-        note('A4988: each rising edge on STEP = one (micro)step. DIR picks the direction. EN LOW (or open) = driver on. VDD = logic 3–5.5 V, VMOT = motor 8–35 V with a 100 µF capacitor close by. Tie RST to SLP on the module.')); break;
+        field('Current limit (set with the trimpot)', plain(q.ilim), 'A', v => { q.ilim = Math.max(0.05, Math.min(2.5, v)); }),
+        note(`${D.note} Each rising edge on STEP = one (micro)step, DIR picks the direction, EN LOW (or open) = driver on. VDD = logic 3–5.5 V, VMOT = motor ${D.vmin}–${D.vmax} V with a 100 µF capacitor close by.`)); break;
+      }
       case 'ESP32': case 'UNO': {
         if (relayCount(p) > 0 && relayCount(p) <= 32) f.append(relayControl(p));
         const B = S.BOARDS[p.type]; q.pins ??= {};
@@ -1699,7 +1813,7 @@ export function schematicTab(root) {
     updateReadings();
     panelRefresh = updateReadings;
     function updateReadings() {
-      syncSerial?.(); syncRelays?.();
+      syncSerial?.(); syncRelays?.(); syncMqtt?.();
       const r = res.ok ? res.parts.get(p.id) : null;
       rd.innerHTML = '';
       if (!res.ok) { rd.append(el('p', { class: 'flag ' + (res.stopped ? 'warn' : 'bad'), text: res.error })); return; }
@@ -1865,6 +1979,64 @@ export function schematicTab(root) {
         L.push('Read it with an interrupt: attachInterrupt(digitalPinToInterrupt(CLK), isr, FALLING); in the ISR, DT HIGH = turned right, LOW = turned left.', 'UNO: only D2 and D3 have interrupts, so CLK goes on D2 (or D3).');
         break;
       }
+      case 'BYJ': {
+        vals.push(['Speed', `${(Math.abs(r.rpm) < 0.05 ? 0 : Math.abs(r.rpm)).toFixed(1)} RPM ${r.rpm < -0.05 ? '(reverse)' : ''}`, true], ['Output shaft', `${r.ang.toFixed(1)}°`, true], ['Half steps counted', String(r.hs)],
+          ['Coils ON', r.k ? [0, 1, 2, 3].filter(i => r.bits & (1 << i)).map(i => 'IN' + (i + 1)).join(' + ') : 'none'], ['Supply', si(r.vcc, 'V')], ['Motor current', si(c0(r.i), 'A')]);
+        L.push('Angle = half steps × 360° ÷ 4096 (64:1 gearbox inside)', 'Stepper.h speed: setSpeed(rpm) → one step every 60 ÷ (2048 × rpm) s');
+        if (r.vcc < 4.5) warn.push(['warn', 'Less than 4.5 V on +: the 5 V motor is weak or does not turn.']);
+        if (r.vcc > 12.5) warn.push(['bad', 'More than 12 V: the 5 V version of the 28BYJ-48 overheats.']);
+        if (Math.abs(r.rpm) > 16) warn.push(['warn', `${Math.abs(r.rpm).toFixed(0)} RPM: a real 28BYJ-48 skips steps above ≈ 15 RPM. Use setSpeed(10–15).`]);
+        if (r.k === 0 && r.vcc > 4) warn.push(['ok', 'All coils off: the shaft turns freely (no holding torque, no heat).']);
+        break;
+      }
+      case 'ACS712': {
+        const m = S.ACS[q.model] ?? S.ACS['30A'], I0 = Math.abs(r.isens) < 1e-4 ? 0 : r.isens;
+        vals.push(['Current IP+ → IP−', si(I0, 'A', 4), true], ['OUT', si(r.vout, 'V', 4), true], ['Zero point (VCC ÷ 2)', si(r.vcc / 2, 'V', 4)], ['Sensitivity', `${m.s * 1000} mV/A`]);
+        L.push(`Current = (OUT − VCC/2) ÷ ${m.s} = (${plain(r.vout, 4)} − ${plain(r.vcc / 2, 4)}) ÷ ${m.s} = ${si(I0, 'A', 3)}`, 'In code: measure OUT once with no load (the real zero), then subtract it: the zero drifts a few mV.');
+        if (Math.abs(I0) > m.max) warn.push(['bad', `Over ${m.max} A: the ${q.model} version saturates. Use the next bigger one.`]);
+        if (r.vcc < 4.5) warn.push(['warn', 'VCC should be 5 V (4.5–5.5 V).']);
+        if (r.vout > 3.6) warn.push(['warn', `OUT is ${si(r.vout, 'V', 3)}: too much for an ESP32 pin (3.3 V). Use a divider or an ADS1115 on 5 V.`]);
+        break;
+      }
+      case 'INA219': {
+        const b = adsBoard(p);
+        vals.push(['Bus voltage (VIN−)', si(r.vbus, 'V', 4), true], ['Current', si(r.ishunt, 'A', 4), true], ['Shunt voltage', si(r.vshunt, 'V', 3)], ['Power', si(r.vbus * r.ishunt, 'W', 3)], ['Address', '0x' + r.addr.toString(16).toUpperCase()]);
+        L.push(`Current = shunt voltage ÷ 0.1 Ω = ${si(r.vshunt, 'V', 3)} ÷ 0.1 = ${si(r.ishunt, 'A', 3)}`);
+        if (r.v < 2.7) warn.push(['bad', 'No power: VCC 3.3 or 5 V.']);
+        if (r.vbus > 26) warn.push(['bad', `${si(r.vbus, 'V', 3)} on VIN: the INA219 is destroyed above 26 V. For 48 V use an ACS712 + divider (example 🔋 48 V monitor).`]);
+        if (Math.abs(r.vshunt) > 0.32) warn.push(['warn', 'More than 3.2 A: past the INA219 range with the 0.1 Ω shunt.']);
+        warn.push(b ? ['ok', `On ${b.name}'s I2C bus: Adafruit_INA219 ina219(0x${r.addr.toString(16).toUpperCase()}); ina219.begin();`] : ['warn', 'SDA / SCL not wired to a board\'s I2C pins (ESP32 GPIO21 / 22, UNO A4 / A5).']);
+        break;
+      }
+      case 'DS3231': {
+        const u = rtcNow(p), d = new Date(u * 1000), b = adsBoard(p);
+        vals.push(['Time', fmtClock(u), true], ['Date', `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()]} ${d.toISOString().slice(0, 10)}`, true], ['Speed', `×${q.speed || 1}`], ['Supply', si(r.v, 'V')]);
+        if (r.v < 2.3) warn.push(['bad', 'No power on VCC: the clock keeps running on its coin cell, but the board can\'t read it.']);
+        warn.push(b ? ['ok', `On ${b.name}'s I2C bus at 0x68.`] : ['warn', 'SDA / SCL not wired to a board\'s I2C pins (ESP32 GPIO21 / 22, UNO A4 / A5).']);
+        break;
+      }
+      case 'PV': {
+        const m = S.PANELS[q.model] ?? S.PANELS['100W'], G = (q.sun ?? 100) / 100, k = 1 + 0.06 * Math.log(Math.max(G, 1e-3));
+        vals.push(['Voltage', si(r.v, 'V', 3), true], ['Current out', si(c0(r.i), 'A', 3), true], ['Power', si(Math.max(0, r.p), 'W', 3), true], ['Best possible now', si(r.pmax, 'W', 3)],
+          ['Using', r.pmax > 0.1 ? `${Math.round(Math.max(0, r.p) / r.pmax * 100)} % of it` : '—'], ['Open voltage / short current now', `${si(m.voc * k, 'V', 3)} / ${si(m.isc * G, 'A', 3)}`]);
+        L.push('Power = V × I. The most power comes at Vmp ≈ ' + si(m.vmp * k, 'V', 3) + ' (the knee of the I-V curve).');
+        if (r.pmax > 1 && r.p < 0.85 * r.pmax && r.v < m.vmp * k * 0.9) warn.push(['warn', `Working at ${si(r.v, 'V', 3)}, far below its best voltage: ${Math.round((1 - r.p / r.pmax) * 100)} % of the power is lost. A PWM controller does this; an MPPT controller gets it back.`]);
+        if (r.i < -0.01) warn.push(['bad', 'Current flows INTO the panel (at night a battery would drain into it): the controller must block it.']);
+        break;
+      }
+      case 'SCC': {
+        const b = S.SCC_BATS[q.bat] ?? S.SCC_BATS.lfp12, eff = r.ppv > 1 ? r.pchg / r.ppv : null;
+        vals.push(['Stage', { bulk: 'Bulk (charging)', absorb: 'Absorption (holding)', sleep: 'Sleep (no sun)', nobat: 'No battery' }[r.stage] ?? r.stage, true], ['Panel', `${si(r.vpv, 'V', 3)} · ${si(c0(r.ipv), 'A', 3)} · ${si(Math.max(0, r.ppv), 'W', 3)}`, true],
+          ['Battery', si(r.vbat, 'V', 3), true], ['Charge current', si(c0(r.ichg), 'A', 3), true], ['Charge power', si(Math.max(0, r.pchg), 'W', 3)], ['Efficiency', eff != null ? Math.round(eff * 100) + ' %' : '—'],
+          ['LOAD output', r.load ? `ON · ${si(c0(r.iload), 'A', 3)}` : `OFF (below ${b.lvd} V)`]);
+        L.push(q.mode === 'mppt' ? 'MPPT: keeps the panel at its best voltage and turns the extra volts into extra amps: I_bat = P_panel × 96 % ÷ V_bat.' : 'PWM: a switch joins the panel to the battery, so the panel works at the battery voltage: I_bat = I_panel.',
+          `${b.name}: absorption ${b.abs} V, float ${b.flt} V, load off below ${b.lvd} V, back on above ${b.lvr} V.`);
+        if (r.stage === 'nobat') warn.push(['bad', 'No battery on BAT+: connect the battery first, the controller starts from it.']);
+        if (r.ichg > q.imax * 1.01) warn.push(['warn', `Charge current above the ${q.imax} A rating.`]);
+        if (r.vpv > (q.bat === 'lfp48' ? 150 : 100)) warn.push(['bad', 'Panel voltage too high for this controller.']);
+        if (q.mode === 'pwm' && r.vpv > r.vbat * 2) warn.push(['warn', 'A PWM controller wastes most of a high-voltage panel: use MPPT, or a panel made for this battery voltage.']);
+        break;
+      }
       case 'ADS1115': {
         const b = adsBoard(p), gains = [[6.144, 'GAIN_TWOTHIRDS'], [4.096, 'GAIN_ONE'], [2.048, 'GAIN_TWO'], [1.024, 'GAIN_FOUR'], [0.512, 'GAIN_EIGHT'], [0.256, 'GAIN_SIXTEEN']];
         vals.push(['Supply', si(r.v, 'V'), true], ['Address', '0x' + r.addr.toString(16).toUpperCase(), true]);
@@ -2023,11 +2195,13 @@ export function schematicTab(root) {
         break;
       }
       case 'STEPPER': {
-        vals.push(['Speed', `${Math.round(Math.abs(r.rpm))} RPM ${r.rpm < 0 ? '(reverse)' : ''}`, true], ['Steps counted', String(r.n), true], ['Shaft angle', `${r.ang.toFixed(1)}°`], ['Driver', r.en ? 'ON' : 'OFF'], ['VMOT', si(r.vmot, 'V')], ['Motor supply current', si(c0(r.imot), 'A')]);
+        const DV = S.DRIVERS[q.drv ?? 'A4988'];
+        vals.push(['Speed', `${Math.round(Math.abs(r.rpm))} RPM ${r.rpm < 0 ? '(reverse)' : ''}`, true], ['Steps counted', String(r.n), true], ['Shaft angle', `${r.ang.toFixed(1)}°`], ['Driver', `${q.drv ?? 'A4988'} ${r.en ? 'ON' : 'OFF'}`], ['VMOT', si(r.vmot, 'V')], ['Motor supply current', si(c0(r.imot), 'A')]);
         L.push(`Step angle = 360° ÷ ${q.steps} ÷ ${q.micro} = ${(360 / q.steps / q.micro).toFixed(3)}°`, `RPM = step rate × 60 ÷ (${q.steps} × ${q.micro})`, 'Current limit: Vref = I × 8 × Rsense (Rsense often 0.1 Ω → Vref = 0.8 × I). Measure Vref on the trimpot.');
-        if (!r.en) warn.push(['warn', r.vdd < 3 ? 'No logic power on VDD (3–5.5 V).' : r.vmot < 8 ? 'VMOT below 8 V: the A4988 shuts down.' : 'EN is HIGH: driver off (motor free).']);
-        if (r.vmot > 35) warn.push(['bad', 'VMOT over 35 V: the A4988 can be destroyed.']);
-        if (q.ilim > 1.2) warn.push(['warn', 'Above about 1.2 A the A4988 needs a heatsink and a fan.']);
+        if (!r.en) warn.push(['warn', r.vdd < 3 ? 'No logic power on VDD (3–5.5 V).' : r.vmot < DV.vmin ? `VMOT below ${DV.vmin} V: the ${q.drv ?? 'A4988'} shuts down.` : 'EN is HIGH: driver off (motor free).']);
+        if (r.vmot > DV.vmax) warn.push(['bad', `VMOT over ${DV.vmax} V: the ${q.drv ?? 'A4988'} can be destroyed.`]);
+        if (q.ilim > DV.cool) warn.push(['warn', `Above about ${DV.cool} A the ${q.drv ?? 'A4988'} needs a heatsink and a fan.`]);
+        if (q.ilim > DV.imax) warn.push(['bad', `${q.ilim} A is more than the ${q.drv ?? 'A4988'} can give (${DV.imax} A).`]);
         if (Math.abs(r.rpm) > 600 / q.micro && q.micro <= 2) warn.push(['warn', 'Very fast for full / half step: a real motor may stall. Ramp the speed up.']);
         break;
       }
@@ -2166,7 +2340,7 @@ export function schematicTab(root) {
   globalThis.__schDbg = { c: () => c, res: () => res, sim, sketches };     // for automated tests
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; probes = []; if (S.isDynamic(c)) { autoTimeQuiet(); autoSpeed(); } if (!running) msg += ' Tap ▶ Run to simulate.'; hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['oled', '💻 ESP32 + OLED 128×64 SSD1306: text, bar + live graph of the pot (code runs)'], ['ads1115', '💻 ADS1115 16-bit voltage sensor 0–25 V: ESP32 + LCD (turn SET)'], ['encoder', '🎛 Rotary encoder menu: ESP32 interrupt + OLED + LED (turn + push the knob)'], ['sr595sig', '📈 74HC595 by hand: signal generators feed SER (data) + SRCLK (clock), 8 LEDs'], ['relay10', '🔌 10 relay modules on 3 wires: ESP32 + two 74HC595 in a chain (type commands in Serial)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM'], ['tl494pwm', '📈 TL494 PWM: 10 kHz lamp dimmer with a MOSFET (turn DUTY)'], ['tl494inv', '📈 TL494 push-pull inverter 12 V → 220 V AC 50 Hz (turn POWER)'], ['bms48', '🔋 48 V protector: 2 × 24 V LiFePO4, whole-pack low / high cut-off (relay)'], ['bms48b', '🔋 48 V BMS: 2 × 24 V LiFePO4, each battery watched + balancing'], ['lm2596', '📈 LM2596 buck module: 24 V → 5 V 3 A (turn SET, flip BIG LOAD / RUN)'], ['buck30', '📈 30 A synchronous buck 24 V → 12 V: TL494 + IR2104 + 2 × IRFB4110 (POWER, then MAIN)'], ['tblock', '🔩 Screw terminal blocks: 12 V in → switch on the PCB → 21 W lamp out']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['oled', '💻 ESP32 + OLED 128×64 SSD1306: text, bar + live graph of the pot (code runs)'], ['ads1115', '💻 ADS1115 16-bit voltage sensor 0–25 V: ESP32 + LCD (turn SET)'], ['encoder', '🎛 Rotary encoder menu: ESP32 interrupt + OLED + LED (turn + push the knob)'], ['sr595sig', '📈 74HC595 by hand: signal generators feed SER (data) + SRCLK (clock), 8 LEDs'], ['relay10', '🔌 10 relay modules on 3 wires: ESP32 + two 74HC595 in a chain (type commands in Serial)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM'], ['tl494pwm', '📈 TL494 PWM: 10 kHz lamp dimmer with a MOSFET (turn DUTY)'], ['tl494inv', '📈 TL494 push-pull inverter 12 V → 220 V AC 50 Hz (turn POWER)'], ['bms48', '🔋 48 V protector: 2 × 24 V LiFePO4, whole-pack low / high cut-off (relay)'], ['bms48b', '🔋 48 V BMS: 2 × 24 V LiFePO4, each battery watched + balancing'], ['lm2596', '📈 LM2596 buck module: 24 V → 5 V 3 A (turn SET, flip BIG LOAD / RUN)'], ['buck30', '📈 30 A synchronous buck 24 V → 12 V: TL494 + IR2104 + 2 × IRFB4110 (POWER, then MAIN)'], ['mqtt', '📡 ESP32 MQTT: 2 relays + DHT22 by topics (📡 panel)'], ['bank48', '🔋 48 V LiFePO4 bank monitor: volts, amps, % on LCD'], ['ina219', '💻 INA219: current + voltage of a 12 V load on LCD'], ['solar', '☀️ Solar: PWM vs MPPT controller side by side'], ['rtc', '🕐 DS3231 clock: lights ON 18:00–06:00 (clock ×60)'], ['byj', '💻 28BYJ-48 + ULN2003 stepper (Stepper.h)'], ['tblock', '🔩 Screw terminal blocks: 12 V in → switch on the PCB → 21 W lamp out']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -2405,6 +2579,63 @@ function symbol(ctx, p, r, g) {
       if (q._a || q._b) T((q._a ? 'A' : '') + (q._b ? 'B' : ''), -0.6, 2.25, 0.36, '#FFD54F');
       break;
     }
+    case 'BYJ': {
+      for (let y = -2; y <= 3; y++) L(-4, y, -3.3, y);
+      ctx.fillStyle = '#0E3A2A'; ctx.fillRect(-3.3, -2.8, 3.4, 6.4); ctx.strokeRect(-3.3, -2.8, 3.4, 6.4);
+      T('ULN2003', -1.6, -2.35, 0.36, '#3DDC84');
+      ['IN1', 'IN2', 'IN3', 'IN4', '+5V', 'GND'].forEach((t, i) => T(t, -2.55, i - 2, 0.32, i === 4 ? '#FF9F43' : C.dim));
+      for (let i = 0; i < 4; i++) { const on = r && (r.bits & (1 << i)) && r.vcc > 4; ctx.fillStyle = on ? '#FF5252' : '#4A2A2A'; ctx.beginPath(); ctx.arc(-0.85, i - 2, 0.2, 0, 7); ctx.fill(); }
+      L(0.1, -0.4, 1.1, -0.4); L(0.1, 0.4, 1.1, 0.4);
+      ctx.fillStyle = '#B8C4CE'; ctx.beginPath(); ctx.arc(2.9, 0, 1.75, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#2C6FB7'; ctx.fillRect(1.1, -0.7, 0.6, 1.4);
+      ctx.save(); ctx.translate(2.9, 0); ctx.rotate(-(p.rot || 0) * Math.PI / 2 + (r?.ang ?? 0) * Math.PI / 180);
+      ctx.strokeStyle = r?.k ? '#FFE16B' : C.dim; ctx.lineWidth *= 2.2; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -1.25); ctx.stroke(); ctx.lineWidth /= 2.2; ctx.restore();
+      ctx.fillStyle = '#E8EDF2'; ctx.beginPath(); ctx.arc(2.9, 0, 0.25, 0, 7); ctx.fill(); ctx.strokeStyle = C.part;
+      T('28BYJ-48', 2.9, 2.35, 0.36, C.dim);
+      break;
+    }
+    case 'ACS712': {
+      L(-3, -1, -2.4, -1); L(-3, 0, -2.4, 0); L(-3, 1, -2.4, 1); L(2.4, -1, 3, -1); L(2.4, 1, 3, 1);
+      ctx.fillStyle = '#7A1E1E'; ctx.fillRect(-2.4, -1.8, 4.8, 3.6); ctx.strokeRect(-2.4, -1.8, 4.8, 3.6);
+      ctx.fillStyle = '#1A3C6E'; ctx.fillRect(1.2, -1.6, 1.1, 3.2);
+      ctx.fillStyle = '#20232A'; ctx.fillRect(-0.6, -0.5, 1.2, 1);
+      T('VCC', -1.8, -1, 0.3, '#FFD9D9'); T('OUT', -1.8, 0, 0.3, '#FFE16B'); T('GND', -1.8, 1, 0.3, '#FFD9D9'); T('IP+', 1.75, -1, 0.3, '#FFFFFF'); T('IP−', 1.75, 1, 0.3, '#FFFFFF');
+      T('ACS712', 0, -1.3, 0.34, '#FFFFFF'); T(q.model, 0, 1.25, 0.34, '#FFD9D9');
+      break;
+    }
+    case 'INA219': {
+      ctx.fillStyle = '#5B2C83'; ctx.fillRect(-3.4, -2.6, 6.8, 5.2); ctx.strokeRect(-3.4, -2.6, 6.8, 5.2);
+      [[-2, 'SCL'], [-1, 'SDA'], [1, 'VCC'], [2, 'GND']].forEach(([y, n]) => { L(-4, y, -3.4, y); T(n, -2.6, y, 0.34, '#E1C8F5'); });
+      [[-1, 'VIN+'], [1, 'VIN−']].forEach(([y, n]) => { L(3.4, y, 4, y); T(n, 2.45, y, 0.34, '#FFFFFF'); });
+      ctx.fillStyle = '#20232A'; ctx.fillRect(-0.9, -0.6, 1.4, 1.2);
+      ctx.fillStyle = '#C8CDD2'; ctx.fillRect(1.15, -0.55, 0.6, 1.1); T('R100', 1.45, 0, 0.22, '#20232A');
+      T('INA219', 0, -1.85, 0.42, '#FFFFFF');
+      break;
+    }
+    case 'DS3231': {
+      ctx.fillStyle = '#1A4E8C'; ctx.fillRect(-3.4, -2.9, 6.8, 6.4); ctx.strokeRect(-3.4, -2.9, 6.8, 6.4);
+      ['32K', 'SQW', 'SCL', 'SDA', 'VCC', 'GND'].forEach((n, i) => { L(-4, i - 2, -3.4, i - 2); T(n, -2.65, i - 2, 0.32, '#CFE3FF'); });
+      ctx.fillStyle = '#C0C6CC'; ctx.beginPath(); ctx.arc(1.6, 0.6, 1.35, 0, 7); ctx.fill(); ctx.stroke(); T('CR2032', 1.6, 0.6, 0.28, '#20232A');
+      T('DS3231', 0.3, -2.25, 0.4, '#FFFFFF'); T('RTC', 1.6, -1.25, 0.34, '#FFE16B');
+      break;
+    }
+    case 'PV': {
+      L(-3, 0, -2.6, 0); L(2.6, 0, 3, 0);
+      ctx.fillStyle = '#132E5C'; ctx.fillRect(-2.6, -2, 5.2, 2.8); ctx.strokeStyle = '#C8CDD2'; ctx.strokeRect(-2.6, -2, 5.2, 2.8);
+      ctx.strokeStyle = 'rgba(160,190,230,0.45)'; for (let k = 1; k < 4; k++) L(-2.6 + k * 1.3, -2, -2.6 + k * 1.3, 0.8); L(-2.6, -0.6, 2.6, -0.6); ctx.strokeStyle = C.part;
+      T('+', -2.2, 0.35, 0.5, '#3DDC84'); T('−', 2.2, 0.35, 0.5, '#FF6B6B');
+      const sun = Math.min(1, (q.sun ?? 100) / 100); ctx.fillStyle = `rgba(255,214,0,${0.15 + 0.85 * sun})`; ctx.beginPath(); ctx.arc(0, -2.55, 0.42, 0, 7); ctx.fill();
+      if (r) T(`${Math.round(Math.max(0, r.p))} W`, 0, -0.65, 0.5, '#FFE16B');
+      break;
+    }
+    case 'SCC': {
+      L(-4, -1, -3.4, -1); L(-4, 1, -3.4, 1); L(3.4, -1, 4, -1); L(3.4, 1, 4, 1);
+      ctx.fillStyle = q.mode === 'pwm' ? '#24476B' : '#14532D'; ctx.fillRect(-3.4, -2.2, 6.8, 4.4); ctx.strokeRect(-3.4, -2.2, 6.8, 4.4);
+      T('PV+', -2.6, -1, 0.34, '#FFE16B'); T('GND', -2.6, 1, 0.34, C.dim); T('BAT+', 2.45, -1, 0.34, '#3DDC84'); T('LOAD+', 2.35, 1, 0.34, '#FF9F43');
+      T(q.mode === 'pwm' ? 'PWM' : 'MPPT', 0, -1.45, 0.46, '#FFFFFF');
+      if (r) { T({ bulk: 'BULK', absorb: 'ABSORB', sleep: 'SLEEP', nobat: 'NO BAT' }[r.stage] ?? '', 0, 0, 0.36, r.stage === 'bulk' ? '#3DDC84' : '#FFC857'); T(`${Math.max(0, r.ichg).toFixed(1)} A`, 0, 1.2, 0.42, '#4FC3F7'); }
+      break;
+    }
     case 'ADS1115': {
       ctx.fillStyle = '#5B2C83'; ctx.fillRect(-3.4, -3.7, 6.8, 6.4); ctx.strokeRect(-3.4, -3.7, 6.8, 6.4);
       ctx.fillStyle = '#20232A'; ctx.fillRect(-1.1, -1.1, 2.2, 1.6);
@@ -2593,7 +2824,7 @@ function symbol(ctx, p, r, g) {
     case 'STEPPER': {
       L(-4, -2, -3, -2); L(-4, -1, -3, -1); L(-4, 0, -3, 0); L(-4, 1, -3, 1); L(-4, 2, -3, 2); L(-4, 3, -3, 3);
       ctx.fillStyle = '#0E3A2A'; ctx.fillRect(-3, -2.8, 3.2, 6.4); ctx.strokeStyle = C.part; ctx.strokeRect(-3, -2.8, 3.2, 6.4);
-      T('A4988', -1.4, -2.35, 0.42, '#3DDC84');
+      T(q.drv ?? 'A4988', -1.4, -2.35, 0.4, q.drv === 'TMC2209' ? '#4FC3F7' : '#3DDC84');
       for (const [t, y] of [['STEP', -2], ['DIR', -1], ['EN', 0], ['VDD', 1], ['GND', 2], ['VMOT', 3]]) T(t, -2.15, y, 0.36, t === 'VMOT' ? '#FF9F43' : C.dim);
       // motor
       L(0.2, -0.5, 1.2, -0.5); L(0.2, 0.5, 1.2, 0.5);
@@ -2661,6 +2892,6 @@ function arrowHead(ctx, x1, y1, x2, y2, f) {
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, OLED: 6, ADS1115: 6, ENC: 7, SR595: 4.5, TL494: 4, LM2596: 8, IR2104: 6, TB: 12, RMOD: 7, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10, KEYPAD: 5.5, BUZZER: 14, LOCK: 14 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, OLED: 6, ADS1115: 6, INA219: 6, DS3231: 6, ACS712: 8, PV: 8, SCC: 6, BYJ: 5, ENC: 7, SR595: 4.5, TL494: 4, LM2596: 8, IR2104: 6, TB: 12, RMOD: 7, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10, KEYPAD: 5.5, BUZZER: 14, LOCK: 14 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

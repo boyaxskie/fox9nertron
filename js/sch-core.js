@@ -209,7 +209,19 @@ export const TYPES = {
   ESP32: { label: 'ESP32 DevKit (30 pin)', prefix: 'MCU', pins: boardPins(BOARDS.ESP32, 15), box: [-4, -8.6, 4, 8.6], props: { pins: {} } },
   UNO: { label: 'Arduino UNO', prefix: 'MCU', pins: boardPins(BOARDS.UNO, 11), box: [-4, -8.6, 4, 8.6], props: { pins: {} } },
   SERVO: { label: 'Servo motor', prefix: 'M', pins: [[-3, -1], [-3, 0], [-3, 1]], box: [-3, -2.2, 3.2, 2.2], props: { model: 'SG90' } },
-  STEPPER: { label: 'Stepper motor + A4988 driver', prefix: 'M', pins: [[-4, -2], [-4, -1], [-4, 0], [-4, 1], [-4, 2], [-4, 3]], box: [-4, -3.4, 5.6, 3.8], props: { micro: 1, ilim: 1.0, steps: 200 } },
+  // 28BYJ-48 5 V geared stepper on its ULN2003 board: IN1–IN4, + (5–12 V), − (GND)
+  BYJ: { label: '28BYJ-48 stepper + ULN2003 board', prefix: 'M', pins: [[-4, -2], [-4, -1], [-4, 0], [-4, 1], [-4, 2], [-4, 3]], box: [-4, -3, 5, 3.8], props: {} },
+  // ACS712 Hall current sensor module: header VCC, OUT, GND (left), current terminals IP+ / IP− (right)
+  ACS712: { label: 'ACS712 current sensor (5 / 20 / 30 A)', prefix: 'U', pins: [[-3, -1], [-3, 0], [-3, 1], [3, -1], [3, 1]], box: [-3, -2, 3, 2], props: { model: '30A' } },
+  // INA219 I2C current + voltage monitor: header VCC, GND, SCL, SDA, VIN+, VIN− (0.1 Ω shunt between VIN+ and VIN−)
+  INA219: { label: 'INA219 current + voltage (I2C, ≤ 26 V)', prefix: 'U', pins: [[-4, 1], [-4, 2], [-4, -2], [-4, -1], [4, -1], [4, 1]], box: [-4, -2.7, 4, 2.7], props: { addr: 0x40 } },
+  // DS3231 real-time clock (ZS-042 module): header 32K, SQW, SCL, SDA, VCC, GND
+  DS3231: { label: 'DS3231 real-time clock (I2C)', prefix: 'U', pins: [[-4, -2], [-4, -1], [-4, 0], [-4, 1], [-4, 2], [-4, 3]], box: [-4, -3, 4, 3.6], props: { start: '', speed: 1 } },
+  // solar panel: + / − (like a battery), sunlight 0–120 %
+  PV: { label: 'Solar panel (PV)', prefix: 'PV', pins: [[-3, 0], [3, 0]], box: [-3, -2.2, 3, 1.2], props: { model: '100W', sun: 100 } },
+  // solar charge controller, common negative: PV+, GND (left) · BAT+, LOAD+ (right)
+  SCC: { label: 'Solar charge controller (PWM / MPPT)', prefix: 'U', pins: [[-4, -1], [-4, 1], [4, -1], [4, 1]], box: [-4, -2.4, 4, 2.4], props: { mode: 'mppt', bat: 'lfp12', imax: 20 } },
+  STEPPER: { label: 'Stepper motor + driver (A4988 / DRV8825 / TMC2209)', prefix: 'M', pins: [[-4, -2], [-4, -1], [-4, 0], [-4, 1], [-4, 2], [-4, 3]], box: [-4, -3.4, 5.6, 3.8], props: { micro: 1, ilim: 1.0, steps: 200 } },
   T555: { label: '555 timer', prefix: 'U', pins: [[0, 4], [-4, 2], [4, 0], [1, -4], [2, 4], [-4, 0], [-4, -2], [-1, -4]], box: [-4, -4, 4, 4], props: { model: 'NE555' } },
   RELAY: { label: 'Relay (coil + changeover)', prefix: 'K', pins: [[-3, -2], [-3, 2], [0, 2], [0, -2], [2, -2]], box: [-3.7, -2.4, 2.4, 2.4], props: { vcoil: 5, rcoil: 70, l: 0.02 } },
   XFMR: { label: 'Transformer (center tap)', prefix: 'TR', pins: [[-3, -2], [-3, 0], [-3, 2], [3, -2], [3, 2]], box: [-3, -2.6, 3, 2.6], props: { n1: 10, n2: 10, ns: 190, lm: 0.3, r1: 0.02, r2: 0.02, rs: 2 } },
@@ -245,8 +257,27 @@ export const TYPES = {
   VM: { label: 'Voltmeter', prefix: 'VM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
   AM: { label: 'Ammeter', prefix: 'AM', pins: [[-2, 0], [2, 0]], box: [-2, -1.1, 2, 1.1], props: {} },
 };
-export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'TL494', 'LM2596', 'IR2104', 'SR595', 'ESP32', 'UNO', 'LCD', 'OLED', 'ADS1115', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'ENC', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'REG', 'RELAY', 'RMOD', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'TB', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
-export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER', 'ENC', 'TL494', 'LM2596']);
+export const PALETTE = ['R', 'POT', 'C', 'L', 'BAT', 'SIG', 'LED', 'D', 'ZD', 'NPN', 'PNP', 'NMOS', 'PMOS', 'OPAMP', 'T555', 'TL494', 'LM2596', 'IR2104', 'SR595', 'ESP32', 'UNO', 'LCD', 'OLED', 'ADS1115', 'INA219', 'DS3231', 'SEG7', 'DHT', 'HCSR04', 'LDR', 'PIR', 'KEYPAD', 'ENC', 'BUZZER', 'LOCK', 'SERVO', 'STEPPER', 'BYJ', 'ACS712', 'PV', 'SCC', 'REG', 'RELAY', 'RMOD', 'OPTO', 'SW', 'SPDT', 'DPDT', 'PB', 'LAMP', 'XFMR', 'TB', 'ISRC', 'VM', 'AM', 'SCOPE', 'GND'];
+export const DYNAMIC = new Set(['C', 'L', 'XFMR', 'LOCK', 'SIG', 'SCOPE', 'RELAY', 'SERVO', 'STEPPER', 'BYJ', 'SCC', 'ENC', 'TL494', 'LM2596']);
+// stepper drivers (StepStick modules, same pins). micro = MS pin settings it offers
+export const DRIVERS = {
+  A4988: { vmin: 8, vmax: 35, imax: 2, cool: 1.2, micro: [1, 2, 4, 8, 16], note: 'A4988: MS1–MS3 set the microstep. Vref = I × 8 × Rsense (0.1 Ω → Vref = 0.8 × I).' },
+  DRV8825: { vmin: 8.2, vmax: 45, imax: 2.2, cool: 1.5, micro: [1, 2, 4, 8, 16, 32], note: 'DRV8825: up to 1/32 step, 45 V. Vref = I ÷ 2 (Rsense 0.1 Ω).' },
+  TMC2209: { vmin: 4.75, vmax: 29, imax: 2, cool: 1.4, micro: [8, 16, 32, 64], silent: true, note: 'TMC2209 (standalone): MS1 / MS2 LOW-LOW = 1/8, HIGH-HIGH = 1/16, HIGH-LOW = 1/32, LOW-HIGH = 1/64. StealthChop: almost silent. Vref ≈ I_rms × 1.41 (Vref 1.41 V ≈ 1 A rms). Needs a heatsink above 1 A.' },
+};
+export const ACS = { '5A': { s: 0.185, max: 5 }, '20A': { s: 0.100, max: 20 }, '30A': { s: 0.066, max: 30 } };
+// solar panels at 1000 W/m² (25 °C): Voc, Isc, Vmp, Imp
+export const PANELS = {
+  '10W': { voc: 21.6, isc: 0.61, vmp: 18, imp: 0.56 }, '50W': { voc: 22, isc: 3.0, vmp: 18, imp: 2.78 }, '100W': { voc: 22.5, isc: 5.9, vmp: 18.2, imp: 5.5 },
+  '200W': { voc: 24.3, isc: 10.4, vmp: 20.3, imp: 9.85 }, '400W': { voc: 49.5, isc: 10.3, vmp: 41.5, imp: 9.65 },
+};
+// charge controller battery settings: absorption, float, low-voltage disconnect / reconnect of the LOAD output
+export const SCC_BATS = {
+  lfp12: { name: 'LiFePO4 12.8 V (4S)', abs: 14.2, flt: 13.6, lvd: 11.6, lvr: 12.8 }, lfp24: { name: 'LiFePO4 25.6 V (8S)', abs: 28.4, flt: 27.2, lvd: 23.2, lvr: 25.6 },
+  lfp48: { name: 'LiFePO4 51.2 V (16S)', abs: 56.8, flt: 54.4, lvd: 46.4, lvr: 51.2 }, lead12: { name: 'Lead-acid 12 V', abs: 14.4, flt: 13.8, lvd: 11.1, lvr: 12.6 },
+};
+// 28BYJ-48 half-step coil patterns (IN1 = 1, IN2 = 2, IN3 = 4, IN4 = 8) → position in the 8-step cycle
+const BYJ_SEQ = { 1: 0, 3: 1, 2: 2, 6: 3, 4: 4, 12: 5, 8: 6, 9: 7 };
 export const isDynamic = (c) => c.parts.some(p => DYNAMIC.has(p.type) || (isBoard(p.type) && ((p.props.run && p.props.code) || Object.values(p.props.pins ?? {}).some(x => x.mode === 'pwm'))));
 
 // signal generator value at time t
@@ -580,12 +611,66 @@ export function solveCircuit(c, sim = null, opts = {}) {
         R(pins[1], pins[2], 5 / (prev?.moving ? m.run : m.idle), p, 'load');
         break;
       }
+      case 'BYJ': {
+        // ULN2003 inputs ≈ 10 kΩ; each coil ON pulls ≈ 50 Ω from + (5 V motor: ≈ 100 mA per coil)
+        const prev = st.get(p.id), k = prev?.k ?? 0;
+        for (let i = 0; i < 4; i++) R(pins[i], pins[5], 10000, p, 'in' + i);
+        R(pins[4], pins[5], k ? 50 / k : 1e6, p, 'main');
+        break;
+      }
+      case 'ACS712': {
+        // OUT = VCC / 2 + sensitivity × current (IP+ → IP−). Hall sensor: the current path is isolated from the electronics
+        const [Vp, OUT, Gp, IPp, IPm] = pins, m = ACS[pr.model] ?? ACS['30A'], n1 = inner(), nm = inner();
+        R(Vp, Gp, 500, p, 'main');
+        const sense = { kind: 'V', a: IPp, b: n1, val: 0, owner: p, role: 'sense' }; els.push(sense);
+        R(n1, IPm, 0.0012, p, 'rs');
+        els.push({ kind: 'V', a: nm, b: Gp, val: 0, gp: Vp, gn: Gp, gain: 0.5, owner: p, role: 'mid' });
+        R(nm, OUT, 10, p, 'rout');
+        els.push({ kind: 'F', a: Gp, b: OUT, ctrl: sense, val: m.s / 10, owner: p, role: 'gain' });
+        break;
+      }
+      case 'INA219': {
+        // ≈ 1 mA, 10 kΩ I2C pull-ups, 0.1 Ω shunt VIN+ → VIN−, bus voltage measured on VIN− (≈ 800 kΩ to GND)
+        const [Vp, Gp, SCL, SDA, VP, VN] = pins;
+        R(Vp, Gp, 3300, p, 'main'); R(SDA, Vp, 10000, p, 'sda'); R(SCL, Vp, 10000, p, 'scl');
+        R(VP, VN, 0.1, p, 'shunt'); R(VN, Gp, 800e3, p, 'bus');
+        break;
+      }
+      case 'DS3231': {
+        // ≈ 0.2 mA, 4.7 kΩ pull-ups on SDA / SCL (ZS-042 module), SQW / 32K open drain
+        const [K32, SQW, SCL, SDA, Vp, Gp] = pins;
+        R(Vp, Gp, 16500, p, 'main'); R(SDA, Vp, 4700, p, 'sda'); R(SCL, Vp, 4700, p, 'scl'); R(SQW, Gp, R_OPEN, p, 'sqw'); R(K32, Gp, R_OPEN, p, 'k32');
+        break;
+      }
+      case 'PV': {
+        // photo current (∝ sunlight) + shunt slope + a knee at Vmp → a realistic I-V curve: Isc at 0 V, Imp at Vmp, 0 A at Voc
+        const m = PANELS[pr.model] ?? PANELS['100W'], G = Math.max(0, Math.min(1.2, (pr.sun ?? 100) / 100)), [P, N] = pins;
+        if (G > 0.002) {
+          const k = 1 + 0.06 * Math.log(G), voc = m.voc * k, vmp = m.vmp * k, isc = m.isc * G, imp = m.imp * G;
+          const rsh = vmp / Math.max(1e-6, isc - imp), rd = (voc - vmp) / Math.max(1e-6, isc - voc / rsh);
+          I(N, P, isc, p, 'ph'); R(P, N, rsh, p, 'sh');
+          diodes.push({ p, a: P, b: N, vf: vmp, rs: rd, on: st.get(p.id)?.on ?? false, n: inner(), role: 'knee' });
+        } else { I(N, P, 0, p, 'ph'); R(P, N, 1e7, p, 'sh'); }
+        break;
+      }
+      case 'SCC': {
+        // behaviour model: PWM = a switch PV+ → BAT+ (panel pulled down to the battery), MPPT = holds the panel at its best voltage
+        // (perturb & observe, one step per time step) and pushes that power × 96 % into the battery. Sleeps when the panel is too low.
+        const [PVp, Gp, BATp, LDp] = pins, prev = st.get(p.id) ?? {}, stg = prev.stage ?? 'sleep';
+        R(PVp, Gp, 1e6, p, 'self');
+        R(BATp, Gp, Math.max(10, (prev.vbat || 12) / 0.012), p, 'main');            // ≈ 12 mA own consumption from the battery
+        if (stg === 'sleep' || stg === 'nobat') I(PVp, BATp, 0, p, 'chg');
+        else if (pr.mode === 'pwm') { if (stg === 'bulk') R(PVp, BATp, 0.03, p, 'chg'); else I(PVp, BATp, prev.iout ?? 0, p, 'chg'); }
+        else { els.push({ kind: 'V', a: PVp, b: Gp, val: prev.vref ?? 18, owner: p, role: 'pvin' }); I(Gp, BATp, prev.iout ?? 0, p, 'chg'); }
+        R(BATp, LDp, prev.load === false ? R_OPEN : 0.02, p, 'load');
+        break;
+      }
       case 'STEPPER': {
         // A4988: pins STEP, DIR, EN (LOW = on, pulled down inside), VDD (logic 3–5.5 V), GND, VMOT (8–35 V)
         const prev = st.get(p.id), on = prev ? prev.en : true;
         R(pins[0], pins[4], 100000, p, 'step'); R(pins[1], pins[4], 100000, p, 'dir'); R(pins[2], pins[4], 100000, p, 'en');
         R(pins[3], pins[4], 1000, p, 'vdd');
-        R(pins[5], pins[4], on ? 12 / Math.max(0.05, pr.ilim * 0.65) : 1e6, p, 'vmot');
+        R(pins[5], pins[4], on ? 12 / Math.max(0.05, pr.ilim * ((DRIVERS[pr.drv] ?? DRIVERS.A4988).silent ? 0.5 : 0.65)) : 1e6, p, 'vmot');
         break;
       }
       case 'ESP32': case 'UNO': {
@@ -1043,10 +1128,79 @@ export function solveCircuit(c, sim = null, opts = {}) {
       parts.set(p.id, { va, vb, vsig: vs, vcc, icc: load.i, ang, tgt, w, moving: Math.abs(tgt - ang) > 0.5, v: vcc, i: load.i, p: vcc * load.i, acc, hi, vh, dots: [] });
       continue;
     }
+    if (p.type === 'BYJ') {
+      const prev = st.get(p.id) ?? { idx: -1, hs: 0, last: null, rate: 0, k: 0, dir: 0, w0: null, h0: 0 }, g = res.v[pins[5]], vcc = res.v[pins[4]] - g;
+      const bits = [0, 1, 2, 3].reduce((s, i) => s | (res.v[pins[i]] - g > 1.8 ? 1 << i : 0), 0), k = [0, 1, 2, 3].filter(i => bits & (1 << i)).length;
+      let { idx, hs, last, rate, dir, w0, h0 } = prev; const t = sim ? sim.t : 0, now = vcc > 4 ? (BYJ_SEQ[bits] ?? -1) : -1;
+      if (sim && now >= 0 && idx >= 0 && now !== idx) {
+        const d = (now - idx + 8) % 8, mv = d <= 3 ? d : d >= 5 ? d - 8 : 0;     // 4 half-steps away: can't tell the direction, the real motor just shakes
+        if (mv) {   // speed = half-steps counted over ≥ 0.25 s (single steps land on circuit time steps, so one gap alone is jumpy)
+          if (Math.sign(mv) !== dir || last == null || t - last > 0.5) { w0 = t; h0 = hs; }
+          hs += mv; dir = Math.sign(mv); last = t;
+          if (t - w0 >= 0.25) { rate = Math.abs(hs - h0) / (t - w0); w0 = t; h0 = hs; }
+        }
+      }
+      if (now >= 0) idx = now;
+      if (sim && last != null && t - last > 0.5) rate = 0;
+      const m = mine.find(e => e.role === 'main');
+      parts.set(p.id, { va, vb, idx, hs, last, rate, dir, w0, h0, k: vcc > 4 ? k : 0, bits, vcc, ang: ((hs * 360 / 4096) % 360 + 360) % 360, rpm: rate * 60 / 4096 * dir, v: vcc, i: m.i, p: vcc * m.i, dots: [] });
+      continue;
+    }
+    if (p.type === 'ACS712') {
+      const g = res.v[pins[2]], s = mine.find(e => e.role === 'sense'), vcc = res.v[pins[0]] - g, vout = res.v[pins[1]] - g, m = mine.find(e => e.role === 'main');
+      parts.set(p.id, { va, vb, i: s.i, isens: s.i, vcc, vout, v: vcc, p: vcc * m.i + s.i * s.i * 0.0012, icc: m.i, dots: [[3, 4, s.i]] });
+      continue;
+    }
+    if (p.type === 'INA219') {
+      const g = res.v[pins[1]], vcc = res.v[pins[0]] - g, sh = mine.find(e => e.role === 'shunt'), m = mine.find(e => e.role === 'main');
+      parts.set(p.id, { va, vb, v: vcc, i: m.i, p: vcc * m.i, vbus: res.v[pins[5]] - g, vshunt: res.v[pins[4]] - res.v[pins[5]], ishunt: sh.i, addr: p.props.addr ?? 0x40, dots: [[4, 5, sh.i]] });
+      continue;
+    }
+    if (p.type === 'DS3231') {
+      const g = res.v[pins[5]], vcc = res.v[pins[4]] - g, m = mine.find(e => e.role === 'main');
+      parts.set(p.id, { va, vb, v: vcc, i: m.i, p: vcc * m.i, dots: [] });
+      continue;
+    }
+    if (p.type === 'PV') {
+      const v = res.v[pins[0]] - res.v[pins[1]], ph = mine.find(e => e.role === 'ph'), sh = mine.find(e => e.role === 'sh'), kn = mine.find(e => e.role === 'knee');
+      const iout = ph.i - sh.i - (kn ? Math.max(0, kn.i) : 0), m = PANELS[p.props.model] ?? PANELS['100W'], G = Math.max(0, (p.props.sun ?? 100) / 100);
+      parts.set(p.id, { va, vb, v, i: iout, p: v * iout, pmax: m.vmp * m.imp * G, on: diodes.find(x => x.p === p)?.on ?? false, dots: [[1, 0, iout]] });
+      continue;
+    }
+    if (p.type === 'SCC') {
+      const q = p.props, b = SCC_BATS[q.bat] ?? SCC_BATS.lfp12, prev = st.get(p.id) ?? {}, g = res.v[pins[1]];
+      const vpv = res.v[pins[0]] - g, vbat = res.v[pins[2]] - g, chg = mine.find(e => e.role === 'chg'), pvin = mine.find(e => e.role === 'pvin'), ld = mine.find(e => e.role === 'load');
+      const ipv = q.mode === 'mppt' ? (pvin ? Math.max(0, pvin.i) : 0) : Math.max(0, chg.i), ppv = vpv * ipv;
+      let stage = prev.stage ?? 'sleep', vref = prev.vref ?? vpv * 0.8, dir = prev.dir ?? -1, iout = prev.iout ?? 0, load = prev.load ?? true, tAbs = prev.tAbs ?? 0, vopen = prev.vopen ?? 0;
+      const ichg = q.mode === 'mppt' ? (stage === 'sleep' || stage === 'nobat' ? 0 : iout) : chg.i;
+      if (sim) {
+        if (vbat < 0.6 * b.lvd) stage = 'nobat';
+        else if (stage === 'sleep' || stage === 'nobat') { vopen = vpv; if (vpv > vbat + 1) { stage = 'bulk'; vref = Math.max(vbat + 1, vpv * 0.8); iout = 0; } }
+        else if (q.mode === 'pwm') {
+          if (chg.i < -0.01 || (stage === 'bulk' && vpv < vbat + 0.05 && chg.i < 0.02)) stage = 'sleep';
+          else if (vbat >= b.abs && stage === 'bulk') { stage = 'absorb'; iout = Math.max(0, chg.i); }
+          else if (stage !== 'bulk') { iout = Math.max(0.02 * q.imax, iout * 0.995); if (vbat < b.flt - 0.2) stage = 'bulk'; }
+        } else {
+          if (pvin && pvin.i < -0.02) { vref += 0.4; dir = 1; }                        // above the panel's open voltage: back off
+          else { if (ppv < (prev.ppv ?? 0) - 1e-3) dir = -dir; vref += dir * Math.max(0.05, 0.004 * vref); }
+          vref = Math.max(vbat + 1, Math.min(vref, 1.2 * (prev.vopen || vref + 5)));
+          if (ppv < 0.2 && ipv < 0.01 && (prev.lowN ?? 0) > 50) { stage = 'sleep'; iout = 0; }
+          let want = Math.min(q.imax, 0.96 * Math.max(0, ppv) / Math.max(vbat, 1));
+          if (vbat >= b.abs) { stage = 'absorb'; tAbs += sim.dt; want = Math.min(want, Math.max(0.02 * q.imax, iout * 0.995)); }
+          else if (stage === 'absorb' && vbat < b.flt - 0.2) stage = 'bulk';
+          iout = want;
+        }
+        if (load && vbat < b.lvd) load = false; else if (!load && vbat > b.lvr) load = true;
+      }
+      const lowN = ppv < 0.2 ? (prev.lowN ?? 0) + 1 : 0;
+      parts.set(p.id, { va, vb, vpv, ipv, ppv, vbat, ichg, pchg: vbat * ichg, stage, vref, dir, iout, load, tAbs, vopen, lowN, iload: ld.i, mode: q.mode,
+        v: vbat, i: ichg, p: Math.max(0, ppv - vbat * ichg), dots: [] });
+      continue;
+    }
     if (p.type === 'STEPPER') {
       const pr2 = p.props, prev = st.get(p.id) ?? { ang: 0, lvl: 0, n: 0, en: true, last: null, rate: 0 };
       const vg = res.v[pins[4]], vdd = res.v[pins[3]] - vg, vmot = res.v[pins[5]] - vg, thr = 0.7 * Math.max(vdd, 1);
-      const stepHi = res.v[pins[0]] - vg > thr ? 1 : 0, dirHi = res.v[pins[1]] - vg > thr, en = !(res.v[pins[2]] - vg > thr) && vdd > 3 && vmot > 8;
+      const stepHi = res.v[pins[0]] - vg > thr ? 1 : 0, dirHi = res.v[pins[1]] - vg > thr, en = !(res.v[pins[2]] - vg > thr) && vdd > 3 && vmot > (DRIVERS[pr2.drv] ?? DRIVERS.A4988).vmin;
       let { ang, lvl, n, last, rate } = prev; const t = sim ? sim.t : 0;
       if (sim && en && stepHi && !lvl) {
         const d = (dirHi ? 1 : -1) * 360 / pr2.steps / pr2.micro; ang = ((ang + d) % 360 + 360) % 360; n += dirHi ? 1 : -1;
@@ -1172,6 +1326,9 @@ export function solveCircuit(c, sim = null, opts = {}) {
     else if (p.type === 'RMOD') next.set(p.id, { on: r.on });
     else if (p.type === 'SEG7') next.set(p.id, { segOn: r.segOn });
     else if (p.type === 'SERVO') next.set(p.id, { ang: r.ang, tgt: r.tgt, acc: r.acc, hi: r.hi, vh: r.vh, w: r.w, moving: r.moving });
+    else if (p.type === 'BYJ') next.set(p.id, { idx: r.idx, hs: r.hs, last: r.last, rate: r.rate, k: r.k, dir: r.dir, w0: r.w0, h0: r.h0 });
+    else if (p.type === 'PV') next.set(p.id, { on: r.on });
+    else if (p.type === 'SCC') next.set(p.id, { stage: r.stage, vref: r.vref, dir: r.dir, iout: r.iout, load: r.load, tAbs: r.tAbs, vopen: r.vopen, vbat: r.vbat, ppv: r.ppv, lowN: r.lowN });
     else if (p.type === 'STEPPER') next.set(p.id, { ang: r.ang, lvl: r.lvl, n: r.n, en: r.en, last: r.last, rate: r.rate });
   }
   return { ok: true, parts, wires, vAt, notes, delivered, nodes: nextNode, next, t: sim?.t ?? 0 };
@@ -1251,6 +1408,11 @@ export const CODE_LESSONS = {
  "lesson9": "// Lesson 9: commands from the console (type in the Serial box, press Enter)\nconst int LED1 = 23, LED2 = 22, POT = 34;\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(LED1, OUTPUT);\n  pinMode(LED2, OUTPUT);\n  Serial.println(\"Commands: red on | red off | green on | green off | read | help\");\n}\n\nvoid loop() {\n  if (Serial.available() > 0) {               // something was typed\n    String cmd = Serial.readStringUntil('\\n');  // read one line\n    cmd.trim();                               // drop spaces / Enter\n    cmd.toLowerCase();\n    Serial.print(\"> \"); Serial.println(cmd);\n\n    if (cmd == \"red on\")         { digitalWrite(LED1, HIGH); Serial.println(\"red is ON\"); }\n    else if (cmd == \"red off\")   { digitalWrite(LED1, LOW);  Serial.println(\"red is OFF\"); }\n    else if (cmd == \"green on\")  { digitalWrite(LED2, HIGH); Serial.println(\"green is ON\"); }\n    else if (cmd == \"green off\") { digitalWrite(LED2, LOW);  Serial.println(\"green is OFF\"); }\n    else if (cmd == \"read\") {\n      int raw = analogRead(POT);\n      Serial.print(\"pot raw \"); Serial.print(raw);\n      Serial.print(\" = \");      Serial.print(raw * 3.3 / 4095, 2); Serial.println(\" V\");\n    }\n    else if (cmd == \"help\") Serial.println(\"red on | red off | green on | green off | read\");\n    else { Serial.print(\"unknown: \"); Serial.println(cmd); }\n  }\n  delay(10);\n}\n"
 };
 const SKETCH_EX = {
+  mqtt: "// ESP32 MQTT: 2 relays + DHT22 by topics (Mosquitto / Home Assistant / an MQTT phone app)\n// In the simulator: open the \"📡 MQTT\" box under the code to see the broker and send messages.\n#include <WiFi.h>\n#include <PubSubClient.h>\n#include <DHT.h>\n\nconst char* WIFI_SSID = \"YourWiFi\";\nconst char* WIFI_PASS = \"YourPassword\";\nconst char* BROKER = \"192.168.254.10\";    // IP of the PC / Pi running Mosquitto\n\nconst int RELAY1 = 19;                     // relay modules: LOW = ON\nconst int RELAY2 = 18;\nDHT dht(4, DHT22);                         // DATA on GPIO4\nWiFiClient espClient;\nPubSubClient client(espClient);\nunsigned long lastSend = 0;\nchar buf[16];\n\nvoid setRelay(int pin, const char* stateTopic, bool on) {\n  digitalWrite(pin, on ? LOW : HIGH);\n  client.publish(stateTopic, on ? \"ON\" : \"OFF\", true);   // retained: a new app sees the last state\n}\n\n// runs when a message arrives on a topic we subscribed to\nvoid callback(char* topic, byte* payload, unsigned int length) {\n  String msg = \"\";\n  for (int i = 0; i < length; i++) msg += (char)payload[i];\n  Serial.print(\"got \");\n  Serial.print(topic);\n  Serial.print(\" = \");\n  Serial.println(msg);\n  bool on = (msg == \"ON\" || msg == \"1\");\n  if (strcmp(topic, \"home/relay1/set\") == 0) setRelay(RELAY1, \"home/relay1/state\", on);\n  if (strcmp(topic, \"home/relay2/set\") == 0) setRelay(RELAY2, \"home/relay2/state\", on);\n}\n\nvoid connectMqtt() {\n  while (!client.connected()) {\n    Serial.print(\"MQTT connect... \");\n    if (client.connect(\"fox9-esp32\")) {\n      Serial.println(\"OK\");\n      client.subscribe(\"home/+/set\");      // + = any one word: relay1, relay2\n      client.publish(\"home/status\", \"online\", true);\n    } else {\n      Serial.print(\"failed, state \");\n      Serial.println(client.state());\n      delay(2000);\n    }\n  }\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(RELAY1, OUTPUT);\n  pinMode(RELAY2, OUTPUT);\n  digitalWrite(RELAY1, HIGH);              // both OFF at boot\n  digitalWrite(RELAY2, HIGH);\n  dht.begin();\n  WiFi.begin(WIFI_SSID, WIFI_PASS);\n  Serial.print(\"WiFi\");\n  while (WiFi.status() != WL_CONNECTED) {\n    delay(500);\n    Serial.print(\".\");\n  }\n  Serial.println();\n  Serial.print(\"IP \");\n  Serial.println(WiFi.localIP());\n  client.setServer(BROKER, 1883);\n  client.setCallback(callback);\n}\n\nvoid loop() {\n  if (!client.connected()) connectMqtt();\n  client.loop();                           // must run often: it delivers the messages\n\n  if (millis() - lastSend > 5000) {        // every 5 s\n    lastSend = millis();\n    float t = dht.readTemperature();\n    float h = dht.readHumidity();\n    if (!isnan(t)) {\n      dtostrf(t, 4, 1, buf);\n      client.publish(\"home/temp\", buf);\n      dtostrf(h, 4, 1, buf);\n      client.publish(\"home/hum\", buf);\n      Serial.print(\"sent temp \");\n      Serial.print(t, 1);\n      Serial.print(\" C  hum \");\n      Serial.print(h, 1);\n      Serial.println(\" %\");\n    }\n  }\n}\n",
+  bank48: "// 48 V LiFePO4 bank monitor (16S, 51.2 V): ESP32 + ADS1115 + ACS712-30A + LCD 16x2\n// A0 = bank voltage through R1 200k / R2 10k (divide by 21: 60 V -> 2.86 V)\n// A1 = ACS712 OUT through R3 10k / R4 20k (x 2/3: keeps it under 3.3 V)\n#include <Wire.h>\n#include <Adafruit_ADS1X15.h>\n#include <LiquidCrystal_I2C.h>\n\nAdafruit_ADS1115 ads;                     // 0x48\nLiquidCrystal_I2C lcd(0x27, 16, 2);\n\nconst float VDIV = (200000.0 + 10000.0) / 10000.0;   // 21\nconst float IDIV = (10000.0 + 20000.0) / 20000.0;    // 1.5\nconst float SENS = 0.066;                            // ACS712-30A: 66 mV per amp\nfloat zeroV = 2.5;                                   // ACS712 output at 0 A (measured at boot)\nfloat ah = 0;                                        // amp-hours taken since boot\nunsigned long lastMs = 0;\n\n// resting voltage -> % for a 16S LiFePO4 bank (under load it reads a little lower)\nconst float VT[] = {40.0, 48.0, 51.2, 52.0, 52.4, 52.8, 53.2, 53.6, 54.4};\nconst int PT[] = {0, 10, 20, 30, 40, 70, 80, 90, 100};\n\nint soc(float v) {\n  if (v <= VT[0]) return 0;\n  for (int i = 1; i < 9; i++) {\n    if (v < VT[i]) return PT[i - 1] + (PT[i] - PT[i - 1]) * (v - VT[i - 1]) / (VT[i] - VT[i - 1]);\n  }\n  return 100;\n}\n\nfloat readV(int ch) {                      // average of 8 readings, in volts on the pin\n  long sum = 0;\n  for (int i = 0; i < 8; i++) sum += ads.readADC_SingleEnded(ch);\n  return ads.computeVolts(sum / 8);\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  lcd.init();\n  lcd.backlight();\n  if (!ads.begin(0x48)) {\n    Serial.println(\"ADS1115 not found!\");\n    lcd.print(\"ADS1115 missing\");\n    while (true) delay(100);\n  }\n  ads.setGain(GAIN_ONE);                   // +-4.096 V\n  lcd.print(\"Zero current...\");\n  zeroV = readV(1) * IDIV;                 // the LOAD must be OFF at boot\n  Serial.print(\"ACS712 zero = \");\n  Serial.print(zeroV, 3);\n  Serial.println(\" V\");\n  lastMs = millis();\n  delay(500);\n  lcd.clear();\n}\n\nvoid loop() {\n  float v = readV(0) * VDIV;\n  float amps = (readV(1) * IDIV - zeroV) / SENS;\n  if (fabs(amps) < 0.15) amps = 0;         // noise floor of the ACS712\n  float watts = v * amps;\n  unsigned long now = millis();\n  ah += amps * (now - lastMs) / 3600000.0;\n  lastMs = now;\n  int pct = soc(v);\n\n  lcd.setCursor(0, 0);                     // \"52.8V  5.2A  70%\"\n  lcd.print(v, 1);\n  lcd.print(\"V \");\n  lcd.print(amps, 1);\n  lcd.print(\"A \");\n  lcd.print(pct);\n  lcd.print(\"%   \");\n  lcd.setCursor(0, 1);                     // \"275W  0.012Ah\"\n  lcd.print(watts, 0);\n  lcd.print(\"W \");\n  lcd.print(ah, 3);\n  lcd.print(\"Ah\");\n  if (v < 48.0) lcd.print(\" LOW!\");\n  else lcd.print(\"     \");\n\n  Serial.print(v, 2);\n  Serial.print(\" V  \");\n  Serial.print(amps, 2);\n  Serial.print(\" A  \");\n  Serial.print(watts, 0);\n  Serial.print(\" W  \");\n  Serial.print(pct);\n  Serial.println(\" %\");\n  delay(500);\n}\n",
+  ina219: "// INA219: current + voltage of a 12 V load, shown on the LCD 16x2 (both on SDA = GPIO21, SCL = GPIO22)\n#include <Wire.h>\n#include <Adafruit_INA219.h>\n#include <LiquidCrystal_I2C.h>\n\nAdafruit_INA219 ina219;                    // A0, A1 open = 0x40\nLiquidCrystal_I2C lcd(0x27, 16, 2);\nfloat wh = 0;                              // energy used since boot\nunsigned long lastMs = 0;\n\nvoid setup() {\n  Serial.begin(115200);\n  lcd.init();\n  lcd.backlight();\n  if (!ina219.begin()) {\n    Serial.println(\"INA219 not found! Check VCC, GND, SDA, SCL.\");\n    lcd.print(\"INA219 missing\");\n    while (true) delay(100);\n  }\n  ina219.setCalibration_32V_2A();          // up to 26 V, 3.2 A with the 0.1 ohm shunt\n  lastMs = millis();\n}\n\nvoid loop() {\n  float busV = ina219.getBusVoltage_V();          // VIN- to GND (the load side)\n  float shuntmV = ina219.getShuntVoltage_mV();    // across the 0.1 ohm shunt\n  float mA = ina219.getCurrent_mA();\n  float loadV = busV + shuntmV / 1000.0;          // supply side\n  float watts = busV * mA / 1000.0;\n  unsigned long now = millis();\n  wh += watts * (now - lastMs) / 3600000.0;\n  lastMs = now;\n\n  lcd.setCursor(0, 0);                            // \"12.00V  1.583A\"\n  lcd.print(loadV, 2);\n  lcd.print(\"V  \");\n  lcd.print(mA / 1000.0, 3);\n  lcd.print(\"A  \");\n  lcd.setCursor(0, 1);                            // \"19.0W  0.005Wh\"\n  lcd.print(watts, 1);\n  lcd.print(\"W  \");\n  lcd.print(wh, 3);\n  lcd.print(\"Wh  \");\n\n  Serial.print(\"bus \");\n  Serial.print(busV, 3);\n  Serial.print(\" V  shunt \");\n  Serial.print(shuntmV, 2);\n  Serial.print(\" mV  \");\n  Serial.print(mA, 1);\n  Serial.print(\" mA  \");\n  Serial.print(watts, 2);\n  Serial.println(\" W\");\n  delay(500);\n}\n",
+  rtc: "// DS3231 clock: the lights relay is ON from 18:00 to 06:00, the LCD shows the time\n// In the simulator the clock runs x60 (1 s = 1 min, set in the DS3231 panel) so you see it switch.\n#include <Wire.h>\n#include <RTClib.h>\n#include <LiquidCrystal_I2C.h>\n\nRTC_DS3231 rtc;                            // 0x68, SDA = GPIO21, SCL = GPIO22\nLiquidCrystal_I2C lcd(0x27, 16, 2);\nconst int RELAY = 26;                      // relay module: LOW = ON\nconst int ON_HOUR = 18;                    // lights ON at 18:00\nconst int OFF_HOUR = 6;                    // lights OFF at 06:00\nchar line[17];\nint lastMin = -1;\n\nbool lightsOn(int h) {\n  if (ON_HOUR > OFF_HOUR) return h >= ON_HOUR || h < OFF_HOUR;   // over midnight\n  return h >= ON_HOUR && h < OFF_HOUR;\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(RELAY, OUTPUT);\n  digitalWrite(RELAY, HIGH);               // OFF at boot\n  lcd.init();\n  lcd.backlight();\n  if (!rtc.begin()) {\n    Serial.println(\"DS3231 not found!\");\n    lcd.print(\"RTC missing\");\n    while (true) delay(100);\n  }\n  if (rtc.lostPower()) {                   // new coin cell: set it once from the PC time\n    Serial.println(\"RTC lost power, setting the time\");\n    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));\n  }\n}\n\nvoid loop() {\n  DateTime now = rtc.now();\n  bool on = lightsOn(now.hour());\n  digitalWrite(RELAY, on ? LOW : HIGH);\n\n  snprintf(line, 17, \"%02d:%02d:%02d  %s\", now.hour(), now.minute(), now.second(), on ? \"ON \" : \"OFF\");\n  lcd.setCursor(0, 0);\n  lcd.print(line);\n  snprintf(line, 17, \"%04d-%02d-%02d\", now.year(), now.month(), now.day());\n  lcd.setCursor(0, 1);\n  lcd.print(line);\n\n  if (now.minute() != lastMin) {           // log once a minute\n    lastMin = now.minute();\n    Serial.print(now.timestamp());\n    Serial.println(on ? \"  lights ON\" : \"  lights OFF\");\n  }\n  delay(200);\n}\n",
+  byj: "// 28BYJ-48 5 V stepper on a ULN2003 board: one turn forward, one turn back\n// Stepper.h wants the pins in the order IN1, IN3, IN2, IN4 for this motor.\n#include <Stepper.h>\n\nconst int STEPS = 2048;                    // steps per turn (32 x 64 gearbox)\nStepper motor(STEPS, 19, 5, 18, 17);       // IN1 = 19, IN2 = 18, IN3 = 5, IN4 = 17\n\nvoid setup() {\n  Serial.begin(115200);\n  motor.setSpeed(10);                      // rpm, 28BYJ-48 tops out near 15\n}\n\nvoid loop() {\n  Serial.println(\"forward 1 turn\");\n  motor.step(STEPS);\n  delay(1000);\n  Serial.println(\"back 1 turn\");\n  motor.step(-STEPS);\n  delay(1000);\n}\n",
   ads1115: '// 0-25 V voltage sensor: divider R1 68k / R2 10k -> ADS1115 A0 (16-bit), ESP32 reads it over I2C, LCD shows it\n#include <Wire.h>\n#include <Adafruit_ADS1X15.h>\n#include <LiquidCrystal_I2C.h>\n\nAdafruit_ADS1115 ads;                 // ADDR open = 0x48 (pull-down on the module)\nLiquidCrystal_I2C lcd(0x27, 16, 2);   // both on SDA = GPIO21, SCL = GPIO22\n\nconst float R1 = 68000.0;             // top resistor: from the voltage you measure to A0\nconst float R2 = 10000.0;             // bottom resistor: A0 to GND\nconst float RATIO = (R1 + R2) / R2;   // 7.8: 25 V in -> 3.2 V on A0 (below VDD 3.3 V)\nconst float CAL = 1.000;              // fine trim: real volts / shown volts (measure once with a good meter)\n\nvoid setup() {\n  Serial.begin(115200);\n  lcd.init();\n  lcd.backlight();\n  if (!ads.begin(0x48)) {\n    Serial.println(\"ADS1115 not found! Check VDD, GND, SDA, SCL.\");\n    lcd.print(\"ADS1115 missing\");\n    while (true) {\n      delay(100);\n    }\n  }\n  ads.setGain(GAIN_ONE);              // +-4.096 V full scale, 1 bit = 0.125 mV on A0\n  lcd.print(\"Voltage sensor\");\n}\n\nvoid loop() {\n  // average 8 readings: less noise on a real board\n  long sum = 0;\n  for (int i = 0; i < 8; i++) sum += ads.readADC_SingleEnded(0);\n  int16_t raw = sum / 8;\n\n  float vA0 = ads.computeVolts(raw);    // volts on the A0 pin\n  float vin = vA0 * RATIO * CAL;        // volts before the divider\n\n  Serial.print(\"raw \");\n  Serial.print(raw);\n  Serial.print(\"  A0 \");\n  Serial.print(vA0, 4);\n  Serial.print(\" V  input \");\n  Serial.print(vin, 3);\n  Serial.println(\" V\");\n\n  lcd.setCursor(0, 0);\n  lcd.print(\"A0  \");\n  lcd.print(vA0, 4);\n  lcd.print(\" V     \");\n  lcd.setCursor(0, 1);\n  lcd.print(\"VIN \");\n  lcd.print(vin, 2);\n  lcd.print(\" V     \");\n  delay(250);\n}\n',
   relay10: '// 10 relay modules on 3 wires: two 74HC595 shift registers in a chain (cascade)\n// Serial Monitor commands (type below, press Send):\n//   3          toggle relay 3\n//   on 3 / off 3\n//   on 1,3,5   off 2,4   (pick several)\n//   all on / all off\n//   1000000001 binary, one digit per relay (relay 1 first), 1 = ON\n//   time 5     reset time: each relay switches itself OFF 5 s after it went ON (time 0 = stays ON)\n\nconst int DATA  = 19;   // 74HC595 pin 14 SER   (only to the 1st chip)\nconst int CLOCK = 18;   // 74HC595 pin 11 SRCLK (both chips)\nconst int LATCH = 5;    // 74HC595 pin 12 RCLK  (both chips)\nconst int OE    = 4;    // 74HC595 pin 13 OE    (both chips): HIGH = all outputs off\nconst int NRELAYS = 10;\nconst bool ACTIVE_LOW = true;   // most relay modules switch ON when IN is LOW\n\nunsigned int relays = 0;     // bit 0 = relay 1 ... bit 9 = relay 10\nunsigned int before = 0;     // what writeRelays() sent last time\nunsigned long onSince[10];   // millis() when each relay went ON\nunsigned long resetMs = 0;   // reset time in ms (0 = relays stay ON)\n\nvoid writeRelays() {\n  for (int i = 0; i < NRELAYS; i++)\n    if (((relays >> i) & 1) && !((before >> i) & 1)) onSince[i] = millis();   // just went ON: start its timer\n  before = relays;\n  unsigned int out = relays;\n  if (ACTIVE_LOW) out = ~relays;              // flip: ON = LOW\n  digitalWrite(LATCH, LOW);\n  shiftOut(DATA, CLOCK, MSBFIRST, (out >> 8) & 0xFF);   // the LAST chip\'s byte goes first\n  shiftOut(DATA, CLOCK, MSBFIRST, out & 0xFF);          // the 1st chip\'s byte\n  digitalWrite(LATCH, HIGH);                             // all outputs change at the same moment\n}\n\n// "1,3,5" → switch those relays on or off\nvoid setList(String list, bool on) {\n  list += ",";\n  int start = 0;\n  for (int i = 0; i < list.length(); i++) {\n    if (list.charAt(i) == \',\') {\n      int n = list.substring(start, i).toInt();\n      if (n >= 1 && n <= NRELAYS) {\n        if (on) relays |= (1 << (n - 1));\n        else relays &= ~(1 << (n - 1));\n      }\n      start = i + 1;\n    }\n  }\n}\n\nvoid printRelays() {\n  Serial.print("Relays 1-10: ");\n  for (int i = 0; i < NRELAYS; i++) Serial.print((relays >> i) & 1);\n  Serial.println();\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(DATA, OUTPUT);\n  pinMode(CLOCK, OUTPUT);\n  pinMode(LATCH, OUTPUT);\n  pinMode(OE, OUTPUT);\n  digitalWrite(OE, HIGH);           // outputs off while we load "all OFF"\n  writeRelays();                    // all OFF first\n  digitalWrite(OE, LOW);            // now the chips drive the relays\n\n  // test: click each relay once, 1 to 10\n  for (int i = 0; i < NRELAYS; i++) {\n    relays = 1 << i;\n    writeRelays();\n    delay(250);\n  }\n  relays = 0;\n  writeRelays();\n  Serial.println("Ready. Type 3, on 1,3,5, off 2, all on, all off, 1000000001 or time 5");\n}\n\nvoid loop() {\n  if (Serial.available()) {\n    String cmd = Serial.readStringUntil(\'\\n\');\n    cmd.trim();\n    cmd.toLowerCase();\n\n    if (cmd == "all on") relays = (1 << NRELAYS) - 1;\n    else if (cmd == "all off") relays = 0;\n    else if (cmd.startsWith("time ")) {\n      resetMs = cmd.substring(5).toFloat() * 1000;\n      Serial.print("Reset time: ");\n      if (resetMs == 0) Serial.println("off");\n      else {\n        Serial.print(resetMs / 1000.0, 1);\n        Serial.println(" s");\n      }\n    }\n    else if (cmd.startsWith("on ")) setList(cmd.substring(3), true);\n    else if (cmd.startsWith("off ")) setList(cmd.substring(4), false);\n    else if (cmd.length() == NRELAYS && cmd.indexOf(\'2\') < 0) {   // binary\n      relays = 0;\n      for (int i = 0; i < NRELAYS; i++) if (cmd.charAt(i) == \'1\') relays |= (1 << i);\n    } else {\n      int n = cmd.toInt();\n      if (n >= 1 && n <= NRELAYS) relays ^= (1 << (n - 1));   // toggle\n      else Serial.println("?? " + cmd);\n    }\n    writeRelays();\n    printRelays();\n  }\n\n  // reset time: switch OFF every relay that has been ON long enough\n  if (resetMs > 0) {\n    unsigned int was = relays;\n    for (int i = 0; i < NRELAYS; i++)\n      if (((relays >> i) & 1) && millis() - onSince[i] >= resetMs) relays &= ~(1 << i);\n    if (relays != was) {\n      writeRelays();\n      printRelays();\n    }\n  }\n}\n',
   encoder: '#include <Wire.h>\n#include <Adafruit_GFX.h>\n#include <Adafruit_SSD1306.h>\n\nAdafruit_SSD1306 display(128, 64, &Wire, -1);   // SDA = GPIO21, SCL = GPIO22\n\nconst int CLK = 32;   // encoder CLK (A)\nconst int DT  = 33;   // encoder DT (B)\nconst int SW  = 25;   // encoder push button\nconst int LED = 23;\n\nvolatile int steps = 0;   // changed by the interrupt, read by loop()\n\n// runs by itself the instant CLK falls (one click of the knob)\nvoid IRAM_ATTR readEncoder() {\n  if (digitalRead(DT) == HIGH) steps++;   // CLK fell first: clockwise\n  else steps--;                           // DT fell first: counter-clockwise\n}\n\nconst String items[4] = {"LED", "Blink", "Speed", "About"};\nint sel = 0;            // selected line\nbool editing = false;   // pushed on Speed: the knob changes the number\nbool ledOn = true;\nbool blinking = false;\nint speed = 2;          // blinks per second\nbool about = false;\nbool wasPressed = false;\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(CLK, INPUT);          // the KY-040 has its own 10k pull-ups on CLK and DT\n  pinMode(DT, INPUT);\n  pinMode(SW, INPUT_PULLUP);    // SW has none: use the internal one\n  pinMode(LED, OUTPUT);\n  attachInterrupt(digitalPinToInterrupt(CLK), readEncoder, FALLING);\n  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);\n  delay(100);                   // let the pull-ups settle before the first read\n}\n\nvoid loop() {\n  // 1. knob turns since last time (stop interrupts for a moment while we copy)\n  noInterrupts();\n  int s = steps;\n  steps = 0;\n  interrupts();\n  if (s != 0) {\n    if (editing) speed = constrain(speed + s, 1, 10);\n    else sel = (sel + s + 40) % 4;\n    Serial.print("turn ");\n    Serial.println(s);\n  }\n\n  // 2. push button: act once per press\n  bool pressed = digitalRead(SW) == LOW;\n  if (pressed && !wasPressed) {\n    if (about) about = false;\n    else if (editing) editing = false;\n    else if (sel == 0) ledOn = !ledOn;\n    else if (sel == 1) blinking = !blinking;\n    else if (sel == 2) editing = true;\n    else about = true;\n    Serial.println("push");\n  }\n  wasPressed = pressed;\n\n  // 3. the LED\n  bool on = ledOn && (!blinking || int(millis() * speed / 500) % 2 == 0);\n  digitalWrite(LED, on ? HIGH : LOW);\n\n  // 4. the screen\n  display.clearDisplay();\n  display.setTextColor(SSD1306_WHITE);\n  if (about) {\n    display.setTextSize(2);\n    display.setCursor(0, 0);\n    display.println("Fox9ner");\n    display.setTextSize(1);\n    display.setCursor(0, 24);\n    display.println("Rotary encoder menu");\n    display.println("with interrupts.");\n    display.println("");\n    display.println("Push to go back.");\n  } else {\n    display.setTextSize(1);\n    display.setCursor(0, 0);\n    display.print(editing ? "Turn: speed, push: OK" : "MENU  turn + push");\n    for (int i = 0; i < 4; i++) {\n      int y = 18 + i * 11;\n      if (i == sel) {\n        display.fillRect(0, y - 2, 128, 11, SSD1306_WHITE);\n        display.setTextColor(SSD1306_BLACK);\n      } else {\n        display.setTextColor(SSD1306_WHITE);\n      }\n      display.setCursor(4, y);\n      display.print(items[i]);\n      display.setCursor(84, y);\n      if (i == 0) display.print(ledOn ? "ON" : "OFF");\n      if (i == 1) display.print(blinking ? "ON" : "OFF");\n      if (i == 2) {\n        display.print(speed);\n        display.print(editing ? " /s <" : " /s");\n      }\n    }\n  }\n  display.display();\n  delay(20);\n}\n',
@@ -1968,6 +2130,96 @@ export function example(name) {
     const b = addPart(c, 'BAT', 50, 2, 1); b.name = 'VIN'; b.props.v = 24;
     const vm = addPart(c, 'VM', 38, 7, 1); vm.name = 'VM1';
     W(35, 2, 38, 2); W(40, 0, 50, 0); W(40, 4, 50, 4); addPart(c, 'GND', 46, 4); W(38, 2, 38, 5); W(38, 9, 38, 10); addPart(c, 'GND', 38, 10);
+  } else if (name === 'mqtt') {
+    // ESP32 on WiFi + MQTT: relay modules on GPIO19 / 18 switch two 12 V lamps, DHT22 on GPIO4 sends temperature. 📡 box = the broker.
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.mqtt; m.props.run = true;
+    const d = addPart(c, 'DHT', 12, 3); d.name = 'DHT1'; d.props.temp = 29;
+    addPart(c, 'GND', 9, 4); addPart(c, 'GND', -6, 6); W(-4, 6, -6, 6);
+    W(4, 3, 9, 3); W(4, 7, 16, 7); W(16, 7, 16, 1); W(16, 1, 9, 1); W(9, 1, 9, 2);
+    const k1 = addPart(c, 'RMOD', 24, -8); k1.name = 'RLY1';
+    const k2 = addPart(c, 'RMOD', 24, -2); k2.name = 'RLY2';
+    const ps = addPart(c, 'BAT', 20, -13); ps.name = 'PSU'; ps.props.v = 5; addPart(c, 'GND', 22, -13);
+    W(18, -13, 18, -3); W(18, -9, 21, -9); W(18, -3, 21, -3);                 // 5 V rail
+    W(19, -8, 19, 0); W(19, -8, 21, -8); W(19, -2, 21, -2); addPart(c, 'GND', 19, 0);   // GND rail
+    W(4, -2, 8, -2); W(8, -2, 8, -7); W(8, -7, 21, -7);                        // GPIO19 → RLY1 IN
+    W(4, -1, 21, -1);                                                           // GPIO18 → RLY2 IN
+    const b = addPart(c, 'BAT', 33, -12); b.name = 'B12'; b.props.v = 12; addPart(c, 'GND', 35, -12);
+    W(31, -12, 29, -12); W(29, -12, 29, -2); W(27, -8, 29, -8); W(27, -2, 29, -2);   // 12 V → both COM
+    const l1 = addPart(c, 'LAMP', 34, -9); l1.name = 'LAMP1'; const l2 = addPart(c, 'LAMP', 34, -3); l2.name = 'LAMP2';
+    W(27, -9, 32, -9); W(27, -3, 32, -3); addPart(c, 'GND', 36, -9); addPart(c, 'GND', 36, -3);
+  } else if (name === 'bank48' || name === 'ina219') {
+    // ESP32 + LCD 16×2 (same I2C wiring as the ADS1115 example): SCL bus x = 6, SDA bus x = 8, LCD 5 V from VIN
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX[name]; m.props.run = true;
+    addPart(c, 'LCD', 21, -8).name = 'LCD1';
+    addPart(c, 'GND', 13, -6); addPart(c, 'GND', -6, 6);
+    W(4, -6, 6, -6); W(6, -9, 6, 1); W(6, -9, 14, -9); W(6, 1, 15, 1);
+    W(4, -3, 8, -3); W(8, -8, 8, 2); W(8, -8, 14, -8); W(8, 2, 15, 2);
+    W(14, -6, 13, -6);
+    W(14, -7, 11, -7); W(11, -7, 11, -11); W(11, -11, -8, -11); W(-8, -11, -8, 9); W(-8, 9, -4, 9); W(-4, 9, -4, 7);
+    W(-4, 6, -6, 6);
+    if (name === 'bank48') {
+      // 48 V LiFePO4 bank (16S) + ACS712-30A on the + line + 10 Ω load. ADS1115: A0 = bank ÷ 21, A1 = ACS712 OUT × 2/3.
+      const u = addPart(c, 'ADS1115', 19, 4); u.name = 'ADS1';
+      W(4, 7, 12, 7); W(12, 7, 12, 5); W(12, 5, 15, 5); W(15, 6, 14, 6); addPart(c, 'GND', 14, 6);
+      const r1 = addPart(c, 'R', 28, 2); r1.name = 'R1'; r1.props.r = 200000; r1.lbl = [0, -2.6];
+      const r2 = addPart(c, 'R', 26, 4, 1); r2.name = 'R2'; r2.props.r = 10000; addPart(c, 'GND', 26, 6);
+      W(23, 2, 26, 2);
+      const r3 = addPart(c, 'R', 32, 8); r3.name = 'R3'; r3.props.r = 10000; r3.lbl = [0, -2.6];
+      const r4 = addPart(c, 'R', 30, 10, 1); r4.name = 'R4'; r4.props.r = 20000; addPart(c, 'GND', 30, 12);
+      W(23, 3, 24, 3); W(24, 3, 24, 8); W(24, 8, 30, 8);
+      const a = addPart(c, 'ACS712', 40, 8); a.name = 'ACS1'; a.props.model = '30A'; addPart(c, 'GND', 37, 9);
+      W(34, 8, 37, 8); W(11, -11, 36, -11); W(36, -11, 36, 7); W(36, 7, 37, 7);   // ACS712 VCC = 5 V
+      const b = addPart(c, 'BAT', 47, 9, 1); b.name = 'BANK'; b.props.v = 53; b.props.rint = 0.05; addPart(c, 'GND', 47, 11);
+      W(43, 7, 47, 7); W(30, 2, 45, 2); W(45, 2, 45, 7);
+      const sw = addPart(c, 'SW', 43, 13, 1); sw.name = 'LOAD'; sw.props.on = false;
+      const rl = addPart(c, 'R', 43, 19, 1); rl.name = 'RLOAD'; rl.props.r = 10; rl.props.rating = 300; addPart(c, 'GND', 43, 21);
+      W(43, 9, 43, 11); W(43, 15, 43, 17);
+    } else {
+      // INA219 high-side on a 12 V supply: lamp 10 W always on, lamp 21 W by switch S1
+      const u = addPart(c, 'INA219', 19, 3); u.name = 'INA1';
+      W(4, 7, 12, 7); W(12, 7, 12, 4); W(12, 4, 15, 4); W(15, 5, 14, 5); addPart(c, 'GND', 14, 5);
+      const b = addPart(c, 'BAT', 34, 4, 1); b.name = 'B12'; b.props.v = 12; b.props.rint = 0.05; addPart(c, 'GND', 34, 6);
+      W(23, 2, 34, 2);
+      const l1 = addPart(c, 'LAMP', 23, 7, 1); l1.name = 'LAMP1'; l1.props.wr = 10; l1.lbl = [-6, 1.8]; addPart(c, 'GND', 23, 9); W(23, 4, 23, 5);
+      const sw = addPart(c, 'SW', 27, 6, 1); sw.name = 'S1'; sw.props.on = false; W(23, 4, 27, 4);
+      const l2 = addPart(c, 'LAMP', 27, 12, 1); l2.name = 'LAMP2'; l2.props.wr = 21; addPart(c, 'GND', 27, 14); W(27, 8, 27, 10);
+    }
+  } else if (name === 'solar') {
+    // two 100 W panels in the same sun: top one on a PWM controller, bottom one on an MPPT controller, each charging a 12 V LiFePO4
+    for (const [k, y, mode] of [[1, 0, 'pwm'], [2, 13, 'mppt']]) {
+      const pv = addPart(c, 'PV', 0, y, 1); pv.name = 'PV' + k; pv.props.model = '100W'; pv.props.sun = 100; pv.lbl = [-1, 5.2];
+      const u = addPart(c, 'SCC', 10, y); u.name = 'SCC' + k; u.props.mode = mode; u.props.bat = 'lfp12'; u.props.imax = 20;
+      W(0, y - 3, 6, y - 3); W(6, y - 3, 6, y - 1); W(0, y + 3, 6, y + 3); W(6, y + 3, 6, y + 1); addPart(c, 'GND', 6, y + 3);
+      const b = addPart(c, 'BAT', 25, y + 1, 1); b.name = 'BAT' + k; b.props.v = 13.2; b.props.rint = 0.02; addPart(c, 'GND', 25, y + 3);
+      W(14, y - 1, 25, y - 1);
+      const l = addPart(c, 'LAMP', 16, y + 4, 1); l.name = 'LOAD' + k; l.props.wr = 10; addPart(c, 'GND', 16, y + 6);
+      W(14, y + 1, 16, y + 1); W(16, y + 1, 16, y + 2);
+    }
+  } else if (name === 'rtc') {
+    // ESP32 + DS3231 + LCD: relay module on GPIO26 turns a 12 V lamp ON 18:00–06:00. The clock starts at 17:55 and runs ×60.
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.rtc; m.props.run = true;
+    addPart(c, 'LCD', 21, -8).name = 'LCD1'; addPart(c, 'GND', 13, -6);
+    W(4, -6, 6, -6); W(6, -9, 6, 1); W(6, -9, 14, -9); W(6, 1, 15, 1);
+    W(4, -3, 8, -3); W(8, -8, 8, 2); W(8, -8, 14, -8); W(8, 2, 15, 2);
+    W(14, -6, 13, -6); W(14, -7, 11, -7); W(11, -7, 11, -11); W(11, -11, -7, -11); W(-7, -11, -7, 9);
+    const r = addPart(c, 'DS3231', 19, 1); r.name = 'RTC1'; r.props.start = '2026-11-07T17:55:00'; r.props.speed = 60;
+    W(4, 7, 12, 7); W(12, 7, 12, 3); W(12, 3, 15, 3); W(15, 4, 14, 4); addPart(c, 'GND', 14, 4);
+    const k = addPart(c, 'RMOD', -13, 2, 2); k.name = 'RLY1';
+    W(-4, 1, -10, 1); W(-10, 2, -8, 2); addPart(c, 'GND', -8, 2);
+    W(-10, 3, -10, 9); W(-10, 9, -4, 9); W(-4, 9, -4, 7);                     // relay 5 V from VIN
+    W(-4, 6, -6, 6); addPart(c, 'GND', -6, 6);
+    const b = addPart(c, 'BAT', -22, 4, 1); b.name = 'B12'; b.props.v = 12; addPart(c, 'GND', -22, 6);
+    W(-16, 2, -22, 2);
+    const l = addPart(c, 'LAMP', -16, 7, 1); l.name = 'LIGHTS'; addPart(c, 'GND', -16, 9); W(-16, 3, -16, 5);
+  } else if (name === 'byj') {
+    // ESP32 → ULN2003 board → 28BYJ-48: IN1–IN4 on GPIO19, 18, 5, 17. Motor 5 V from its own supply, grounds joined.
+    const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.byj; m.props.run = true;
+    addPart(c, 'BYJ', 14, 0).name = 'M1';
+    W(4, -2, 10, -2); W(4, -1, 10, -1); W(4, 0, 10, 0); W(4, 1, 10, 1);
+    W(10, 2, 7, 2); W(7, 2, 7, 5);
+    const ps = addPart(c, 'BAT', 7, 7, 1); ps.name = 'PSU'; ps.props.v = 5; addPart(c, 'GND', 7, 9);
+    W(10, 3, 9, 3); addPart(c, 'GND', 9, 3);
+    W(-4, 6, -6, 6); addPart(c, 'GND', -6, 6);
   } else if (name === 'oled') {
     // ESP32 + OLED 128×64 SSD1306 I2C (SDA = GPIO21, SCL = GPIO22): text, a bar and a moving graph of the pot voltage
     const m = addPart(c, 'ESP32', 0, 0); m.name = 'ESP32'; m.props.code = SKETCH_EX.oled; m.props.run = true;

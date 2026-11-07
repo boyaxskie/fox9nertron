@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '2.4.17';
+export const VERSION = '2.5.0';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -49,6 +49,9 @@ function help() {
 <p><b>★ Your own parts</b>: part not in the list? Tap the part, open its Type list, pick <b>+ New part from datasheet…</b> and type the main values (typical column). It is saved and shows as ★ in the list from then on; ✎ Edit or delete it the same way. Projects carry their ★ parts, so a shared file opens right on another phone.</p>
 <p><b>📟 LCD 16×2 I2C + 🔢 7-segment</b>: wire the LCD's SDA / SCL to the board (ESP32 21 / 22, UNO A4 / A5) and print to it from a sketch with LiquidCrystal_I2C: the text shows on the drawing. 7-segment segments light from the real current.</p>
 <p><b>📏 ADS1115</b>: 16-bit ADC module with 4 inputs on I2C (SDA / SCL like the LCD). Read it from a sketch with the Adafruit_ADS1X15 library: ads.begin(0x48), setGain(GAIN_ONE), readADC_SingleEnded(0), computeVolts(). Example: 0–25 V voltage sensor for the ESP32.</p>
+<p><b>📡 WiFi + MQTT</b> (ESP32): sketches with WiFi.h + PubSubClient connect to a pretend broker. Open <b>📡 WiFi + MQTT test broker</b> under the code to see every message, publish your own (e.g. home/relay1/set = ON) and switch WiFi or the broker off to test reconnecting.</p>
+<p><b>⚡ Power sensors</b>: INA219 (current + voltage, I2C), ACS712 5 / 20 / 30 A (Hall, analog out), DS3231 real-time clock (RTClib; set its time and speed ×60 / ×3600 in its panel). <b>☀️ Solar</b>: PV panel (sun slider) + PWM or MPPT charge controller. <b>Steppers</b>: 28BYJ-48 + ULN2003 (Stepper.h) and A4988 / DRV8825 / TMC2209 drivers.</p>
+<p><b>📤 Send to Nova</b> (PCB → 🛠 G-code): sends the 3 G-code files straight to the Fox9ner Nova's SD card over WiFi. Type nova.local (or its IP on Android) in the box next to it.</p>
 <p><b>🌡 Sensors</b>: DHT22 / DHT11 (temperature + humidity), HC-SR04 (distance), LDR (light), PIR (motion). Slide what they sense in their panel (tap a PIR to toggle motion). Sketches read them with the DHT library, pulseIn(), analogRead(), digitalRead().</p>
 <p><b>🔐 Keypad, buzzer, door lock</b>: tap keypad keys on the drawing (or in its panel); sketches read them with the Keypad library. The buzzer really beeps (🔊 switch in its panel). The solenoid lock shows LOCKED / OPEN from its coil current.</p>
 <p><b>⧉ Many of the same part</b>: tap a part in the tray, then keep tapping the grid: one each tap (↻ / R turns the next ones, right-click or Esc when done). Right-click also cancels a wire and lets go of the selection. Or select a part and ⧉ Duplicate (Ctrl+D): same value, new name. Ctrl+C / Ctrl+V pastes where the mouse is.</p>

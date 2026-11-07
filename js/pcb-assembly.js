@@ -26,7 +26,7 @@ export function partValue(p) {
     case 'ESP32': return 'ESP32 DevKit 30-pin (+ 2x15 female headers)';
     case 'UNO': return 'Arduino UNO (shield headers)';
     case 'SERVO': return `servo ${q.model} (3-pin header)`;
-    case 'STEPPER': return 'A4988 module (+ 2x8 female headers)';
+    case 'STEPPER': return `${p.props.drv ?? 'A4988'} module (+ 2x8 female headers)`;
     case 'OPTO': return 'PC817';
     case 'SR595': return q.model ?? '74HC595';
     case 'LM2596': return `${(q.model ?? 'LM2596S-ADJ').replace('LM2596S', 'LM2596T')} (TO-220-5)`;
@@ -37,6 +37,12 @@ export function partValue(p) {
     case 'ENC': return 'rotary encoder KY-040 (5-pin header)';
     case 'OLED': return 'OLED 0.96in SSD1306 I2C (4-pin header)';
     case 'ADS1115': return 'ADS1115 16-bit ADC module (10-pin header)';
+    case 'INA219': return 'INA219 current sensor module (6-pin header)';
+    case 'DS3231': return 'DS3231 RTC module ZS-042 + CR2032 (6-pin header)';
+    case 'ACS712': return `ACS712-${p.props.model} current sensor module`;
+    case 'BYJ': return '28BYJ-48 5 V stepper + ULN2003 driver board';
+    case 'PV': return `Solar panel ${p.props.model} (MC4 cable to screw terminal)`;
+    case 'SCC': return `Solar charge controller ${p.props.mode === 'pwm' ? 'PWM' : 'MPPT'} ${p.props.imax} A`;
     case 'LCD': return 'LCD 16x2 + I2C backpack (4-pin header)';
     case 'ISRC': return 'current source';
     default: return q.model ?? p.type;

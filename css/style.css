@@ -388,3 +388,13 @@ html.pcb-fs, html.pcb-fs body { overflow: hidden; }
 .sb:disabled { opacity: 0.45; }
 .rt-fill.busy { animation: rtbusy 1s ease-in-out infinite alternate; }
 @keyframes rtbusy { from { opacity: 1; } to { opacity: 0.45; } }
+/* 📡 MQTT test broker */
+.mq-box { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.mq-box summary { cursor: pointer; font-weight: 700; }
+.mq-box[open] { gap: 8px; }
+.mq-stat { font-size: 13px; color: var(--dim); }
+.mq-log { max-height: 180px; }
+.nova-send { align-items: center; margin-top: 6px; }
+.nova-send .nova-host { width: 150px; font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line, #444); background: var(--card); color: inherit; }
+.mq-box .serial-in { flex: 1 1 100%; width: 100%; min-width: 0; text-align: left; }
+.mq-box .serial-in + .serial-in { flex: 1 1 8em; width: auto; }

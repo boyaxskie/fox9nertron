@@ -87,6 +87,7 @@ export const FOOTPRINTS = {
   HDR8: { label: 'Pin header 8-pin (keypad R1-R4 C1-C4)', n: 8, make: () => ({ pads: square1([...Array(8)].map((_, k) => th((k - 3.5) * PITCH, 0, k, 1.8, 1.0))), body: [box(-10.4, -1.27, 10.4, 1.27)] }) },
   // LCD I2C backpack header: GND VCC SDA SCL in a row (fits a 4-pin female header or the wires to the LCD)
   TO2205: { label: 'TO-220-5 (LM2596T, staggered leads)', n: 5, make: () => ({ pads: square1([...Array(5)].map((_, k) => th((k - 2) * 1.7, k % 2 ? 2.54 : 0, k, 1.6, 1.0))), body: [box(-5.1, -3.3, 5.1, 1.5), [[-5.1, -2.1], [5.1, -2.1]]] }) },
+  HDR6: { label: 'Pin header 6-pin (module)', n: 6, make: () => ({ pads: square1([...Array(6)].map((_, k) => th((k - 2.5) * PITCH, 0, k, 1.8, 1.0))), body: [box(-7.62, -1.27, 7.62, 1.27)] }) },
   HDR5: { label: 'Pin header 5-pin', n: 5, make: () => ({ pads: square1([...Array(5)].map((_, k) => th((k - 2) * PITCH, 0, k, 1.8, 1.0))), body: [box(-6.35, -1.27, 6.35, 1.27)] }) },
   HDR4: { label: 'Pin header 4-pin', n: 4, make: () => ({ pads: square1([th(-3.81, 0, 0, 1.8, 1.0), th(-1.27, 0, 1, 1.8, 1.0), th(1.27, 0, 2, 1.8, 1.0), th(3.81, 0, 3, 1.8, 1.0)]), body: [box(-5.08, -1.27, 5.08, 1.27)] }) },
   // 0.56" single digit (5161AS / 5161BS): top row 10 g · 9 f · 8 COM · 7 a · 6 b, bottom row 1 e · 2 d · 3 COM · 4 c · 5 dp, rows 15.24 mm apart
@@ -137,6 +138,10 @@ export function fpChoices(p) {
   if (p.type === 'XFMR') return ['XF5'];
   if (p.type === 'LCD' || p.type === 'OLED') return ['HDR4'];
   if (p.type === 'ADS1115') return ['HDR10'];
+  if (p.type === 'INA219' || p.type === 'DS3231' || p.type === 'BYJ') return ['HDR6'];
+  if (p.type === 'ACS712') return ['HDR5'];
+  if (p.type === 'SCC') return ['HDR4'];
+  if (p.type === 'PV') return ['TERM2', 'HDR2'];
   if (p.type === 'DHT' || p.type === 'PIR') return ['HDR3'];
   if (p.type === 'HCSR04') return ['HDR4'];
   if (p.type === 'KEYPAD') return ['HDR8'];
@@ -211,7 +216,9 @@ export function pinLabel(p, i) {
   if (isBoard(p.type)) return BOARDS[p.type].pins[i]?.n ?? String(i + 1);
   if (p.type === 'TB') return i % 2 ? String((i - 1) / 2 + 1) : `W${i / 2 + 1}`;   // W1 = wire / screw side of way 1
   const L = { BAT: ['+', '−'], LED: ['A', 'K'], D: ['A', 'K'], ZD: ['A', 'K'], C: ['+', '−'], NPN: ['B', 'C', 'E'], PNP: ['B', 'C', 'E'], NMOS: ['G', 'D', 'S'], PMOS: ['G', 'D', 'S'],
-    OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], IR2104: ['VCC', 'IN', 'SD', 'COM', 'LO', 'VS', 'HO', 'VB'], SERVO: ['SIG', 'V+', 'GND'], LCD: ['GND', 'VCC', 'SDA', 'SCL'], OLED: ['GND', 'VCC', 'SCL', 'SDA'], ADS1115: ['VDD', 'GND', 'SCL', 'SDA', 'ADDR', 'ALRT', 'A0', 'A1', 'A2', 'A3'], ENC: ['CLK', 'DT', 'SW', '+', 'GND'], SR595: ['QB', 'QC', 'QD', 'QE', 'QF', 'QG', 'QH', 'GND', "QH'", 'SRCLR', 'SRCLK', 'RCLK', 'OE', 'SER', 'QA', 'VCC'], LM2596: ['VIN', 'OUT', 'GND', 'FB', 'ON'], TL494: ['1IN+', '1IN−', 'FB', 'DTC', 'CT', 'RT', 'GND', 'C1', 'E1', 'E2', 'C2', 'VCC', 'OC', 'REF', '2IN−', '2IN+'], RMOD: ['VCC', 'GND', 'IN', 'COM', 'NO', 'NC'], DHT: ['VCC', 'DATA', 'GND'], HCSR04: ['VCC', 'TRIG', 'ECHO', 'GND'], PIR: ['VCC', 'OUT', 'GND'], KEYPAD: ['R1', 'R2', 'R3', 'R4', 'C1', 'C2', 'C3', 'C4'], BUZZER: ['+', '-'], SEG7: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp', 'COM'], STEPPER: ['STEP', 'DIR', 'EN', 'VDD', 'GND', 'VMOT'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
+    OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], IR2104: ['VCC', 'IN', 'SD', 'COM', 'LO', 'VS', 'HO', 'VB'], SERVO: ['SIG', 'V+', 'GND'], LCD: ['GND', 'VCC', 'SDA', 'SCL'], OLED: ['GND', 'VCC', 'SCL', 'SDA'], ADS1115: ['VDD', 'GND', 'SCL', 'SDA', 'ADDR', 'ALRT', 'A0', 'A1', 'A2', 'A3'],
+    INA219: ['VCC', 'GND', 'SCL', 'SDA', 'VIN+', 'VIN−'], DS3231: ['32K', 'SQW', 'SCL', 'SDA', 'VCC', 'GND'], ACS712: ['VCC', 'OUT', 'GND', 'IP+', 'IP−'],
+    BYJ: ['IN1', 'IN2', 'IN3', 'IN4', '+', '−'], PV: ['+', '−'], SCC: ['PV+', 'GND', 'BAT+', 'LOAD+'], ENC: ['CLK', 'DT', 'SW', '+', 'GND'], SR595: ['QB', 'QC', 'QD', 'QE', 'QF', 'QG', 'QH', 'GND', "QH'", 'SRCLR', 'SRCLK', 'RCLK', 'OE', 'SER', 'QA', 'VCC'], LM2596: ['VIN', 'OUT', 'GND', 'FB', 'ON'], TL494: ['1IN+', '1IN−', 'FB', 'DTC', 'CT', 'RT', 'GND', 'C1', 'E1', 'E2', 'C2', 'VCC', 'OC', 'REF', '2IN−', '2IN+'], RMOD: ['VCC', 'GND', 'IN', 'COM', 'NO', 'NC'], DHT: ['VCC', 'DATA', 'GND'], HCSR04: ['VCC', 'TRIG', 'ECHO', 'GND'], PIR: ['VCC', 'OUT', 'GND'], KEYPAD: ['R1', 'R2', 'R3', 'R4', 'C1', 'C2', 'C3', 'C4'], BUZZER: ['+', '-'], SEG7: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp', 'COM'], STEPPER: ['STEP', 'DIR', 'EN', 'VDD', 'GND', 'VMOT'], OPTO: ['A', 'K', 'C', 'E'], POT: ['1', '3', 'W'], SIG: ['+', '−'] }[p.type];
   return L?.[i] ?? String(i + 1);
 }
 
@@ -246,7 +253,7 @@ export function netlist(c) {
     const bat = n.members.find(m => m.part.type === 'BAT' && m.pin === 0);
     const m = bat ?? n.members[0];
     n.name = m ? `${m.part.name}.${pinLabel(m.part, m.pin)}` : `N${n.id}`;
-    n.power = n.members.some(m => ['BAT', 'LAMP', 'REG', 'L', 'XFMR', 'LOCK'].includes(m.part.type) || (m.part.type === 'STEPPER' && m.pin >= 4) || (m.part.type === 'SERVO' && m.pin >= 1) || (m.part.type === 'RELAY' && m.pin >= 2) || (isBoard(m.part.type) && /pwr|gnd/.test(BOARDS[m.part.type].pins[m.pin].k)));
+    n.power = n.members.some(m => ['BAT', 'LAMP', 'REG', 'L', 'XFMR', 'LOCK', 'PV', 'SCC'].includes(m.part.type) || (m.part.type === 'STEPPER' && m.pin >= 4) || (m.part.type === 'SERVO' && m.pin >= 1) || (m.part.type === 'RELAY' && m.pin >= 2) || (isBoard(m.part.type) && /pwr|gnd/.test(BOARDS[m.part.type].pins[m.pin].k)));
   }
   nets[0].power = true;
   return { nets, pinNet };
