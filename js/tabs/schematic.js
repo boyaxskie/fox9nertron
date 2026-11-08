@@ -401,7 +401,7 @@ export function schematicTab(root) {
   // [prop, label, min, max, step, unit, log?]
   const QUICK = {
     POT: [['pos', 'Wiper', 0, 100, 1, '%']], R: [['r', 'R', 0, 0, 0, 'Ω', 1]], C: [['c', 'C', 0, 0, 0, 'F', 1]], L: [['l', 'L', 0, 0, 0, 'H', 1]],
-    BAT: [['v', 'Volts', 0, 60, 0.1, 'V']], ISRC: [['i', 'Current', 0, 0, 0, 'A', 1]], SIG: [['f', 'Freq', 0, 0, 0, 'Hz', 1], ['amp', 'Amplitude', 0, 50, 0.1, 'V'], ['duty', 'Duty', 0, 100, 1, '%']],
+    BAT: [['v', 'Volts', 0, 60, 0.1, 'V']], ISRC: [['i', 'Current', 0, 0, 0, 'A', 1]], SIG: [['f', 'Freq', 0, 0, 0, 'Hz', 1], ['amp', 'Peak', 0, 50, 0.1, 'V'], ['duty', 'Duty', 0, 100, 1, '%']],
     LAMP: [['vr', 'Rated V', 1, 240, 1, 'V'], ['wr', 'Rated W', 0.5, 100, 0.5, 'W']],
     DHT: [['temp', 'Temp', -20, 80, 0.5, '°C'], ['hum', 'Humidity', 0, 100, 1, '%']], HCSR04: [['cm', 'Distance', 2, 400, 1, 'cm']], LDR: [['lux', 'Light', 0, 0, 0, 'lux', 1]],
   };
@@ -925,7 +925,7 @@ export function schematicTab(root) {
       case 'PB': return q.on ? 'pressed' : '';
       case 'C': return capTxt(q.c);
       case 'L': return si(q.l, 'H', 3);
-      case 'SIG': return `${q.wave} ${si(q.f, 'Hz', 3)} ${si(q.amp, 'V', 3)}`;
+      case 'SIG': return q.wave === 'sine' && q.rms ? `sine ${si(q.f, 'Hz', 3)} ${si(q.amp / Math.SQRT2, 'V', 3)} RMS (${si(q.amp, 'V', 3)} peak)` : `${q.wave} ${si(q.f, 'Hz', 3)} ${si(q.amp, 'V', 3)} peak`;
       case 'OPTO': return 'PC817';
       case 'ZD': return S.ZENER_PARTS[q.model] ? `${q.model} ${si(S.ZENER_PARTS[q.model].vz, 'V', 3)}` : si(q.vz, 'V', 3);
       case 'NPN': case 'PNP': case 'NMOS': case 'PMOS': case 'OPAMP': return q.model;
@@ -1759,7 +1759,9 @@ export function schematicTab(root) {
         choice('Type', q.polar ? 'e' : 'n', [['e', 'Electrolytic (has + and −)'], ['n', 'Ceramic / film (no polarity)']], v => { q.polar = v === 'e'; })); break;
       case 'L': f.append(field('Inductance', plain(q.l), 'H', v => { q.l = Math.max(v, 1e-12); }), field('Coil resistance', plain(q.r), 'Ω', v => { q.r = v; })); break;
       case 'SIG': f.append(choice('Wave', q.wave, [['sine', 'Sine'], ['square', 'Square (±)'], ['triangle', 'Triangle'], ['saw', 'Sawtooth'], ['pwm', 'PWM (0 to amplitude)']], v => { q.wave = v; }),
-        field('Frequency', plain(q.f), 'Hz', v => { q.f = Math.max(v, 1e-3); }), field('Amplitude (peak)', plain(q.amp), 'V', v => { q.amp = v; }),
+        field('Frequency', plain(q.f), 'Hz', v => { q.f = Math.max(v, 1e-3); }),
+        ...(q.wave === 'sine' ? [choice('Amplitude is', q.rms ? 'rms' : 'pk', [['pk', 'peak (top of the wave)'], ['rms', 'RMS (what a meter / the mains label says: 220 V)']], v => { q.rms = v === 'rms'; })] : []),
+        q.wave === 'sine' && q.rms ? field('Amplitude (RMS)', plain(+(q.amp / Math.SQRT2).toPrecision(6)), 'V', v => { q.amp = v * Math.SQRT2; }) : field('Amplitude (peak)', plain(q.amp), 'V', v => { q.amp = v; }),
         field('DC offset', plain(q.off), 'V', v => { q.off = v; }), field('Duty (PWM)', plain(q.duty), '%', v => { q.duty = Math.min(100, v); })); break;
       case 'VM': case 'AM': f.append(choice('Measures', q.mode ?? 'dc', [['dc', 'DC ⎓ (average)'], ['ac', 'AC ~ (true RMS)']], v => { q.mode = v; })); break;
       case 'SCOPE': f.append(note('CH1 (yellow) and CH2 (blue) measure against the bottom pin (COM). Usually wire COM to ground. Settings are under the scope screen.'),
@@ -2170,7 +2172,8 @@ export function schematicTab(root) {
         break;
       case 'SIG': {
         vals.push(['Output now', si(Vab, 'V'), true], ['Current', si(-r.i, 'A'), true], ['Frequency', si(q.f, 'Hz')], ['Period', si(1 / q.f, 's')]);
-        if (q.wave === 'sine') L.push(`Sine: peak ${si(q.amp, 'V')}, peak-to-peak ${si(2 * q.amp, 'V')}, RMS = peak ÷ √2 = ${si(q.amp / Math.SQRT2, 'V')}`);
+        if (q.wave === 'sine') L.push(`Sine: peak ${si(q.amp, 'V')}, peak-to-peak ${si(2 * q.amp, 'V')}, RMS = peak ÷ √2 = ${si(q.amp / Math.SQRT2, 'V')}. A rectifier + capacitor charges to the PEAK (minus the diode drop), not to the RMS.`);
+        if (q.wave === 'sine' && !q.rms && q.amp >= 100 && q.amp <= 260) warn.push(['warn', `Mains "${si(q.amp, 'V', 3)}" is an RMS value: its peak is ${si(q.amp * Math.SQRT2, 'V', 3)}. Set "Amplitude is" to RMS for real mains.`]);
         if (q.wave === 'pwm') L.push(`PWM: ${q.duty} % high → average ${si(q.off + q.amp * q.duty / 100, 'V')}`);
         break;
       }
