@@ -71,7 +71,8 @@ export function* autorouteSteps(c, { keepManual = true, onProgress } = {}) {
     let routed = 0, done = 0;
     const total0 = edges.length;
     const stuckNets = new Set();     // nets that already failed in this try: not searched again in the clean-up rounds (that search is the slow part)
-    for (let round = 0; round < 4 && edges.length; round++) {
+    // ONE pass only, then stop and let the user decide (🔁 Retry / ✓ Keep / 🧩 Place + route): no automatic clean-up rounds or new tries
+    for (let round = 0; round < 1 && edges.length; round++) {
     if (round) edges = edges.filter(e => !stuckNets.has(e.net));
     if (!edges.length) break;
     failed = [];
