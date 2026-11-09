@@ -2274,6 +2274,10 @@ export function example(name) {
     W(11, 13, 11, 18); W(11, 18, 7, 18); W(7, 18, 7, 12); W(7, 8, 7, 2); W(7, 2, 4, 2);   // J1-4 (board TX) → R2 → GPIO16 (RX2)
     W(10, 13, 10, 14); addPart(c, 'GND', 10, 14);                // J1-6 GND
     W(9, 13, 9, 16); W(9, 16, -4, 16); W(-4, 16, -4, 7);         // J1-8 5V → VIN
+    // noise protection (the router sparks): 10 µF + 100 nF on VIN, 1 nF on GPIO16 (with R2 = RC filter on the board TX line)
+    const c1 = addPart(c, 'C', -2, 18, 1); c1.name = 'C1'; c1.lbl = [-5.4, 0]; Object.assign(c1.props, { c: 10e-6, vmax: 16, polar: true }); addPart(c, 'GND', -2, 20);
+    const c2 = addPart(c, 'C', 1, 18, 1); c2.name = 'C2'; Object.assign(c2.props, { c: 100e-9, vmax: 50, polar: false }); addPart(c, 'GND', 1, 20);
+    const c3 = addPart(c, 'C', 6, 4, 1); c3.name = 'C3'; Object.assign(c3.props, { c: 1e-9, vmax: 50, polar: false }); addPart(c, 'GND', 6, 6);
     W(-4, 6, -6, 6); addPart(c, 'GND', -6, 6);
   } else if (name === 'd1sd') {
     // ESP32 + WeMos D1 mini Datalogger shield (micro SD on SPI + DS1307 on I2C) + DHT22 on GPIO27
