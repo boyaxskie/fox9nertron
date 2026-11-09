@@ -37,7 +37,7 @@ export function partValue(p) {
     case 'ENC': return 'rotary encoder KY-040 (5-pin header)';
     case 'OLED': return 'OLED 0.96in SSD1306 I2C (4-pin header)';
     case 'ADS1115': return 'ADS1115 16-bit ADC module (10-pin header)';
-    case 'SIL': return `Pin header 1x${q.n ?? 8}, ${q.pitch ?? '2.54'} mm (male, or female socket for a module)`;
+    case 'SIL': return `Pin header ${q.rows === 2 ? 2 : 1}x${q.n ?? 8}, ${q.pitch ?? '2.54'} mm (male, or female socket for a module)`;
     case 'D1SD': return 'D1 mini Datalogger shield (micro SD + DS1307) on 2x 1x8 female headers';
     case 'SDCARD': return 'Micro SD card module 5V (6-pin header)';
     case 'INA219': return 'INA219 current sensor module (6-pin header)';

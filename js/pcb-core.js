@@ -38,10 +38,11 @@ export const FOOTPRINTS = {
   } },
   // single row of 2–40 holes (pin header / female socket), pitch 2.54 mm (Arduino / Dupont) or 2.0 mm
   SIL: { label: 'Pin header SIL (1 row)', n: 8, make: (o) => {
-    const n = Math.max(1, Math.min(40, Math.round(o.sil?.n ?? 8))), pt = o.sil?.pitch === '2.0' ? 2.0 : 2.54, d = pt < 2.5 ? 1.5 : 1.8, dr = pt < 2.5 ? 0.8 : 1.0;
-    const pads = square1(Array.from({ length: n }, (_, k) => th((k - (n - 1) / 2) * pt, 0, k, d, dr)));
+    const n = Math.max(1, Math.min(40, Math.round(o.sil?.n ?? 8))), pt = o.sil?.pitch === '2.0' ? 2.0 : 2.54, d = pt < 2.5 ? 1.5 : 1.8, dr = pt < 2.5 ? 0.8 : 1.0, two = o.sil?.rows === 2;
+    const pads = square1(two ? Array.from({ length: 2 * n }, (_, i) => th((Math.floor(i / 2) - (n - 1) / 2) * pt, (i % 2 - 0.5) * pt, i, d, dr))
+      : Array.from({ length: n }, (_, k) => th((k - (n - 1) / 2) * pt, 0, k, d, dr)));
     const w = n * pt / 2;
-    return { pads, body: [box(-w, -pt / 2, w, pt / 2)] };
+    return { pads, body: [box(-w, two ? -pt : -pt / 2, w, two ? pt : pt / 2)] };
   } },
   // WeMos D1 mini shield: two rows of 8 at 2.54 mm, 22.86 mm (0.9") apart; left TX…5V, right RST…3V3 (same order as the part's pins)
   D1SHIELD: { label: 'D1 mini shield (2 × 8 pins, rows 22.86 mm apart)', n: 16, make: () => ({
