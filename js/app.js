@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '2.5.2';
+export const VERSION = '2.5.3';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -52,7 +52,7 @@ function help() {
 <p><b>📡 WiFi + MQTT</b> (ESP32): sketches with WiFi.h + PubSubClient connect to a pretend broker. Open <b>📡 WiFi + MQTT test broker</b> under the code to see every message, publish your own (e.g. home/relay1/set = ON) and switch WiFi or the broker off to test reconnecting.</p>
 <p><b>💾 SD card module</b> (SPI): sketches with SD.h open, write, append, read and list files. The files are kept in the project: tap the module → 📂 Files on the card to read, download or delete them. VCC 5 V; ESP32 SCK 18, MISO 19, MOSI 23, CS 5.</p>
 <p><b>⚡ Power sensors</b>: INA219 (current + voltage, I2C), ACS712 5 / 20 / 30 A (Hall, analog out), DS3231 real-time clock (RTClib; set its time and speed ×60 / ×3600 in its panel). <b>☀️ Solar</b>: PV panel (sun slider) + PWM or MPPT charge controller. <b>Steppers</b>: 28BYJ-48 + ULN2003 (Stepper.h) and A4988 / DRV8825 / TMC2209 drivers.</p>
-<p><b>📤 Send to Nova</b> (PCB → 🛠 G-code): sends the 3 G-code files straight to the Fox9ner Nova's SD card over WiFi. Type nova.local (or its IP on Android) in the box next to it.</p>
+<p><b>📤 Send to Nova</b> (PCB → 🛠 G-code): sends the 3 G-code files straight to the Fox9ner Nova's SD card over WiFi. Type fox9ner.local (or its IP on Android) in the box next to it.</p>
 <p><b>🌡 Sensors</b>: DHT22 / DHT11 (temperature + humidity), HC-SR04 (distance), LDR (light), PIR (motion). Slide what they sense in their panel (tap a PIR to toggle motion). Sketches read them with the DHT library, pulseIn(), analogRead(), digitalRead().</p>
 <p><b>🔐 Keypad, buzzer, door lock</b>: tap keypad keys on the drawing (or in its panel); sketches read them with the Keypad library. The buzzer really beeps (🔊 switch in its panel). The solenoid lock shows LOCKED / OPEN from its coil current.</p>
 <p><b>⧉ Many of the same part</b>: tap a part in the tray, then keep tapping the grid: one each tap (↻ / R turns the next ones, right-click or Esc when done). Right-click also cancels a wire and lets go of the selection. Or select a part and ⧉ Duplicate (Ctrl+D): same value, new name. Ctrl+C / Ctrl+V pastes where the mouse is.</p>
