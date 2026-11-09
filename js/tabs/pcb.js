@@ -335,7 +335,10 @@ export function pcbView(api) {
       // routing steps until the time budget is used, or a new trace appeared and needs its moment on screen
       while (performance.now() - t0 < 24 && !rt.stop) {
         if (now - rt.lastNew < pace) break;
-        const s = rt.gen.next();
+        let s;
+        try { s = rt.gen.next(); } catch (err) {         // a router error must never leave the bar hanging: stop and keep what is routed
+          console.error(err); res = { routed: rt.cur?.routed ?? 0, failed: P.analyze(api.getC()).rats, jumpers: (L.jumpers ?? []).filter(j => j.auto).length, stopped: true }; break;
+        }
         if (s.done) { res = s.value; break; }
         const v = s.value;
         if (v.pause) { rt.paused = v; break; }

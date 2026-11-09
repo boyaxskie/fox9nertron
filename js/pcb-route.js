@@ -108,10 +108,14 @@ export function* autorouteSteps(c, { keepManual = true, onProgress } = {}) {
   L.traces = JSON.parse(best.traces); L.jumpers = JSON.parse(best.jumpers);
   return { routed: best.routed, failed: best.failed, jumpers: L.jumpers.filter(j => j.auto).length };
 }
-const edgeKey = (e) => `${e.a.part.id}.${e.a.k}-${e.b.part.id}.${e.b.k}`;
+// a rat line can end on a trace or a jumper (no part): key it by its position then
+const endKey = (q) => (q.part ? `${q.part.id}.${q.k}` : `J${q.jumper}.${q.k}`);
+// the same pad in another analysis: part + pad number, or jumper number + end (jumper pads have no part)
+const samePad = (pd, q) => pd.part === q.part && pd.k === q.k && (pd.part != null || pd.jumper === q.jumper);
+const edgeKey = (e) => `${endKey(e.a)}-${endKey(e.b)}`;
 function sameCluster(an, a, b) {
-  const ia = an.items.find(it => it.kind === 'pad' && it.pad.part === a.part && it.pad.k === a.k);
-  const ib = an.items.find(it => it.kind === 'pad' && it.pad.part === b.part && it.pad.k === b.k);
+  const ia = an.items.find(it => it.kind === 'pad' && samePad(it.pad, a));
+  const ib = an.items.find(it => it.kind === 'pad' && samePad(it.pad, b));
   return ia && ib && ia.cl === ib.cl;
 }
 
@@ -120,7 +124,8 @@ function routeOne(c, an, nl, e, w, gs, nx, ny, N, allowJump = false) {
   const L = c.pcb, R = L.rules, net = e.net;
   // obstacles: copper of other nets (and unconnected pads), blocked within w/2 + clearance
   const other = new Uint8Array(N), mine = new Uint8Array(N), target = new Uint8Array(N), start = new Uint8Array(N);
-  const ia = an.items.find(it => it.kind === 'pad' && it.pad.part === e.a.part && it.pad.k === e.a.k);
+  const ia = an.items.find(it => it.kind === 'pad' && samePad(it.pad, e.a));
+  if (!ia) return null;
   for (const it of an.items) {
     const itNet = it.net;
     if (itNet === net && itNet >= 0) {
