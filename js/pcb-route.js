@@ -115,6 +115,7 @@ function sameCluster(an, a, b) {
   return ia && ib && ia.cl === ib.cl;
 }
 
+const ROUTE_MS = 1200;      // give up on one connection after this long: it is reported stuck, you decide what to do
 function routeOne(c, an, nl, e, w, gs, nx, ny, N, allowJump = false) {
   const L = c.pcb, R = L.rules, net = e.net;
   // obstacles: copper of other nets (and unconnected pads), blocked within w/2 + clearance
@@ -154,7 +155,10 @@ function routeOne(c, an, nl, e, w, gs, nx, ny, N, allowJump = false) {
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; if (i >= pe && j >= pe && i <= nx - 1 - pe && j <= ny - 1 - pe && d2[k] >= pr2 && !mine[k]) padFree[k] = 1; }
   }
   const hops = allowJump ? [2, 3, 4, 5, 6, 8].map(n => Math.round(n * 2.54 / gs)) : [];
+  // time limit per search: a connection that can't be reached would otherwise scan every cell (and every jumper hop) of a big board
+  const t0 = performance.now(); let pops = 0;
   while (h.size) {
+    if ((++pops & 4095) === 0 && performance.now() - t0 > ROUTE_MS) return null;
     const s = h.pop(), k = s >> 3, dir = s & 7, cost = dist[s];
     if (cost > dist[s]) continue;
     if (target[k] && free[k]) { end = s; break; }
