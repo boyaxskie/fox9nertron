@@ -11,7 +11,7 @@ import { schematicTab } from './tabs/schematic.js';
 import { calcTab } from './tabs/calc.js';
 import { learnTab } from './tabs/learn.js';
 
-export const VERSION = '2.5.3';
+export const VERSION = '2.5.4';
 const TABS = [
   ['schematic', '⚡ Schematic', schematicTab], ['calc', '🧮 Calc', calcTab], ['learn', '📖 Learn', learnTab], ['ohm', 'Ohm', ohmTab], ['divider', 'Divider', dividerTab], ['power', 'Power', powerTab], ['kirchhoff', 'Kirchhoff', kirchhoffTab],
   ['rectifier', 'Rectifier', rectifierTab], ['capacitor', 'Capacitor', capacitorTab], ['inductor', 'Inductor', inductorTab],
@@ -50,6 +50,7 @@ function help() {
 <p><b>📟 LCD 16×2 I2C + 🔢 7-segment</b>: wire the LCD's SDA / SCL to the board (ESP32 21 / 22, UNO A4 / A5) and print to it from a sketch with LiquidCrystal_I2C: the text shows on the drawing. 7-segment segments light from the real current.</p>
 <p><b>📏 ADS1115</b>: 16-bit ADC module with 4 inputs on I2C (SDA / SCL like the LCD). Read it from a sketch with the Adafruit_ADS1X15 library: ads.begin(0x48), setGain(GAIN_ONE), readADC_SingleEnded(0), computeVolts(). Example: 0–25 V voltage sensor for the ESP32.</p>
 <p><b>📡 WiFi + MQTT</b> (ESP32): sketches with WiFi.h + PubSubClient connect to a pretend broker. Open <b>📡 WiFi + MQTT test broker</b> under the code to see every message, publish your own (e.g. home/relay1/set = ON) and switch WiFi or the broker off to test reconnecting.</p>
+<p><b>📌 Pin header SIL</b> (tray): a single row of 2–40 holes (2.54 or 2.0 mm) for any module that isn't in the tray. Set the pin count and names in its panel; on 🟫 PCB it becomes a matching row of holes for a male header or a female socket. <b>D1 mini Datalogger shield</b>: micro SD + DS1307 clock with its real 2 × 8 pin layout.</p>
 <p><b>💾 SD card module</b> (SPI): sketches with SD.h open, write, append, read and list files. The files are kept in the project: tap the module → 📂 Files on the card to read, download or delete them. VCC 5 V; ESP32 SCK 18, MISO 19, MOSI 23, CS 5.</p>
 <p><b>⚡ Power sensors</b>: INA219 (current + voltage, I2C), ACS712 5 / 20 / 30 A (Hall, analog out), DS3231 real-time clock (RTClib; set its time and speed ×60 / ×3600 in its panel). <b>☀️ Solar</b>: PV panel (sun slider) + PWM or MPPT charge controller. <b>Steppers</b>: 28BYJ-48 + ULN2003 (Stepper.h) and A4988 / DRV8825 / TMC2209 drivers.</p>
 <p><b>📤 Send to Nova</b> (PCB → 🛠 G-code): sends the 3 G-code files straight to the Fox9ner Nova's SD card over WiFi. Type fox9ner.local (or its IP on Android) in the box next to it.</p>

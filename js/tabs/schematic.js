@@ -138,21 +138,23 @@ export function schematicTab(root) {
   function rtcAt(b) {
     const nl = nets(); if (!nl) return null;
     for (const d of c.parts) {
-      if (d.type !== 'DS3231' || !i2cOn(nl, b, d, 3, 2)) continue;
-      const r = res?.ok ? res.parts.get(d.id) : null; if (!r || r.v < 2.3) continue;
+      if ((d.type !== 'DS3231' && d.type !== 'D1SD') || !i2cOn(nl, b, d, 3, 2)) continue;
+      const r = res?.ok ? res.parts.get(d.id) : null; if (!r || (d.type === 'D1SD' ? r.v5 < 4.3 : r.v < 2.3)) continue;   // DS1307 needs 5 V
       return { now: () => rtcNow(d), set: (u) => { const s = rtcState(d); s.base = u; s.t0 = sim.t; }, lost: () => false };
     }
     return null;
   }
   // SD card module on this board's SPI pins (ESP32 VSPI: SCK 18, MISO 19, MOSI 23; UNO: SCK 13, MISO 12, MOSI 11) with CS on GPIO cs
+  // pin numbers of the SD lines on each SD part: blue module (GND VCC MISO MOSI SCK CS) and the D1 mini shield (CS D8, MOSI D7, MISO D6, SCK D5)
+  const SDMAP = { SDCARD: { miso: 2, mosi: 3, sck: 4, cs: 5 }, D1SD: { miso: 12, mosi: 13, sck: 11, cs: 14 } };
   function sdPart(nl, b, cs) {
     const [sck, miso, mosi] = (b.type === 'ESP32' ? ['D18', 'D19', 'D23'] : ['D13', 'D12', 'D11']).map(n => boardNet(nl, b, n));
     const csn = cs == null ? null : boardNet(nl, b, 'D' + cs);
-    return c.parts.find(d => d.type === 'SDCARD' && sck != null && sck >= 0 && pinNetOf(nl, d, 4) === sck && pinNetOf(nl, d, 2) === miso && pinNetOf(nl, d, 3) === mosi && (cs == null || (csn != null && csn >= 0 && pinNetOf(nl, d, 5) === csn))) ?? null;
+    return c.parts.find(d => { const m = SDMAP[d.type]; return m && sck != null && sck >= 0 && pinNetOf(nl, d, m.sck) === sck && pinNetOf(nl, d, m.miso) === miso && pinNetOf(nl, d, m.mosi) === mosi && (cs == null || (csn != null && csn >= 0 && pinNetOf(nl, d, m.cs) === csn)); }) ?? null;
   }
   function sdBoard(d) {
     const nl = nets(); if (!nl) return null;
-    for (const b of c.parts) { if (!S.isBoard(b.type)) continue; const cs = S.BOARDS[b.type].pins.findIndex((q, i) => q.k === 'gpio' && pinNetOf(nl, b, i) === pinNetOf(nl, d, 5)); if (sdPart(nl, b, null) === d) return { b, cs: cs >= 0 ? S.BOARDS[b.type].pins[cs].n : null }; }
+    for (const b of c.parts) { if (!S.isBoard(b.type)) continue; const cs = S.BOARDS[b.type].pins.findIndex((q, i) => q.k === 'gpio' && pinNetOf(nl, b, i) === pinNetOf(nl, d, SDMAP[d.type].cs)); if (sdPart(nl, b, null) === d) return { b, cs: cs >= 0 ? S.BOARDS[b.type].pins[cs].n : null }; }
     return null;
   }
   function sdFiles(d) {
@@ -176,7 +178,7 @@ export function schematicTab(root) {
     const nl = nets(); if (!nl) return { err: 'wiring' };
     const d = sdPart(nl, b, cs); if (!d) return { err: 'wiring' };
     const r = res?.ok ? res.parts.get(d.id) : null;
-    if (!r || r.v < 4) return { err: 'power' };              // the blue module's AMS1117 needs ≈ 4.5–5 V on VCC
+    if (!r || (d.type === 'D1SD' ? r.v < 2.7 || r.v > 3.6 : r.v < 4)) return { err: 'power' };   // blue module: 5 V (AMS1117); D1 shield: 3.3 V straight to the card
     if (d.props.card === false) return { err: 'nocard' };
     return { files: () => (d.props.files ??= {}), touch: (path) => SDACT.set(d.id, { t: sim.t, w: performance.now(), path }) };
   }
@@ -609,7 +611,7 @@ export function schematicTab(root) {
   let W = 0, H = 0;
 
   // ---------- helpers ----------
-  function shortName(t) { return { LCD: 'LCD I2C', OLED: 'OLED I2C', ADS1115: 'ADS1115', INA219: 'INA219', SDCARD: 'SD card', DS3231: 'DS3231 clock', ACS712: 'ACS712', PV: 'Solar panel', SCC: 'Charge ctrl', BYJ: '28BYJ-48', ENC: 'Encoder', SR595: '74HC595', TL494: 'TL494 PWM', LM2596: 'LM2596', IR2104: 'IR2104', TB: 'Terminal', RMOD: 'Relay module', SEG7: '7-segment', DHT: 'DHT22', HCSR04: 'HC-SR04', LDR: 'LDR', PIR: 'PIR', KEYPAD: 'Keypad', BUZZER: 'Buzzer', LOCK: 'Door lock', XFMR: 'Transformer', R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
+  function shortName(t) { return { LCD: 'LCD I2C', OLED: 'OLED I2C', ADS1115: 'ADS1115', INA219: 'INA219', SDCARD: 'SD card', D1SD: 'D1 SD shield', SIL: 'Pin header', DS3231: 'DS3231 clock', ACS712: 'ACS712', PV: 'Solar panel', SCC: 'Charge ctrl', BYJ: '28BYJ-48', ENC: 'Encoder', SR595: '74HC595', TL494: 'TL494 PWM', LM2596: 'LM2596', IR2104: 'IR2104', TB: 'Terminal', RMOD: 'Relay module', SEG7: '7-segment', DHT: 'DHT22', HCSR04: 'HC-SR04', LDR: 'LDR', PIR: 'PIR', KEYPAD: 'Keypad', BUZZER: 'Buzzer', LOCK: 'Door lock', XFMR: 'Transformer', R: 'Resistor', POT: 'Pot', BAT: 'Battery', LED: 'LED', D: 'Diode', SW: 'Switch', SPDT: 'SPDT', DPDT: 'DPDT', PB: 'Button', C: 'Capacitor', L: 'Inductor', SIG: 'Signal gen', SCOPE: 'Scope', OPTO: 'PC817', ZD: 'Zener', NPN: 'NPN', PNP: 'PNP', NMOS: 'N-MOSFET', PMOS: 'P-MOSFET', OPAMP: 'Op-amp', REG: 'Regulator', RELAY: 'Relay', T555: '555 timer', ESP32: 'ESP32', UNO: 'Arduino UNO', SERVO: 'Servo', STEPPER: 'Stepper', LAMP: 'Lamp', ISRC: 'I source', VM: 'Voltmeter', AM: 'Ammeter', GND: 'Ground' }[t]; }
   function load() { try { const j = JSON.parse(store.get('sch.cur', 'null')); return j && Array.isArray(j.parts) ? j : null; } catch { return null; } }
   const sx = (x) => view.ox + x * view.g, sy = (y) => view.oy + y * view.g;
   const wx = (px) => (px - view.ox) / view.g, wy = (py) => (py - view.oy) / view.g;
@@ -943,7 +945,8 @@ export function schematicTab(root) {
       case 'OLED': return '0x' + (q.addr ?? 0x3C).toString(16).toUpperCase();
       case 'ADS1115': { const r = res?.ok ? res.parts.get(p.id) : null; return r ? '0x' + r.addr.toString(16).toUpperCase() : ''; }
       case 'INA219': return '0x' + (q.addr ?? 0x40).toString(16).toUpperCase();
-      case 'SDCARD': { if (q.card === false) return 'no card'; const n = Object.keys(q.files ?? {}).filter(k => !k.endsWith('/')).length; return n + (n === 1 ? ' file' : ' files'); }
+      case 'SIL': return `1×${S.silN(p)} · ${q.pitch ?? '2.54'} mm`;
+      case 'D1SD': case 'SDCARD': { if (q.card === false) return 'no card'; const n = Object.keys(q.files ?? {}).filter(k => !k.endsWith('/')).length; return n + (n === 1 ? ' file' : ' files'); }
       case 'DS3231': return fmtClock(rtcNow(p)) + ((q.speed || 1) > 1 ? ` ×${q.speed}` : '');
       case 'ACS712': { const r = res?.ok ? res.parts.get(p.id) : null; return `${q.model}${r ? ' · ' + si(Math.abs(r.isens) < 1e-4 ? 0 : r.isens, 'A', 3) : ''}`; }
       case 'PV': { const r = res?.ok ? res.parts.get(p.id) : null; return `${q.model} ☀${q.sun}%${r ? ' · ' + si(Math.max(0, r.p), 'W', 3) : ''}`; }
@@ -1710,6 +1713,26 @@ export function schematicTab(root) {
           el('button', { class: 'btn', type: 'button', text: 'Right ⟳', onclick: () => encTurn(p, 1) }));
         f.append(row, note('Pins CLK, DT, SW, +, GND. + to 3.3 V (ESP32) or 5 V (UNO). CLK and DT have 10 kΩ pull-ups on the module; SW has none: use INPUT_PULLUP. One click: CLK and DT both go LOW and back, CLK first when you turn right. Tap the knob on the drawing too: left half ⟲, right half ⟳, middle = push.')); break;
       }
+      case 'SIL': {
+        const names = el('input', { class: 'num', type: 'text', value: q.names ?? '', placeholder: 'e.g. GND,VCC,MISO,MOSI,SCK,CS', spellcheck: false });
+        names.addEventListener('change', () => { q.names = names.value.split(',').map(x => x.trim()).join(','); commit(); });
+        f.append(choice('Number of pins', String(S.silN(p)), Array.from({ length: 39 }, (_, k) => [String(k + 2), `${k + 2} pins`]), v => { q.n = +v; }),
+          choice('Pitch (hole spacing)', q.pitch ?? '2.54', [['2.54', '2.54 mm (0.1") Arduino / Dupont / modules'], ['2.0', '2.0 mm (JST-PH, some modules)']], v => { q.pitch = v; }),
+          el('label', { class: 'field' }, el('span', { class: 'lab', text: 'Pin names (optional, comma between, pin 1 first)' }), names),
+          note('A single row of holes for any module or board you don\'t find in the tray: count its pins, set the number here, wire each pin, and on 🟫 PCB it becomes a matching row of holes. Solder a male pin header (the Arduino kind) or a female socket in it. Two rows (like a shield)? Use two of these and keep them the module\'s distance apart on the PCB. Square pad = pin 1.'));
+        break;
+      }
+      case 'D1SD': {
+        const inp = el('input', { class: 'num', type: 'datetime-local', step: 1, value: q.start || new Date(phNow() * 1000).toISOString().slice(0, 19) });
+        inp.addEventListener('change', () => { q.start = inp.value; RTCS.delete(p.id); commit(); });
+        f.append(choice('Card', q.card === false ? 'out' : 'in', [['in', 'inserted (8 GB, FAT32)'], ['out', 'no card (pulled out)']], v => { q.card = v === 'in'; }),
+          el('div', { class: 'row wrap' }, el('button', { class: 'btn', type: 'button', text: '📂 Files on the card', onclick: () => sdFiles(p) })),
+          el('label', { class: 'field' }, el('span', { class: 'lab', text: 'DS1307 clock starts at (when you press ⟲ t = 0)' }), inp),
+          el('button', { class: 'btn', type: 'button', text: '🕐 Set to now', onclick: () => { q.start = ''; RTCS.delete(p.id); commit(); } }),
+          choice('Clock speed', String(q.speed || 1), [['1', '×1 real time'], ['60', '×60: 1 s = 1 minute'], ['3600', '×3600: 1 s = 1 hour']], v => { q.speed = +v; RTCS.delete(p.id); }),
+          note('WeMos D1 mini Datalogger shield. Its pins have <b>D1 mini names</b>, not ESP32 ones. To an ESP32: <b>3V3 → 3V3</b> (the card runs straight from it: never 5 V), GND → GND, <b>D8 (CS) → GPIO5, D7 (MOSI) → GPIO23, D6 (MISO) → GPIO19, D5 (SCK) → GPIO18</b>. The DS1307 clock (optional): 5V → VIN, D2 (SDA) → GPIO21, D1 (SCL) → GPIO22, CR1220 cell; RTClib: RTC_DS1307. On 🟫 PCB: two rows of 8 holes, 22.86 mm (0.9") apart.'));
+        break;
+      }
       case 'SDCARD': {
         f.append(choice('Card', q.card === false ? 'out' : 'in', [['in', 'inserted (8 GB, FAT32)'], ['out', 'no card (pulled out)']], v => { q.card = v === 'in'; }),
           el('div', { class: 'row wrap' }, el('button', { class: 'btn', type: 'button', text: '📂 Files on the card', onclick: () => sdFiles(p) })),
@@ -2044,6 +2067,18 @@ export function schematicTab(root) {
         if (r.vout > 3.6) warn.push(['warn', `OUT is ${si(r.vout, 'V', 3)}: too much for an ESP32 pin (3.3 V). Use a divider or an ADS1115 on 5 V.`]);
         break;
       }
+      case 'D1SD': {
+        const files = Object.entries(q.files ?? {}).filter(([k]) => !k.endsWith('/')), used = files.reduce((a, [, v]) => a + v.length, 0), sb = sdBoard(p), act = SDACT.get(p.id), u = rtcNow(p);
+        vals.push(['SD 3V3', si(r.v, 'V'), true], ['RTC 5V', si(r.v5, 'V'), true], ['Card', q.card === false ? 'none' : '8 GB FAT32'], ['Files', String(files.length)], ['Used', used < 1024 ? used + ' B' : (used / 1024).toFixed(1) + ' kB'], ['Clock', fmtClock(u)]);
+        if (act) vals.push(['Last write', `/${act.path} (${(sim.t - act.t).toFixed(1)} s ago)`]);
+        if (r.v > 3.6) warn.push(['bad', `${si(r.v, 'V', 3)} on 3V3: this shield has no regulator, the card gets it directly and will be damaged. Use the ESP32 3V3 pin, never 5 V.`]);
+        else if (r.v < 2.7) warn.push(['bad', r.v < 0.5 ? 'No power on 3V3: wire 3V3 → ESP32 3V3 and GND → GND.' : `${si(r.v, 'V', 3)} on 3V3 is too low for the card (needs 2.7–3.6 V).`]);
+        if (q.card === false) warn.push(['warn', 'No card in the slot: SD.begin() returns false.']);
+        warn.push(sb ? ['ok', `SD on ${sb.b.name}'s SPI pins, CS (D8) on ${sb.cs ?? '?'}: SD.begin(${sb.cs ? sb.cs.replace(/^D/, '') : '?'})`] : ['warn', 'SD lines not on a board\'s SPI pins. ESP32: shield D5 → GPIO18, D6 → GPIO19, D7 → GPIO23, D8 → GPIO5. UNO: D5 → 13, D6 → 12, D7 → 11, D8 → 10.']);
+        if (r.v5 > 4.3) warn.push(adsBoard(p) ? ['ok', `DS1307 on ${adsBoard(p).name}'s I2C bus at 0x68.`] : ['warn', 'DS1307 has 5 V but D2 / D1 are not on the board\'s SDA / SCL (ESP32 21 / 22).']);
+        break;
+      }
+      case 'SIL': vals.push(['Pins', String(S.silN(p))], ['Pitch', `${q.pitch ?? '2.54'} mm`]); break;
       case 'SDCARD': {
         const files = Object.entries(q.files ?? {}).filter(([k]) => !k.endsWith('/')), used = files.reduce((a, [, v]) => a + v.length, 0), sb = sdBoard(p), act = SDACT.get(p.id);
         vals.push(['Supply', si(r.v, 'V'), true], ['Card', q.card === false ? 'none' : '8 GB FAT32', true], ['Files', String(files.length)], ['Used', used < 1024 ? used + ' B' : (used / 1024).toFixed(1) + ' kB']);
@@ -2396,7 +2431,7 @@ export function schematicTab(root) {
   globalThis.__schDbg = { c: () => c, res: () => res, sim, sketches };     // for automated tests
   function loadCircuit(j, msg) { const added = registerLib(j.lib, true); if (added) msg += ` Added ${added} part${added > 1 ? 's' : ''} from the file to your parts (★).`; c = j; resetSim(); sel = null; probes = []; if (S.isDynamic(c)) { autoTimeQuiet(); autoSpeed(); } if (!running) msg += ' Tap ▶ Run to simulate.'; hist.length = 0; hist.push(JSON.stringify(c)); hi = 0; fit(); commit(false); setMode('select'); say(msg); }
   function examples() {
-    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['oled', '💻 ESP32 + OLED 128×64 SSD1306: text, bar + live graph of the pot (code runs)'], ['ads1115', '💻 ADS1115 16-bit voltage sensor 0–25 V: ESP32 + LCD (turn SET)'], ['encoder', '🎛 Rotary encoder menu: ESP32 interrupt + OLED + LED (turn + push the knob)'], ['sr595sig', '📈 74HC595 by hand: signal generators feed SER (data) + SRCLK (clock), 8 LEDs'], ['relay10', '🔌 10 relay modules on 3 wires: ESP32 + two 74HC595 in a chain (type commands in Serial)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM'], ['tl494pwm', '📈 TL494 PWM: 10 kHz lamp dimmer with a MOSFET (turn DUTY)'], ['tl494inv', '📈 TL494 push-pull inverter 12 V → 220 V AC 50 Hz (turn POWER)'], ['bms48', '🔋 48 V protector: 2 × 24 V LiFePO4, whole-pack low / high cut-off (relay)'], ['bms48b', '🔋 48 V BMS: 2 × 24 V LiFePO4, each battery watched + balancing'], ['lm2596', '📈 LM2596 buck module: 24 V → 5 V 3 A (turn SET, flip BIG LOAD / RUN)'], ['buck30', '📈 30 A synchronous buck 24 V → 12 V: TL494 + IR2104 + 2 × IRFB4110 (POWER, then MAIN)'], ['sdlog', '💾 ESP32 + SD card: DHT22 data logger (log.csv)'], ['mqtt', '📡 ESP32 MQTT: 2 relays + DHT22 by topics (📡 panel)'], ['bank48', '🔋 48 V LiFePO4 bank monitor: volts, amps, % on LCD'], ['ina219', '💻 INA219: current + voltage of a 12 V load on LCD'], ['solar', '☀️ Solar: PWM vs MPPT controller side by side'], ['rtc', '🕐 DS3231 clock: lights ON 18:00–06:00 (clock ×60)'], ['byj', '💻 28BYJ-48 + ULN2003 stepper (Stepper.h)'], ['tblock', '🔩 Screw terminal blocks: 12 V in → switch on the PCB → 21 W lamp out']];
+    const ex = [['led', 'LED + resistor + switch (9 V)'], ['divider', 'Voltage divider with voltmeter'], ['bridge', 'Wheatstone bridge'], ['esp32', 'Solenoid coil + push button + flyback diode (12 V)'], ['dpdt', 'DPDT switch reversing a DC motor'], ['rc', '📈 RC filter: square wave charging a capacitor'], ['pwmled', '📈 PWM dimming an LED'], ['flyback', '📈 Coil switch-off spike + flyback diode (hold the button, let go)'], ['rectifier', '📈 Bridge rectifier + filter capacitor (ripple)'], ['opto', '📈 PC817: ESP32 PWM switching a 12 V line'], ['relay', '📈 ESP32 → 2N2222 → 12 V relay → lamp (flip GPIO)'], ['mosfet', '📈 ESP32 PWM → IRLZ44N MOSFET → 12 V solenoid'], ['reg7805', '7805 regulator: 12 V → 5 V (heat)'], ['lm317', 'LM317 adjustable regulator (5 V)'], ['zener', 'Zener diode 5.1 V reference'], ['preamp', '📈 Transistor audio preamp (BC547, gain ≈ 100)'], ['delay555', '📈 555 power-on delay (flip POWER, LED after ≈ 1.1 s)'], ['buck', '📈 DC-DC buck converter 30 V → 12 V (PWM duty sets Vout)'], ['buckreg', '📈 Regulated buck 0–30 V → 0–20 V (like XL4015 / LM2596, flip POWER)'], ['inverter', '📈 Inverter 12 V DC → 220 V AC (push-pull, 50 Hz)'], ['smps', '📈 Switching power supply 220 V AC → 5 V (flyback + opto feedback)'], ['fridge', '📈 Fridge / aircon guard: 4-min restart delay (flip MAINS)'], ['esp32io', 'ESP32 pins: LED output, button with pull-up, pot on the ADC'], ['lcd', '💻 ESP32 + LCD 16×2 I2C shows the pot voltage (code runs)'], ['oled', '💻 ESP32 + OLED 128×64 SSD1306: text, bar + live graph of the pot (code runs)'], ['ads1115', '💻 ADS1115 16-bit voltage sensor 0–25 V: ESP32 + LCD (turn SET)'], ['encoder', '🎛 Rotary encoder menu: ESP32 interrupt + OLED + LED (turn + push the knob)'], ['sr595sig', '📈 74HC595 by hand: signal generators feed SER (data) + SRCLK (clock), 8 LEDs'], ['relay10', '🔌 10 relay modules on 3 wires: ESP32 + two 74HC595 in a chain (type commands in Serial)'], ['seg7', '💻 UNO counts 0–9 on a 7-segment display (code runs)'], ['thermo', '💻 ESP32 + DHT22 thermostat: fan LED above 30 °C (slide the temperature)'], ['parking', '💻 UNO + HC-SR04 parking sensor: LED under 20 cm (slide the distance)'], ['autolight', '💻 UNO + LDR auto light: darker = brighter LED (slide the light)'], ['doorlock', '🔐 Keypad door lock: ESP32 + keypad + LCD + buzzer + 12 V solenoid (PIN 1234 #)'], ['unoio', 'Arduino UNO pins: LED on D13, button on D2, pot on A0'], ['servo', '📈 Servo on ESP32 PWM (change D18 duty: 2.5–12.5 %)'], ['stepper', '📈 Stepper + A4988 from ESP32 (STEP / DIR)'], ['comparator', '📈 Op-amp comparator: triangle vs pot → PWM'], ['tl494pwm', '📈 TL494 PWM: 10 kHz lamp dimmer with a MOSFET (turn DUTY)'], ['tl494inv', '📈 TL494 push-pull inverter 12 V → 220 V AC 50 Hz (turn POWER)'], ['bms48', '🔋 48 V protector: 2 × 24 V LiFePO4, whole-pack low / high cut-off (relay)'], ['bms48b', '🔋 48 V BMS: 2 × 24 V LiFePO4, each battery watched + balancing'], ['lm2596', '📈 LM2596 buck module: 24 V → 5 V 3 A (turn SET, flip BIG LOAD / RUN)'], ['buck30', '📈 30 A synchronous buck 24 V → 12 V: TL494 + IR2104 + 2 × IRFB4110 (POWER, then MAIN)'], ['sdlog', '💾 ESP32 + SD card: DHT22 data logger (log.csv)'], ['d1sd', '💾 ESP32 + D1 mini Datalogger shield (SD + DS1307 clock)'], ['mqtt', '📡 ESP32 MQTT: 2 relays + DHT22 by topics (📡 panel)'], ['bank48', '🔋 48 V LiFePO4 bank monitor: volts, amps, % on LCD'], ['ina219', '💻 INA219: current + voltage of a 12 V load on LCD'], ['solar', '☀️ Solar: PWM vs MPPT controller side by side'], ['rtc', '🕐 DS3231 clock: lights ON 18:00–06:00 (clock ×60)'], ['byj', '💻 28BYJ-48 + ULN2003 stepper (Stepper.h)'], ['tblock', '🔩 Screw terminal blocks: 12 V in → switch on the PCB → 21 W lamp out']];
     dialog('Examples', ex.map(e => e[1]), i => loadCircuit(S.example(ex[i][0]), `Loaded: ${ex[i][1]}.`));
   }
   function projects() {
@@ -2657,6 +2692,27 @@ function symbol(ctx, p, r, g) {
       ctx.fillStyle = '#20232A'; ctx.fillRect(-0.6, -0.5, 1.2, 1);
       T('VCC', -1.8, -1, 0.3, '#FFD9D9'); T('OUT', -1.8, 0, 0.3, '#FFE16B'); T('GND', -1.8, 1, 0.3, '#FFD9D9'); T('IP+', 1.75, -1, 0.3, '#FFFFFF'); T('IP−', 1.75, 1, 0.3, '#FFFFFF');
       T('ACS712', 0, -1.3, 0.34, '#FFFFFF'); T(q.model, 0, 1.25, 0.34, '#FFD9D9');
+      break;
+    }
+    case 'SIL': {
+      const n = S.silN(p), nm = String(q.names ?? '').split(',');
+      ctx.fillStyle = '#20232A'; ctx.fillRect(-0.55, -0.5, 1.1, n); ctx.strokeStyle = C.part; ctx.strokeRect(-0.55, -0.5, 1.1, n);
+      for (let k = 0; k < n; k++) {
+        L(-1, k, -0.55, k);
+        ctx.fillStyle = '#E8B04B'; if (k === 0) ctx.fillRect(-0.2, k - 0.2, 0.4, 0.4); else { ctx.beginPath(); ctx.arc(0, k, 0.2, 0, 7); ctx.fill(); }
+        T(nm[k]?.trim() || String(k + 1), 1.3, k, 0.34, nm[k]?.trim() ? C.text : C.dim);
+      }
+      break;
+    }
+    case 'D1SD': {
+      ctx.fillStyle = '#1F4FA8'; ctx.fillRect(-4.4, -3.8, 8.8, 8.6); ctx.strokeStyle = C.part; ctx.strokeRect(-4.4, -3.8, 8.8, 8.6);
+      S.D1SD_PINS.forEach((n, k) => { const x = k < 8 ? -5 : 5, y = (k % 8) - 3; L(x, y, x < 0 ? -4.4 : 4.4, y); T(n, x < 0 ? -3.55 : 3.55, y, 0.34, '#D6E6FF'); });
+      const on = q.card !== false, act = SDACT.get(p.id), busy = act && performance.now() - act.w < 250;
+      ctx.fillStyle = '#C8CDD2'; ctx.fillRect(-2, -3.3, 4, 3.6);
+      if (on) { ctx.fillStyle = '#20232A'; ctx.fillRect(-1.6, -2.9, 3.2, 2.6); T('micro SD', 0, -1.6, 0.4, '#FFFFFF'); } else T('no card', 0, -1.5, 0.35, '#20232A');
+      ctx.fillStyle = '#C8CDD2'; ctx.beginPath(); ctx.arc(0, 2.2, 1.1, 0, 7); ctx.fill(); T('CR1220', 0, 2.2, 0.3, '#20232A');
+      ctx.fillStyle = busy ? '#FF5252' : '#4A1010'; ctx.beginPath(); ctx.arc(1.7, 0.7, 0.2, 0, 7); ctx.fill();
+      T('D1 mini Datalogger', 0, 4.2, 0.34, '#FFFFFF');
       break;
     }
     case 'SDCARD': {
@@ -2959,6 +3015,6 @@ function arrowHead(ctx, x1, y1, x2, y2, f) {
 
 function drawIcon(cv, type) {
   const x = cv.getContext('2d'), w = cv.width, h = cv.height, g = type === 'GND' ? 22 : 20;
-  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, OLED: 6, ADS1115: 6, INA219: 6, SDCARD: 6, DS3231: 6, ACS712: 8, PV: 8, SCC: 6, BYJ: 5, ENC: 7, SR595: 4.5, TL494: 4, LM2596: 8, IR2104: 6, TB: 12, RMOD: 7, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10, KEYPAD: 5.5, BUZZER: 14, LOCK: 14 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
+  x.clearRect(0, 0, w, h); x.save(); const gg = { DPDT: 7, SPDT: 14, SCOPE: 11, OPTO: 12, NPN: 12, PNP: 12, NMOS: 12, PMOS: 12, OPAMP: 9, REG: 9, RELAY: 9, T555: 6, ESP32: 3, UNO: 3, SERVO: 8, STEPPER: 6, XFMR: 8, LCD: 4.5, OLED: 6, ADS1115: 6, INA219: 6, SDCARD: 6, D1SD: 4.5, SIL: 4.5, DS3231: 6, ACS712: 8, PV: 8, SCC: 6, BYJ: 5, ENC: 7, SR595: 4.5, TL494: 4, LM2596: 8, IR2104: 6, TB: 12, RMOD: 7, SEG7: 7, DHT: 10, HCSR04: 7, PIR: 10, KEYPAD: 5.5, BUZZER: 14, LOCK: 14 }[type] ?? g; x.translate(w / 2 + (type === 'RELAY' ? 6 : 0), type === 'GND' ? 10 : h / 2 + (type === 'POT' ? 10 : 0)); x.scale(gg, gg); x.lineWidth = 2.6 / gg; x.lineCap = 'round'; x.lineJoin = 'round';
   symbol(x, { type, props: S.TYPES[type].props, rot: 0 }, null, gg); x.restore();
 }

@@ -1,7 +1,7 @@
 // PCB core: footprints, netlist from the schematic, board layout, connectivity, DRC.
 // Units: mm. Board coords: x right, y DOWN (like the screen), origin = board top-left.
 // Single-sided board: copper on the BOTTOM, parts on top. The view is from the top (parts side).
-import { TYPES, pinsOf, pinDefs, wirePieces, key, rotPt, BOARDS, isBoard, TB_PITCH } from './sch-core.js';
+import { TYPES, pinsOf, pinDefs, wirePieces, key, rotPt, BOARDS, isBoard, TB_PITCH, D1SD_PINS } from './sch-core.js';
 
 // ---------- footprints ----------
 const PITCH = 2.54;
@@ -36,6 +36,18 @@ export const FOOTPRINTS = {
     const w = n * pt / 2;
     return { pads, body: [box(-w, -P.depth / 2, w, P.depth / 2), [[-w, -P.depth / 2 + 1.6], [w, -P.depth / 2 + 1.6]]] };
   } },
+  // single row of 2–40 holes (pin header / female socket), pitch 2.54 mm (Arduino / Dupont) or 2.0 mm
+  SIL: { label: 'Pin header SIL (1 row)', n: 8, make: (o) => {
+    const n = Math.max(1, Math.min(40, Math.round(o.sil?.n ?? 8))), pt = o.sil?.pitch === '2.0' ? 2.0 : 2.54, d = pt < 2.5 ? 1.5 : 1.8, dr = pt < 2.5 ? 0.8 : 1.0;
+    const pads = square1(Array.from({ length: n }, (_, k) => th((k - (n - 1) / 2) * pt, 0, k, d, dr)));
+    const w = n * pt / 2;
+    return { pads, body: [box(-w, -pt / 2, w, pt / 2)] };
+  } },
+  // WeMos D1 mini shield: two rows of 8 at 2.54 mm, 22.86 mm (0.9") apart; left TX…5V, right RST…3V3 (same order as the part's pins)
+  D1SHIELD: { label: 'D1 mini shield (2 × 8 pins, rows 22.86 mm apart)', n: 16, make: () => ({
+    pads: square1(Array.from({ length: 16 }, (_, k) => th(k < 8 ? -11.43 : 11.43, ((k % 8) - 3.5) * 2.54, k, 1.8, 1.0))),
+    body: [box(-12.8, -14.5, 12.8, 19.7), [[-6, 19.7], [-6, 15.5], [6, 15.5], [6, 19.7]]],
+  }) },
   TERM2: { label: 'Screw terminal 2-pin 5.08 mm', n: 2, make: () => ({ pads: square1([th(-2.54, 0, 0, 2.6, 1.3), th(2.54, 0, 1, 2.6, 1.3)]), body: [box(-5, -4, 5, 4)] }) },
   HDR2: { label: 'Pin header 2-pin', n: 2, make: () => ({ pads: square1([th(-1.27, 0, 0, 1.8, 1.0), th(1.27, 0, 1, 1.8, 1.0)]), body: [box(-2.54, -1.27, 2.54, 1.27)] }) },
   HDR3: { label: 'Pin header 3-pin', n: 3, make: (o) => { const m = o.map ?? [0, 1, 2]; return { pads: square1([th(-2.54, 0, m[0], 1.8, 1.0), th(0, 0, m[1], 1.8, 1.0), th(2.54, 0, m[2], 1.8, 1.0)]), body: [box(-3.81, -1.27, 3.81, 1.27)] }; } },
@@ -127,6 +139,8 @@ export const onBoard = (p) => !PCB_SKIP.has(p.type) && !p.props?.offboard;   // 
 export function fpChoices(p) {
   const n = pinDefs(p).length;
   if (p.type === 'TB') return ['TBLK'];
+  if (p.type === 'SIL') return ['SIL'];
+  if (p.type === 'D1SD') return ['D1SHIELD'];
   if (p.type === 'OPAMP') return ['DIP8'];
   if (p.type === 'OPTO') return ['DIP4'];
   if (p.type === 'T555' || p.type === 'IR2104') return ['DIP8N'];
@@ -203,7 +217,7 @@ export function footprintOf(p, bp = {}, big = BIG) {
   const letters = PIN_LETTERS[p.type];
   let order = [0, 1, 2];
   if (F.ordered && letters) { const s = (bp.order && ORDERS[p.type].includes(bp.order)) ? bp.order : (d.order ?? ORDERS[p.type][0]); order = [...s].map(ch => letters[ch]); }
-  const made = F.make({ order, drill: bp.drill ?? d.drill, map: d.map, micro: p.props.micro, tb: p.type === 'TB' ? p.props : null });
+  const made = F.make({ order, drill: bp.drill ?? d.drill, map: d.map, micro: p.props.micro, tb: p.type === 'TB' ? p.props : null, sil: p.type === 'SIL' ? p.props : null });
   // lead spacing (hole to hole) set by hand: bend the legs wider so traces fit underneath
   const sp = SPACINGS[fpKey], nat = made.pads.length === 2 ? Math.abs(made.pads[1].x - made.pads[0].x) : 0;
   let pitch = nat;
@@ -215,6 +229,8 @@ export function footprintOf(p, bp = {}, big = BIG) {
 export function pinLabel(p, i) {
   if (isBoard(p.type)) return BOARDS[p.type].pins[i]?.n ?? String(i + 1);
   if (p.type === 'TB') return i % 2 ? String((i - 1) / 2 + 1) : `W${i / 2 + 1}`;   // W1 = wire / screw side of way 1
+  if (p.type === 'SIL') return String(p.props.names ?? '').split(',')[i]?.trim() || String(i + 1);
+  if (p.type === 'D1SD') return D1SD_PINS[i];
   const L = { BAT: ['+', '−'], LED: ['A', 'K'], D: ['A', 'K'], ZD: ['A', 'K'], C: ['+', '−'], NPN: ['B', 'C', 'E'], PNP: ['B', 'C', 'E'], NMOS: ['G', 'D', 'S'], PMOS: ['G', 'D', 'S'],
     OPAMP: ['IN+', 'IN−', 'OUT', 'V+', 'V−'], REG: ['IN', 'OUT', p.props.model === 'LM317' ? 'ADJ' : 'GND'], RELAY: ['A1', 'A2', 'COM', 'NC', 'NO'], T555: ['GND', 'TRIG', 'OUT', 'RST', 'CV', 'THR', 'DIS', 'VCC'], IR2104: ['VCC', 'IN', 'SD', 'COM', 'LO', 'VS', 'HO', 'VB'], SERVO: ['SIG', 'V+', 'GND'], LCD: ['GND', 'VCC', 'SDA', 'SCL'], OLED: ['GND', 'VCC', 'SCL', 'SDA'], ADS1115: ['VDD', 'GND', 'SCL', 'SDA', 'ADDR', 'ALRT', 'A0', 'A1', 'A2', 'A3'],
     INA219: ['VCC', 'GND', 'SCL', 'SDA', 'VIN+', 'VIN−'], DS3231: ['32K', 'SQW', 'SCL', 'SDA', 'VCC', 'GND'], ACS712: ['VCC', 'OUT', 'GND', 'IP+', 'IP−'],
