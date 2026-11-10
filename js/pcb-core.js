@@ -39,14 +39,16 @@ export const FOOTPRINTS = {
   // single row of 2–40 holes (pin header / female socket), pitch 2.54 mm (Arduino / Dupont) or 2.0 mm
   SIL: { label: 'Pin header SIL (1 row)', n: 8, make: (o) => {
     const n = Math.max(1, Math.min(40, Math.round(o.sil?.n ?? 8))), pt = o.sil?.pitch === '2.0' ? 2.0 : 2.54, d = pt < 2.5 ? 1.5 : 1.8, dr = pt < 2.5 ? 0.8 : 1.0, two = o.sil?.rows === 2;
-    const pads = square1(two ? Array.from({ length: 2 * n }, (_, i) => th((Math.floor(i / 2) - (n - 1) / 2) * pt, (i % 2 - 0.5) * pt, i, d, dr))
+    // 2 rows: pins go 1-2 / 3-4 / … across the rows, like the schematic symbol turned a quarter left (not mirrored)
+    const pads = square1(two ? Array.from({ length: 2 * n }, (_, i) => th((Math.floor(i / 2) - (n - 1) / 2) * pt, (0.5 - i % 2) * pt, i, d, dr))
       : Array.from({ length: n }, (_, k) => th((k - (n - 1) / 2) * pt, 0, k, d, dr)));
     const w = n * pt / 2;
     return { pads, body: [box(-w, two ? -pt : -pt / 2, w, two ? pt : pt / 2)] };
   } },
-  // WeMos D1 mini shield: two rows of 8 at 2.54 mm, 22.86 mm (0.9") apart; left TX…5V, right RST…3V3 (same order as the part's pins)
+  // WeMos D1 mini shield, seen from the top (parts side, USB end down): left RST A0 D0 D5 D6 D7 D8 3V3, right TX RX D1 D2 D3 D4 GND 5V.
+  // Two rows of 8 at 2.54 mm, 22.86 mm (0.9") apart. Part pins 0–7 = TX…5V, 8–15 = RST…3V3.
   D1SHIELD: { label: 'D1 mini shield (2 × 8 pins, rows 22.86 mm apart)', n: 16, make: () => ({
-    pads: square1(Array.from({ length: 16 }, (_, k) => th(k < 8 ? -11.43 : 11.43, ((k % 8) - 3.5) * 2.54, k, 1.8, 1.0))),
+    pads: square1(Array.from({ length: 16 }, (_, k) => th(k < 8 ? 11.43 : -11.43, ((k % 8) - 3.5) * 2.54, k, 1.8, 1.0))),
     body: [box(-12.8, -14.5, 12.8, 19.7), [[-6, 19.7], [-6, 15.5], [6, 15.5], [6, 19.7]]],
   }) },
   TERM2: { label: 'Screw terminal 2-pin 5.08 mm', n: 2, make: () => ({ pads: square1([th(-2.54, 0, 0, 2.6, 1.3), th(2.54, 0, 1, 2.6, 1.3)]), body: [box(-5, -4, 5, 4)] }) },

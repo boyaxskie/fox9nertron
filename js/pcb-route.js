@@ -1,6 +1,6 @@
 // Single-sided autorouter: grid maze router (Dijkstra, 8 directions, turn penalty).
 // Keeps clearance to other nets with a distance map, routes short connections first, retries failed ones first.
-import { analyze, netlist, padCapsule } from './pcb-core.js';
+import { analyze, netlist, padCapsule, segDist } from './pcb-core.js';
 
 // exact Euclidean distance transform (Felzenszwalb): f = 0 at features, INF elsewhere → squared distance in cells
 export function edt(mask, nx, ny) {
@@ -160,6 +160,9 @@ function routeOne(c, an, nl, e, w, gs, nx, ny, N, allowJump = false) {
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; if (i >= pe && j >= pe && i <= nx - 1 - pe && j <= ny - 1 - pe && d2[k] >= pr2 && !mine[k]) padFree[k] = 1; }
   }
   const hops = allowJump ? [2, 3, 4, 5, 6, 8].map(n => Math.round(n * 2.54 / gs)) : [];
+  // jumper wires are bare wires on the parts side: a new one must not lie on, cross or touch another one
+  const wires = (L.jumpers ?? []).map(j => [j.x1, j.y1, j.x2, j.y2]), WIRE_GAP = JPAD / 2 + 0.6;
+  const wireFree = (i1, j1, i2, j2) => wires.every(([a, b, c2, d]) => segDist(i1 * gs, j1 * gs, i2 * gs, j2 * gs, a, b, c2, d) >= WIRE_GAP);
   // time limit per search: a connection that can't be reached would otherwise scan every cell (and every jumper hop) of a big board
   const t0 = performance.now(); let pops = 0;
   while (h.size) {
@@ -187,6 +190,7 @@ function routeOne(c, an, nl, e, w, gs, nx, ny, N, allowJump = false) {
         if (i2 < 0 || j2 < 0 || i2 >= nx || j2 >= ny) continue;
         const k2 = j2 * nx + i2;
         if (!padFree[k2] || !free[k2]) continue;
+        if (wires.length && !wireFree(i, j, i2, j2)) continue;
         const nc = cost + H + JUMP, s2 = k2 * 8 + d;
         if (nc < dist[s2]) { dist[s2] = nc; prev[s2] = s; viaJump[s2] = 1; h.push(nc, s2); }
       }

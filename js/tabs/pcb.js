@@ -18,10 +18,14 @@ export function pcbView(api) {
   const view = { ox: 20, oy: 20, s: 8 };
   const btn = (t, f, cls = '') => el('button', { class: 'sb ' + cls, type: 'button', text: t, onclick: f });
   const modeBtns = { move: btn('✋ Move', () => setMode('move')), route: btn('✏ Route', () => setMode('route')), jumper: btn('⤴ Jumper', () => setMode('jumper')), delete: btn('🗑 Delete', () => { if (mode === 'move' && deleteSel()) return; setMode('delete'); }) };
+  // 🏷 pin names next to every pad (readable at any zoom); 🔦 tap a pad / trace / jumper to light up everything joined to it
+  let pinTags = store.get('pcb.pinTags', '1') === '1';
+  const tagBtn = btn('🏷 Pin names', () => { pinTags = !pinTags; store.set('pcb.pinTags', pinTags ? '1' : ''); tagBtn.classList.toggle('on', pinTags); draw(); });
+  tagBtn.classList.toggle('on', pinTags); tagBtn.title = 'Show the pin name next to every pad';
   const camBtn = btn('🛠 G-code', () => { showCam = true; makeCam(); renderPanel(); panel.querySelector('.pcb-cam')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   const top = el('div', { class: 'sch-tools' },
     btn('⚡ Schematic', () => api.toSchematic(), 'run'), modeBtns.move, modeBtns.route, modeBtns.jumper, modeBtns.delete,
-    btn('↻', () => rotateSel(), 'icon'), btn('↶', () => { api.undo(); }, 'icon'), btn('↷', () => { api.redo(); }, 'icon'), btn('Fit', () => { fit(); draw(); }),
+    btn('↻', () => rotateSel(), 'icon'), btn('↶', () => { api.undo(); }, 'icon'), btn('↷', () => { api.redo(); }, 'icon'), btn('Fit', () => { fit(); draw(); }), tagBtn,
     btn('🧩 Auto place', () => doAutoPlace()), btn('⚡ Autoroute', () => doAutoroute()), btn('✖ Clear traces', () => { L.traces = []; L.jumpers = []; cam = null; change('All traces removed.'); }), camBtn);
   const canvas = el('canvas', { class: 'sch-canvas' });
   const wrap = el('div', { class: 'sch-wrap pcb-wrap' }, canvas);
@@ -163,7 +167,41 @@ export function pcbView(api) {
     L.traces.forEach((t, i) => { for (let k = 0; k + 1 < t.pts.length; k++) { const d = P.segDist(x, y, x, y, t.pts[k][0], t.pts[k][1], t.pts[k + 1][0], t.pts[k + 1][1]); if (d <= t.w / 2 + 5 / view.s && d < bd) { bd = d; best = i; } } });
     return best;
   }
-  function jumperAt(x, y) { return (L.jumpers ?? []).findIndex(j => P.segDist(x, y, x, y, j.x1, j.y1, j.x2, j.y2) <= 0.6 + 5 / view.s); }
+  function jumperAt(x, y) {
+    return (L.jumpers ?? []).findIndex((j, ji) => { const q = jPts(j, ji); for (let k = 0; k + 1 < q.length; k++) if (P.segDist(x, y, x, y, q[k][0], q[k][1], q[k + 1][0], q[k + 1][1]) <= 0.6 + 5 / view.s) return true; return false; });
+  }
+  // jumpers that lie on top of each other (same line) are drawn bowed apart so each one can be followed; a lone one stays straight
+  const J_COLORS = ['#FFFFFF', '#7FDBFF', '#FFB86B', '#B8F28C', '#F79AC0', '#C3A6FF'];
+  const jColor = (ji) => J_COLORS[ji % J_COLORS.length];
+  function jBow(j, ji) {
+    const others = (L.jumpers ?? []).some((o, oi) => oi !== ji && P.segDist(j.x1, j.y1, j.x2, j.y2, o.x1, o.y1, o.x2, o.y2) < 1.5);
+    if (!others) return 0;
+    const len = Math.hypot(j.x2 - j.x1, j.y2 - j.y1);
+    return Math.min(5, len * (0.22 + 0.12 * (ji % 3))) * (ji % 2 ? -1 : 1);
+  }
+  function jPts(j, ji) {
+    const b = jBow(j, ji); if (!b) return [[j.x1, j.y1], [j.x2, j.y2]];
+    const dx = j.x2 - j.x1, dy = j.y2 - j.y1, len = Math.hypot(dx, dy) || 1, cx = (j.x1 + j.x2) / 2 - dy / len * b * 2, cy = (j.y1 + j.y2) / 2 + dx / len * b * 2;
+    const out = []; for (let k = 0; k <= 16; k++) { const t = k / 16, u = 1 - t; out.push([u * u * j.x1 + 2 * u * t * cx + t * t * j.x2, u * u * j.y1 + 2 * u * t * cy + t * t * j.y2]); }
+    return out;
+  }
+  // 🔦 continuity: every pad, trace and jumper that touches the selected one (copper + jumper wires)
+  function samePd(a, b) { return a && b && (a.part?.id ?? null) === (b.part?.id ?? null) && a.k === b.k && (a.jumper ?? null) === (b.jumper ?? null); }
+  function continuity() {
+    if (!an || !sel || route) return null;
+    let it0 = null;
+    if (sel.pad) it0 = an.items.find(it => it.kind === 'pad' && samePd(it.pad, sel.pad));
+    else if (sel.kind === 'trace') it0 = an.items.find(it => it.kind === 'seg' && it.ti === sel.i);
+    else if (sel.kind === 'jumper') it0 = an.items.find(it => it.kind === 'pad' && it.pad.jumper === sel.i);
+    if (!it0) return null;
+    const cl = an.clusters.get(it0.cl), items = cl.items;
+    const pads = items.filter(it => it.kind === 'pad').map(it => it.pad);
+    const nets = [...cl.nets], net = nets.length === 1 ? nets[0] : (it0.kind === 'pad' ? it0.pad.net : -1);
+    const inCl = new Set(pads);
+    const missing = net >= 0 && nets.length <= 1 ? an.pads.filter(pd => pd.part && pd.net === net && !inCl.has(pd)) : [];
+    return { traces: new Set(items.filter(it => it.kind === 'seg').map(it => it.ti)), pads, jumpers: new Set(pads.filter(pd => pd.jumper != null).map(pd => pd.jumper)), nets, net, missing };
+  }
+  const padName = (pd) => (pd.part ? `${pd.part.name} ${pd.pin >= 0 ? P.pinLabel(pd.part, pd.pin) : pd.name ?? '#' + (pd.k + 1)}` : `jumper ${pd.jumper + 1}`);
   const netName = (n) => (n >= 0 ? an.nl.nets[n]?.name ?? '?' : 'no net');
   const traceNet = (i) => an.traceNet[i];
 
@@ -192,6 +230,41 @@ export function pcbView(api) {
     if (pd.shape === 'rect') ctx.rect(x - w / 2, y - h / 2, w, h);
     else if (pd.shape === 'oval') { const r = Math.min(w, h) / 2; ctx.roundRect ? ctx.roundRect(x - w / 2, y - h / 2, w, h, r) : ctx.rect(x - w / 2, y - h / 2, w, h); }
     else ctx.arc(x, y, w / 2, 0, 7);
+  }
+  function tag(text, x, y, align, fg, bg) {
+    const fs = Math.round(Math.max(10, Math.min(13, view.s * 1.0)));
+    ctx.font = `700 ${fs}px system-ui, sans-serif`;
+    const w = ctx.measureText(text).width + 6, h = fs + 4;
+    const x0 = align === 'left' ? x : align === 'right' ? x - w : x - w / 2, y0 = y - h / 2;
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x0, y0, w, h, 3) : ctx.rect(x0, y0, w, h); ctx.fill();
+    ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, x0 + w / 2, y0 + h / 2 + 0.5);
+  }
+  function pinTagsDraw(pads, lit = false) {
+    for (const pd of pads) {
+      const name = pd.pin >= 0 ? P.pinLabel(pd.part, pd.pin) : pd.name; if (!name) continue;
+      const bp = L.parts[pd.part.id]; if (!bp) continue;
+      const dx = pd.x - bp.x, dy = pd.y - bp.y, r = Math.max(pd.w, pd.h) / 2 * view.s + 3;
+      // pads in a column get the name on the outer side, pads in a row above / below; a 2-pin part along its axis
+      const mine = an.pads.filter(q => q.part === pd.part);
+      const col = mine.length === 2 ? Math.abs(mine[0].x - mine[1].x) < Math.abs(mine[0].y - mine[1].y) ? 'row' : 'col'
+        : mine.filter(q => Math.abs(q.x - pd.x) < 0.1).length >= mine.filter(q => Math.abs(q.y - pd.y) < 0.1).length ? 'col' : 'row';
+      let x = sx(pd.x), y = sy(pd.y), al = 'center';
+      if (col === 'col') { al = dx < -0.01 ? 'right' : 'left'; x += dx < -0.01 ? -r : r; }
+      else y += (dy < -0.01 ? -1 : 1) * (r + 7);
+      tag(name, x, y, al, lit ? '#0F1317' : '#FFE9C7', lit ? '#5CF2FF' : 'rgba(8,11,14,0.86)');
+    }
+  }
+  function jumperDraw(j, ji, color) {
+    const q = jPts(j, ji);
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(3, 0.9 * view.s); ctx.lineCap = 'butt'; ctx.setLineDash([Math.max(6, 1.6 * view.s), Math.max(4, 1.1 * view.s)]);
+    ctx.beginPath(); q.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'round';
+    // the jumper's number at both holes, pushed out along the wire so it doesn't hide the hole
+    const r = Math.max(7, 1.3 * view.s) + 6;
+    for (const [hx, hy, ox, oy] of [[j.x1, j.y1, q[0][0] - q[1][0], q[0][1] - q[1][1]], [j.x2, j.y2, q[q.length - 1][0] - q[q.length - 2][0], q[q.length - 1][1] - q[q.length - 2][1]]]) {
+      const l = Math.hypot(ox, oy) || 1, bx = sx(hx) + ox / l * r, by = sy(hy) + oy / l * r, rr = 8;
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(bx, by, rr, 0, 7); ctx.fill();
+      ctx.fillStyle = '#0F1317'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(ji + 1), bx, by + 0.5);
+    }
   }
   function draw() {
     if (!W || !L) return;
@@ -233,11 +306,8 @@ export function pcbView(api) {
       ctx.fillText(p.name, lx, ly);
       nameBoxes.push({ p, x0: lx - lw / 2, y0: ly - lh, x1: lx + lw / 2, y1: ly + 2 });
     }
-    // pad labels when zoomed in
-    if (view.s >= 9) {
-      ctx.font = `600 ${Math.min(11, view.s * 0.8)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#1B1B1B';
-      for (const pd of an.pads) if (pd.part && pd.pin >= 0) ctx.fillText(P.pinLabel(pd.part, pd.pin), sx(pd.x), sy(pd.y) + (pd.drill ? Math.max(pd.w, pd.h) / 2 * view.s + 6 : 0));
-    }
+    // pin names: light text on a dark tag, beside each pad on the outside of its part
+    if (pinTags && view.s >= 4) pinTagsDraw(an.pads.filter(pd => pd.part));
     // selected trace: corner handles, selected segment / corner brighter
     if (sel?.kind === 'trace' && L.traces[sel.i]) {
       const t = L.traces[sel.i];
@@ -245,9 +315,9 @@ export function pcbView(api) {
       t.pts.forEach(([x, y], k) => { const big = sel.pt === k; ctx.fillStyle = big ? '#FFFFFF' : COL.sel; ctx.strokeStyle = '#0F1317'; ctx.lineWidth = 1; const r = big ? 6 : 4; ctx.fillRect(sx(x) - r, sy(y) - r, 2 * r, 2 * r); ctx.strokeRect(sx(x) - r, sy(y) - r, 2 * r, 2 * r); });
     }
     // jumper wires (on the parts side)
+    // each jumper has its own colour and number: the same number sits at both of its holes
+    for (const [ji, j] of (L.jumpers ?? []).entries()) jumperDraw(j, ji, sel?.kind === 'jumper' && sel.i === ji ? COL.sel : jColor(ji));
     for (const [ji, j] of (L.jumpers ?? []).entries()) {
-      ctx.strokeStyle = sel?.kind === 'jumper' && sel.i === ji ? COL.sel : '#FFFFFF'; ctx.lineWidth = Math.max(3, 0.9 * view.s); ctx.lineCap = 'butt'; ctx.setLineDash([Math.max(6, 1.6 * view.s), Math.max(4, 1.1 * view.s)]);
-      ctx.beginPath(); ctx.moveTo(sx(j.x1), sy(j.y1)); ctx.lineTo(sx(j.x2), sy(j.y2)); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'round';
       if (sel?.kind === 'jumper' && sel.i === ji) for (const k of sel.k == null ? [0, 1] : [sel.k]) { const hx = k ? j.x2 : j.x1, hy = k ? j.y2 : j.y1; ctx.strokeStyle = COL.sel; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(hx), sy(hy), Math.max(6, 1.4 * view.s), 0, 7); ctx.stroke(); }
     }
     // ratsnest
@@ -294,6 +364,20 @@ export function pcbView(api) {
         ctx.beginPath(); ctx.moveTo(sx(a[0]), sy(a[1])); ctx.lineTo(sx(b[0]), sy(b[1])); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
         ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.fillText(`${Math.hypot(b[0] - a[0], b[1] - a[1]).toFixed(1)} mm`, sx(b[0]) + 8, sy(b[1]) - 4);
       }
+    }
+    // 🔦 continuity: dim the rest, light up what is joined to the selection, ring the pads it still has to reach
+    const T = continuity();
+    if (T) {
+      ctx.fillStyle = 'rgba(10,14,18,0.62)'; ctx.fillRect(sx(0), sy(0), L.w * view.s, L.h * view.s);
+      const LIT = T.nets.length > 1 ? COL.bad : '#5CF2FF';
+      ctx.strokeStyle = LIT; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      L.traces.forEach((t, i) => { if (!T.traces.has(i)) return; ctx.lineWidth = Math.max(2, t.w * view.s); ctx.beginPath(); t.pts.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)))); ctx.stroke(); });
+      for (const pd of T.pads) { ctx.fillStyle = LIT; padPath(pd); ctx.fill(); if (pd.drill > 0) { ctx.fillStyle = COL.hole; ctx.beginPath(); ctx.arc(sx(pd.x), sy(pd.y), Math.max(1, pd.drill / 2 * view.s), 0, 7); ctx.fill(); } }
+      for (const ji of T.jumpers) jumperDraw(L.jumpers[ji], ji, LIT);
+      ctx.strokeStyle = COL.rat; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+      for (const pd of T.missing) { ctx.beginPath(); ctx.arc(sx(pd.x), sy(pd.y), Math.max(7, Math.max(pd.w, pd.h) / 2 * view.s + 4), 0, 7); ctx.stroke(); }
+      ctx.setLineDash([]);
+      pinTagsDraw([...T.pads.filter(pd => pd.part), ...T.missing], true);
     }
     drawRouting();
     // origin marker (machine X0 Y0 = lower-left, or lower-right before mirroring)
@@ -680,7 +764,8 @@ export function pcbView(api) {
     // move mode: select
     const ji = jumperAt(x, y), ti = traceAt(x, y), p = partAt(x, y), pd = padAt(x, y);
     sel = pd && !p ? { kind: 'pad', pad: pd } : p ? { kind: 'part', id: p.id } : ti >= 0 ? { kind: 'trace', i: ti, ...tracePart(ti, x, y) } : ji >= 0 ? { kind: 'jumper', i: ji } : null;
-    if (pd && p) sel.pad = pd;
+    if (pd && p && pd.part?.id === p.id) sel.pad = pd;
+    if (pd && pd.jumper != null) sel = { kind: 'jumper', i: pd.jumper };
     renderPanel(); draw();
   }
 
@@ -723,10 +808,19 @@ export function pcbView(api) {
         note(`Selected: ${sel.pt != null ? 'a corner (white square)' : 'a segment (white line)'}. Drag a corner or a segment to reshape, or use the ◀ ▲ ▼ ▶ arrows (keyboard arrows too, Shift = 4 steps). Ends on a pad stay connected.`));
     } else if (sel?.kind === 'jumper') {
       const j = L.jumpers[sel.i];
-      panel.append(el('div', { class: 'sp-head' }, el('b', { text: `Jumper wire · ${Math.hypot(j.x2 - j.x1, j.y2 - j.y1).toFixed(2)} mm` })),
+      panel.append(el('div', { class: 'sp-head' }, el('b', { text: `Jumper ${sel.i + 1} · ${Math.hypot(j.x2 - j.x1, j.y2 - j.y1).toFixed(2)} mm` })),
         note('A short bare wire on the parts side, soldered into its two holes. It hops over traces on a single-sided board.'),
         el('div', { class: 'row wrap' }, btn('🗑 Delete jumper', () => { L.jumpers.splice(sel.i, 1); sel = null; change('Jumper deleted.'); })));
     } else if (sel?.kind === 'pad') panel.append(el('b', { text: `Pad · ${netName(sel.pad.net)}` }));
+    // 🔦 continuity list: what the selected pad / trace / jumper really touches on the copper
+    const T = continuity();
+    if (T) {
+      const parts2 = T.pads.filter(pd => pd.part), js = [...T.jumpers].sort((a, b) => a - b);
+      panel.append(el('div', { class: 'pcb-cont' + (T.nets.length > 1 ? ' bad' : '') },
+        el('b', { text: `🔦 Continuity · ${T.nets.length > 1 ? 'SHORT: ' + T.nets.map(netName).join(' + ') : netName(T.net)}` }),
+        el('div', { class: 'pcb-pins' }, ...parts2.map(pd => el('span', { class: 'pin lit', text: padName(pd) })), ...js.map(ji => el('span', { class: 'pin jw', style: `border-color:${jColor(ji)}`, text: `via jumper ${ji + 1}` }))),
+        T.missing.length ? el('div', { class: 'muted', text: `⚠ Not joined yet (yellow rings): ${T.missing.map(padName).join(', ')}` }) : el('div', { class: 'muted', text: parts2.length > 1 ? '✓ Every pin of this net is joined.' : '' })));
+    }
     // board + status
     const nRoutes = an.rats.length, shorts = an.shorts.length;
     const flags = [];
