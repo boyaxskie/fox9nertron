@@ -25,7 +25,7 @@ export function pcbView(api) {
   const camBtn = btn('🛠 G-code', () => { showCam = true; makeCam(); renderPanel(); panel.querySelector('.pcb-cam')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   const top = el('div', { class: 'sch-tools' },
     btn('⚡ Schematic', () => api.toSchematic(), 'run'), modeBtns.move, modeBtns.route, modeBtns.jumper, modeBtns.delete,
-    btn('↻', () => rotateSel(), 'icon'), btn('↶', () => { api.undo(); }, 'icon'), btn('↷', () => { api.redo(); }, 'icon'), btn('Fit', () => { fit(); draw(); }), tagBtn,
+    btn('↻', () => rotateSel(), 'icon'), btn('⇋', () => flipSel(true), 'icon'), btn('⇅', () => flipSel(false), 'icon'), btn('↶', () => { api.undo(); }, 'icon'), btn('↷', () => { api.redo(); }, 'icon'), btn('Fit', () => { fit(); draw(); }), tagBtn,
     btn('🧩 Auto place', () => doAutoPlace()), btn('⚡ Autoroute', () => doAutoroute()), btn('✖ Clear traces', () => { L.traces = []; L.jumpers = []; cam = null; change('All traces removed.'); }), camBtn);
   const canvas = el('canvas', { class: 'sch-canvas' });
   const wrap = el('div', { class: 'sch-wrap pcb-wrap' }, canvas);
@@ -58,7 +58,7 @@ export function pcbView(api) {
   });
   const fmBody = el('div', { class: 'fm-body' },
     el('div', { class: 'fm-row' }, ...Object.values(fmModes)),
-    el('div', { class: 'fm-row' }, btn('↻', () => rotateSel(), 'icon'), lockBtn, btn('↶', () => api.undo(), 'icon'), btn('↷', () => api.redo(), 'icon'), btn('Fit', () => { fit(); draw(); })),
+    el('div', { class: 'fm-row' }, btn('↻', () => rotateSel(), 'icon'), btn('⇋', () => flipSel(true), 'icon'), btn('⇅', () => flipSel(false), 'icon'), lockBtn, btn('↶', () => api.undo(), 'icon'), btn('↷', () => api.redo(), 'icon'), btn('Fit', () => { fit(); draw(); })),
     el('div', { class: 'fm-row' }, wSel),
     el('div', { class: 'fm-row' }, btn('🧩 Auto place', () => doAutoPlace()), btn('⚡ Autoroute', () => doAutoroute())));
   const fmFold = el('button', { class: 'fm-btn', type: 'button', text: '▾', title: 'Fold / unfold the menu' });
@@ -386,6 +386,21 @@ export function pcbView(api) {
   }
 
   // ---------- actions ----------
+  // ⇋ flip left ↔ right / ⇅ flip top ↔ bottom, as seen on the screen (mounted the other way up).
+  // Only the traces that ended on this part's holes are taken off (they would no longer reach); every other trace stays.
+  function flipSel(horiz) {
+    if (sel?.kind !== 'part') return say('Select a part first (✋ Move, tap it), then ⇋ or ⇅ flips it.');
+    const bp = L.parts[sel.id], p = api.getC().parts.find(q => q.id === sel.id);
+    const old = an.pads.filter(pd => pd.part?.id === sel.id).map(pd => [pd.x, pd.y, Math.max(pd.w, pd.h) / 2 + 0.3]);
+    const local = horiz !== !!(bp.rot & 1);                     // a quarter turn swaps which local axis is left ↔ right on screen
+    if (local) bp.mx = !bp.mx; else bp.my = !bp.my;
+    if (!bp.mx) delete bp.mx; if (!bp.my) delete bp.my;
+    const on = (q) => old.some(([x, y, r]) => Math.hypot(q[0] - x, q[1] - y) <= r);     // a trace end sitting on one of its pads
+    const n0 = L.traces.length;
+    L.traces = L.traces.filter(t => !on(t.pts[0]) && !on(t.pts[t.pts.length - 1]));
+    const gone = n0 - L.traces.length;
+    change(`${p.name} flipped ${horiz ? 'left ↔ right' : 'top ↔ bottom'}${bp.mx || bp.my ? ' (mounted the other way up)' : ' (back to normal)'}.` + (gone ? ` ${gone} trace${gone > 1 ? 's' : ''} to its holes taken off, the rest kept: ⚡ Autoroute reconnects it.` : ''));
+  }
   function rotateSel() {
     if (sel?.kind !== 'part') return say('Select a part first (✋ Move, tap it).');
     const bp = L.parts[sel.id]; bp.rot = (bp.rot + 1) & 3; change('Rotated. Run ⚡ Autoroute again if traces no longer reach.');
@@ -797,7 +812,7 @@ export function pcbView(api) {
           ...(f.pitch ? [sel2('Lead spacing (hole to hole)', String(f.pitch), P.SPACINGS[f.key].map(v => [String(v), `${v} mm (${Math.round(v / 2.54)} holes)` + (Math.abs(v - (P.FOOTPRINTS[f.key].make({ order: [0, 1, 2] }).pads.reduce((a, q) => Math.abs(q.x) * 2, 0))) < 0.01 ? ' · normal' : '')]), v => { bp.pitch = +v; change(`${p.name} legs ${v} mm apart. ⚡ Autoroute again to use the space underneath.`); })] : []),
           ...(f.orderStr ? [sel2('Pin order (left → right, flat side / tab facing you)', f.orderStr, P.ORDERS[p.type].map(o => [o, [...o].join(' ')]), v => { bp.order = v; change(`${p.name} pin order ${v}.`); })] : [])),
         el('div', { class: 'pcb-pins' }, ...nets.map((n, i) => el('span', { class: 'pin', text: `${P.pinLabel(p, i)} → ${netName(n)}` }))),
-        el('div', { class: 'row wrap' }, btn('↻ Rotate', () => rotateSel()), btn('🗑 Delete part', () => deleteSel()),
+        el('div', { class: 'row wrap' }, btn('↻ Rotate', () => rotateSel()), btn('⇋ Flip', () => flipSel(true)), btn('⇅ Flip', () => flipSel(false)), btn('🗑 Delete part', () => deleteSel()),
           el('label', { class: 'chk', title: '🧩 Auto place leaves a locked part where it is' }, Object.assign(el('input', { type: 'checkbox' }), { checked: !!bp.lock, onchange: (e) => { if (e.target.checked) bp.lock = true; else delete bp.lock; change(bp.lock ? `${p.name} 📌 locked: 🧩 Auto place leaves it here.` : `${p.name} unlocked.`); } }), ' 📌 Lock place')),
         note(f.orderStr ? 'Check the pin order in the datasheet: the same transistor name can come in different pin orders.' : ''));
     } else if (sel?.kind === 'trace') {

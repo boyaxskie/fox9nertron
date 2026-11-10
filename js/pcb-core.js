@@ -47,10 +47,9 @@ export const FOOTPRINTS = {
   } },
   // WeMos D1 mini shield, seen from the top (parts side, USB end down): left RST A0 D0 D5 D6 D7 D8 3V3, right TX RX D1 D2 D3 D4 GND 5V.
   // Two rows of 8 at 2.54 mm, 22.86 mm (0.9") apart. Part pins 0–7 = TX…5V, 8–15 = RST…3V3.
-  D1SHIELD: { label: 'D1 mini shield (2 × 8 pins, rows 22.86 mm apart)', n: 16, make: () => ({
-    pads: square1(Array.from({ length: 16 }, (_, k) => th(k < 8 ? 11.43 : -11.43, ((k % 8) - 3.5) * 2.54, k, 1.8, 1.0))),
-    body: [box(-12.8, -14.5, 12.8, 19.7), [[-6, 19.7], [-6, 15.5], [6, 15.5], [6, 19.7]]],
-  }) },
+  D1SHIELD: { label: 'D1 shield face up: its long pins go into the board', n: 16, make: () => d1shield(false) },
+  // the shield's female sockets are on its SD-socket side: plugged onto male pins on this board it lies face down, so left / right swap
+  D1SHIELDF: { label: 'D1 shield face down on male pins (its sockets face the board)', n: 16, make: () => d1shield(true) },
   TERM2: { label: 'Screw terminal 2-pin 5.08 mm', n: 2, make: () => ({ pads: square1([th(-2.54, 0, 0, 2.6, 1.3), th(2.54, 0, 1, 2.6, 1.3)]), body: [box(-5, -4, 5, 4)] }) },
   HDR2: { label: 'Pin header 2-pin', n: 2, make: () => ({ pads: square1([th(-1.27, 0, 0, 1.8, 1.0), th(1.27, 0, 1, 1.8, 1.0)]), body: [box(-2.54, -1.27, 2.54, 1.27)] }) },
   HDR3: { label: 'Pin header 3-pin', n: 3, make: (o) => { const m = o.map ?? [0, 1, 2]; return { pads: square1([th(-2.54, 0, m[0], 1.8, 1.0), th(0, 0, m[1], 1.8, 1.0), th(2.54, 0, m[2], 1.8, 1.0)]), body: [box(-3.81, -1.27, 3.81, 1.27)] }; } },
@@ -118,6 +117,14 @@ export const FOOTPRINTS = {
 // lead spacings (mm) you can choose for 2-leg parts (bent legs)
 const AXS = [7.62, 10.16, 12.7, 15.24, 17.78, 20.32, 22.86, 25.4], RADS = [2.54, 5.08, 7.62, 10.16];
 export const SPACINGS = { AX300: AXS, AX400: AXS, AX500: AXS, RAD25: RADS, RAD50: RADS, LED5: RADS };
+// real Datalogger shield outline (25.6 mm wide): the micro SD socket sits at the 5V / 3V3 end, the card slides in / out at that edge
+function d1shield(down) {
+  const sx = down ? -1 : 1;
+  return {
+    pads: square1(Array.from({ length: 16 }, (_, k) => th((k < 8 ? 11.43 : -11.43) * sx, ((k % 8) - 3.5) * 2.54, k, 1.8, 1.0))),
+    body: [box(-12.8, -10.8, 12.8, 16.5), box(-6.3, 5.5, 6.3, 16.5), [[-5.5, 16.5], [-5.5, 19], [5.5, 19], [5.5, 16.5]], [[-2, 12], [0, 14.5], [2, 12]]],
+  };
+}
 function devkit(w) {
   const pads = [];
   for (let i = 0; i < 15; i++) { const y = (i - 7) * PITCH; pads.push(th(-w / 2, y, i, 1.8, 1.0, i === 0 ? 'rect' : 'round'), th(w / 2, y, 15 + i, 1.8, 1.0)); }
@@ -143,7 +150,7 @@ export function fpChoices(p) {
   const n = pinDefs(p).length;
   if (p.type === 'TB') return ['TBLK'];
   if (p.type === 'SIL') return ['SIL'];
-  if (p.type === 'D1SD') return ['D1SHIELD'];
+  if (p.type === 'D1SD') return ['D1SHIELDF', 'D1SHIELD'];
   if (p.type === 'OPAMP') return ['DIP8'];
   if (p.type === 'OPTO') return ['DIP4'];
   if (p.type === 'T555' || p.type === 'IR2104') return ['DIP8N'];
@@ -226,6 +233,12 @@ export function footprintOf(p, bp = {}, big = BIG) {
   let pitch = nat;
   if (sp && bp.pitch && sp.includes(bp.pitch)) { pitch = bp.pitch; made.pads[0].x = -pitch / 2; made.pads[1].x = pitch / 2; }
   if (big) bigPads(made.pads);
+  // ⇋ / ⇅ flip: the part is mounted the other way up (a module plugged face down): mirror it in its own frame, before rotation
+  if (bp.mx || bp.my) {
+    const fx = bp.mx ? -1 : 1, fy = bp.my ? -1 : 1;
+    made.pads = made.pads.map(pd => ({ ...pd, x: pd.x * fx, y: pd.y * fy }));
+    made.body = made.body.map(b => b.map(([x, y]) => [x * fx, y * fy]));
+  }
   return { key: fpKey, ...made, pitch: sp ? Math.round(pitch * 100) / 100 : null, orderStr: F.ordered && letters ? [...order].map(i => Object.keys(letters).find(k => letters[k] === i)).join('') : null };
 }
 // pad name shown on the board
