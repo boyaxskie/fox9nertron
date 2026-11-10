@@ -173,11 +173,15 @@ export function pcbView(api) {
   // jumpers that lie on top of each other (same line) are drawn bowed apart so each one can be followed; a lone one stays straight
   const J_COLORS = ['#FFFFFF', '#7FDBFF', '#FFB86B', '#B8F28C', '#F79AC0', '#C3A6FF'];
   const jColor = (ji) => J_COLORS[ji % J_COLORS.length];
+  // any number of stacked jumpers: inside each stack the 1st stays straight, then they bow out one step more each, alternating sides
+  // (0, +1, −1, +2, −2 … steps of 1.6 mm), so no two of a stack are ever drawn on the same curve
   function jBow(j, ji) {
-    const others = (L.jumpers ?? []).some((o, oi) => oi !== ji && P.segDist(j.x1, j.y1, j.x2, j.y2, o.x1, o.y1, o.x2, o.y2) < 1.5);
-    if (!others) return 0;
-    const len = Math.hypot(j.x2 - j.x1, j.y2 - j.y1);
-    return Math.min(5, len * (0.22 + 0.12 * (ji % 3))) * (ji % 2 ? -1 : 1);
+    const J = L.jumpers ?? [], near = (a, b) => P.segDist(a.x1, a.y1, a.x2, a.y2, b.x1, b.y1, b.x2, b.y2) < 1.5;
+    const group = [ji], seen = new Set(group);
+    for (let q = 0; q < group.length; q++) J.forEach((o, oi) => { if (!seen.has(oi) && near(J[group[q]], o)) { seen.add(oi); group.push(oi); } });
+    if (group.length < 2) return 0;
+    const r = group.sort((a, b) => a - b).indexOf(ji);
+    return r === 0 ? 0 : Math.ceil(r / 2) * 1.6 * (r % 2 ? 1 : -1);
   }
   function jPts(j, ji) {
     const b = jBow(j, ji); if (!b) return [[j.x1, j.y1], [j.x2, j.y2]];
